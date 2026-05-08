@@ -27,6 +27,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._last_simulation_result: SimulationResult | None = None
         self._last_simulation_state: dict[str, float] | None = None
         self._current_frame_index = 0
+        self._plot_windows: list[QtWidgets.QMainWindow] = []
         self._playback_timer = QtCore.QTimer(self)
         self._playback_timer.timeout.connect(self._advance_playback)
 
@@ -508,7 +509,7 @@ class MainWindow(QtWidgets.QMainWindow):
         selected = [item.text() for item in list_widget.selectedItems()]
         if not selected:
             return
-        plot_window = QtWidgets.QMainWindow()
+        plot_window = QtWidgets.QMainWindow(self)
         plot_window.setWindowTitle(f"QUINO Plot - {', '.join(selected[:2])}{'...' if len(selected) > 2 else ''}")
         plot_window.resize(1200, 600)
         plot_widget = SensorPlotWidget(dataset, plot_window)
@@ -516,6 +517,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for sensor_name in selected:
             plot_widget.load_sensor(sensor_name)
         plot_window.show()
+        self._plot_windows.append(plot_window)
         self._append_message(f"Created plot with {len(selected)} sensor(s)")
 
     def delete_selected_entity(self) -> None:
