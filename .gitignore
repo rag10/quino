@@ -39,4 +39,5 @@ ENV/
 htmlcov/
 
 # Project-specific
-.claude/settings.local.json
+.claude/
+recursos_desarrollo/

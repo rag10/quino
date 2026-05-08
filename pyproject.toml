@@ -25,11 +25,9 @@ solver = [
     "exudyn",
 ]
 
-[tool.setuptools]
-package-dir = {"" = "src"}
-
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
+include = ["quino*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from quino.application.service import ApplicationService
 
+_ICON_PATH = Path(__file__).parent / "icons" / "quino_app_icon_transparent_1024.png"
+
 
 def run_gui(app_service: ApplicationService | None = None) -> int:
-    from PySide6 import QtWidgets
+    from PySide6 import QtGui, QtWidgets
 
     from quino.gui.main_window import MainWindow
 
     qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+
+    if _ICON_PATH.exists():
+        qt_app.setWindowIcon(QtGui.QIcon(str(_ICON_PATH)))
 
     # Pre-initialize pyqtgraph with the QApplication already running so that
     # its internal colorSchemeChanged connection is made once, cleanly, before

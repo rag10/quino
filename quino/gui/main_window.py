@@ -32,6 +32,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._playback_timer.timeout.connect(self._advance_playback)
 
         self.setWindowTitle("QUINO")
+        _icon_path = Path(__file__).parent / "icons" / "quino_app_icon_transparent_1024.png"
+        if _icon_path.exists():
+            self.setWindowIcon(QtGui.QIcon(str(_icon_path)))
         self.resize(1480, 920)
         self._build_ui()
         self.refresh_all()

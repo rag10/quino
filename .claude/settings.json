@@ -24,7 +24,8 @@
       "Bash(git commit -m 'Fix sensor creation by correcting method calls *)",
       "PowerShell(cd \"c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\"; python -W all test_plot_in_app.py 2>&1; echo \"exit: $LASTEXITCODE\")",
       "PowerShell(cd \"c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\"; python test_plot_in_app.py 2>&1; echo \"exit: $LASTEXITCODE\")",
-      "PowerShell(cd \"c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\"; python test_plot_in_app.py 2>&1; echo \"EXIT: $LASTEXITCODE\")"
+      "PowerShell(cd \"c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\"; python test_plot_in_app.py 2>&1; echo \"EXIT: $LASTEXITCODE\")",
+      "Bash(xargs cat)"
     ]
   }
 }
