@@ -218,12 +218,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_fit_view.setToolTip("Fit mechanism to view")
 
         self.action_add_rotation_driver = QtGui.QAction(qta.icon("mdi.rotate-right", color=color_base), "Rotation Driver", self)
-        self.action_add_rotation_driver.triggered.connect(lambda: self._create_driver_for_selected("rotation"))
-        self.action_add_rotation_driver.setToolTip("Add a rotation driver to a joint")
+        self.action_add_rotation_driver.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_ROTATION_DRIVER))
+        self.action_add_rotation_driver.setToolTip("Add a rotation driver to a joint (select a joint on canvas)")
 
         self.action_add_translation_driver = QtGui.QAction(qta.icon("mdi.arrow-right-bold", color=color_base), "Translation Driver", self)
-        self.action_add_translation_driver.triggered.connect(lambda: self._create_driver_for_selected("translation"))
-        self.action_add_translation_driver.setToolTip("Add a translation driver to a slider")
+        self.action_add_translation_driver.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_TRANSLATION_DRIVER))
+        self.action_add_translation_driver.setToolTip("Add a translation driver to a slider (select a slider joint on canvas)")
 
         self.action_delete = QtGui.QAction(qta.icon("mdi.delete", color=color_danger), "Delete", self)
         self.action_delete.setShortcut(QtGui.QKeySequence.StandardKey.Delete)
@@ -945,6 +945,8 @@ class MainWindow(QtWidgets.QMainWindow):
             "create_slider": "Create Slider",
             "connect_ground": "Ground Joint",
             "connect_slider": "Slider Joint",
+            "create_rotation_driver": "Rotation Driver",
+            "create_translation_driver": "Translation Driver",
         }.get(mode, mode)
 
         if self._editing_allowed():

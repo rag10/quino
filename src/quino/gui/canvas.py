@@ -44,6 +44,8 @@ class CanvasMode:
     CREATE_SLIDER = "create_slider"
     CONNECT_GROUND = "connect_ground"
     CONNECT_SLIDER = "connect_slider"
+    CREATE_ROTATION_DRIVER = "create_rotation_driver"
+    CREATE_TRANSLATION_DRIVER = "create_translation_driver"
 
 
 class MechanismCanvas(QtWidgets.QWidget):
@@ -65,6 +67,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._creation_points: list[tuple[float, float]] = []
         self._joint_start_marker: CanvasMarker | None = None
         self._slider_start_marker: CanvasMarker | None = None
+        self._driver_start_joint_id: str | None = None
         self._hover_world: tuple[float, float] | None = None
         self._dragging_marker: CanvasMarker | None = None
         self._drag_preview: tuple[str, float, float] | None = None
@@ -88,6 +91,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._creation_points.clear()
         self._joint_start_marker = None
         self._slider_start_marker = None
+        self._driver_start_joint_id = None
         self._hover_world = None
         self._dragging_marker = None
         self._drag_preview = None
@@ -115,6 +119,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._creation_points.clear()
             self._joint_start_marker = None
             self._slider_start_marker = None
+            self._driver_start_joint_id = None
             self._dragging_marker = None
             self._drag_preview = None
             self._dragging_slider = None
@@ -291,6 +296,13 @@ class MechanismCanvas(QtWidgets.QWidget):
                 return
             self._create_slider_joint(self._slider_start_marker, clicked_slider)
             self._slider_start_marker = None
+            return
+
+        if self._mode in {CanvasMode.CREATE_ROTATION_DRIVER, CanvasMode.CREATE_TRANSLATION_DRIVER}:
+            if clicked_joint is None:
+                return
+            driver_type = "rotation" if self._mode == CanvasMode.CREATE_ROTATION_DRIVER else "translation"
+            self._create_driver_for_joint(clicked_joint, driver_type)
             return
 
         super().mousePressEvent(event)
@@ -1013,6 +1025,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._creation_points.clear()
         self.entitySelected.emit(body_id)
         self.modelChanged.emit(f"Created {name}")
+        self.set_mode(CanvasMode.SELECT)
 
     def _finalize_body_creation(self) -> None:
         if not self._require_editing():
@@ -1028,6 +1041,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._creation_points.clear()
         self.entitySelected.emit(body_id)
         self.modelChanged.emit(f"Created {name}")
+        self.set_mode(CanvasMode.SELECT)
 
     def _create_slider_from_points(self) -> None:
         if not self._require_editing():
@@ -1046,6 +1060,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._creation_points.clear()
         self.entitySelected.emit(slider_id)
         self.modelChanged.emit(f"Created {name}")
+        self.set_mode(CanvasMode.SELECT)
 
     def _handle_joint_click(self, marker: CanvasMarker) -> None:
         if not self._require_editing():
@@ -1080,6 +1095,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             )
         self.entitySelected.emit(joint_id)
         self.modelChanged.emit(f"Created {name}")
+        self.set_mode(CanvasMode.SELECT)
 
     def _create_ground_joint(self, marker: CanvasMarker) -> None:
         if not self._require_editing():
@@ -1091,6 +1107,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         joint_id = self.app_service.connect_marker_to_ground(marker.entity_id, joint_type=joint_type, name=name)
         self.entitySelected.emit(joint_id)
         self.modelChanged.emit(f"Created {name}")
+        self.set_mode(CanvasMode.SELECT)
 
     def _create_slider_joint(self, marker: CanvasMarker, slider: CanvasSlider) -> None:
         if not self._require_editing():
@@ -1107,6 +1124,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         )
         self.entitySelected.emit(joint_id)
         self.modelChanged.emit(f"Created {name}")
+        self.set_mode(CanvasMode.SELECT)
 
     def _add_marker_to_selected_body(
         self, world: tuple[float, float], fallback_body: str | None = None
@@ -1124,6 +1142,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         )
         self.entitySelected.emit(marker_id)
         self.modelChanged.emit(f"Added marker to {body.name}")
+        self.set_mode(CanvasMode.SELECT)
 
     def _selected_body(self, fallback_body: str | None = None) -> Body | None:
         if fallback_body is not None:
@@ -1352,6 +1371,51 @@ class MechanismCanvas(QtWidgets.QWidget):
         ]
         painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
         painter.drawPolygon(QtGui.QPolygonF(corners))
+
+    def _create_driver_for_joint(self, joint_id: str, driver_type: str) -> None:
+        if not self._require_editing():
+            return
+        try:
+            joint = self.app_service._find_joint(joint_id)
+        except ValueError:
+            self.modelChanged.emit("Invalid joint selected")
+            return
+        default_name = self._next_name(
+            "RotationDriver" if driver_type == "rotation" else "TranslationDriver",
+            [driver.name for driver in self.app_service.project.model.drivers],
+        )
+        name, accepted = QtWidgets.QInputDialog.getText(
+            self,
+            "Create Driver",
+            "Driver name:",
+            text=default_name,
+        )
+        if not accepted or not name.strip():
+            self.set_mode(CanvasMode.SELECT)
+            return
+        default_law = "20 deg * t / 1 s" if driver_type == "rotation" else "10 mm * t / 1 s"
+        law, accepted = QtWidgets.QInputDialog.getText(
+            self,
+            "Create Driver",
+            "Driver law:",
+            text=default_law,
+        )
+        if not accepted or not law.strip():
+            self.set_mode(CanvasMode.SELECT)
+            return
+        try:
+            self.app_service.create_driver(
+                name.strip(),
+                driver_type,
+                joint_id,
+                law.strip(),
+                "deg" if driver_type == "rotation" else "mm",
+            )
+            self.modelChanged.emit(f"Created {driver_type} driver {name.strip()}")
+            self.set_mode(CanvasMode.SELECT)
+        except Exception as exc:  # pragma: no cover - UI feedback
+            self.modelChanged.emit(f"Driver creation failed: {exc}")
+            self.set_mode(CanvasMode.SELECT)
 
     def _require_editing(self) -> bool:
         if self._editing_enabled:
