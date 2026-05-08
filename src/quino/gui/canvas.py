@@ -77,6 +77,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._joint_start_marker: CanvasMarker | None = None
         self._slider_start_marker: CanvasMarker | None = None
         self._driver_start_joint_id: str | None = None
+        self._sensor_marker_ids: list[str] = []
         self._hover_world: tuple[float, float] | None = None
         self._dragging_marker: CanvasMarker | None = None
         self._drag_preview: tuple[str, float, float] | None = None
@@ -105,6 +106,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._joint_start_marker = None
         self._slider_start_marker = None
         self._driver_start_joint_id = None
+        self._sensor_marker_ids = []
         self._hover_world = None
         self._dragging_marker = None
         self._drag_preview = None
@@ -119,6 +121,32 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._view_scale, self._view_center_x, self._view_center_y = transform
         self._sync_view_state()
         self.update()
+
+    def center_on_entity(self, entity_id: str) -> None:
+        project = self.app_service.project
+        if project is None:
+            return
+        assembled = self._assembled_mechanism(project)
+        for body in project.model.bodies:
+            for marker in body.markers:
+                if marker.id == entity_id:
+                    x, y = self._marker_world_position(project, body.id, marker.id, assembled)
+                    if x is not None and y is not None:
+                        self._view_center_x, self._view_center_y = x, y
+                        self._sync_view_state()
+                        self.update()
+                    return
+        for slider in project.model.sliders:
+            if slider.id == entity_id:
+                try:
+                    ox = self.app_service.expression_service.evaluate_property(slider.origin_x, project.parameters).value
+                    oy = self.app_service.expression_service.evaluate_property(slider.origin_y, project.parameters).value
+                    self._view_center_x, self._view_center_y = ox, oy
+                    self._sync_view_state()
+                    self.update()
+                except Exception:
+                    pass
+                return
 
     def set_selection(self, entity_id: str | None) -> None:
         self._selected_entity_id = entity_id
@@ -143,6 +171,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._joint_start_marker = None
             self._slider_start_marker = None
             self._driver_start_joint_id = None
+            self._sensor_marker_ids = []
             self._dragging_marker = None
             self._drag_preview = None
             self._dragging_slider = None
@@ -151,6 +180,94 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def set_edit_guard(self, guard: Callable[[], bool] | None) -> None:
         self._edit_guard = guard
+
+    def inject_entity_selection(self, entity_id: str) -> None:
+        """Process a tree-selection as if the user had clicked the entity on the canvas."""
+        if not self._editing_enabled:
+            return
+        project = self.app_service.project
+        if project is None:
+            return
+
+        # Build lookup maps
+        assembled = self._assembled_mechanism(project)
+        markers = self._collect_markers(project, assembled)
+        sliders = self._collect_sliders(project)
+        marker_map = {m.entity_id: m for m in markers}
+        slider_map = {s.entity_id: s for s in sliders}
+
+        # Modes that accept a marker click
+        if self._mode == CanvasMode.ADD_MARKER:
+            # Selecting a body or marker from the tree sets the target body for the next canvas click
+            body_ids = {b.id for b in project.model.bodies}
+            if entity_id in body_ids:
+                self._selected_entity_id = entity_id
+                self.entitySelected.emit(entity_id)
+                self.update()
+            elif entity_id in marker_map:
+                # If a marker was selected, use its body
+                self._selected_entity_id = marker_map[entity_id].body_id
+                self.entitySelected.emit(marker_map[entity_id].body_id)
+                self.update()
+            return
+
+        if self._mode in {
+            CanvasMode.CREATE_REVOLUTE,
+            CanvasMode.CREATE_RIGID,
+        }:
+            marker = marker_map.get(entity_id)
+            if marker is not None:
+                self._handle_joint_click(marker)
+            return
+
+        if self._mode == CanvasMode.CONNECT_GROUND:
+            marker = marker_map.get(entity_id)
+            if marker is not None:
+                self._create_ground_joint(marker)
+            return
+
+        if self._mode == CanvasMode.CONNECT_SLIDER:
+            marker = marker_map.get(entity_id)
+            slider = slider_map.get(entity_id)
+            if self._slider_start_marker is None:
+                if marker is not None:
+                    self._slider_start_marker = marker
+                    self.entitySelected.emit(entity_id)
+                    self.update()
+            else:
+                if slider is not None:
+                    self._create_slider_joint(self._slider_start_marker, slider)
+                    self._slider_start_marker = None
+            return
+
+        if self._mode in {
+            CanvasMode.CREATE_ROTATION_DRIVER,
+            CanvasMode.CREATE_TRANSLATION_DRIVER,
+        }:
+            # Accept a joint selected from the tree
+            joint_ids = {j.id for j in project.model.joints}
+            if entity_id in joint_ids:
+                driver_type = "rotation" if self._mode == CanvasMode.CREATE_ROTATION_DRIVER else "translation"
+                self._create_driver_for_joint(entity_id, driver_type)
+            return
+
+        if self._mode == CanvasMode.CREATE_POINT_SENSOR:
+            marker = marker_map.get(entity_id)
+            if marker is not None:
+                self._create_sensor_from_markers([entity_id], "point")
+            return
+
+        if self._mode in {
+            CanvasMode.CREATE_DISTANCE_SENSOR,
+            CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR,
+            CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR,
+            CanvasMode.CREATE_ANGLE_VECTOR_SENSOR,
+        }:
+            marker = marker_map.get(entity_id)
+            if marker is not None:
+                required = 4 if self._mode == CanvasMode.CREATE_ANGLE_VECTOR_SENSOR else 2
+                self._handle_sensor_marker_selection(marker, required)
+            return
 
     def screen_position_for_world(self, x: float, y: float) -> QtCore.QPoint:
         point = self._to_screen(x, y, self._current_transform())
@@ -469,11 +586,15 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._creation_points.clear()
             self._joint_start_marker = None
             self._slider_start_marker = None
+            self._driver_start_joint_id = None
             self._hover_world = None
             self._drag_preview = None
             self._dragging_marker = None
             self._selected_entity_id = None
             self.selectionCleared.emit()
+            if self._mode != CanvasMode.SELECT:
+                self._mode = CanvasMode.SELECT
+                self.modeChanged.emit(CanvasMode.SELECT)
             self.update()
             return
         super().keyPressEvent(event)
@@ -1703,28 +1824,20 @@ class MechanismCanvas(QtWidgets.QWidget):
             self.set_mode(CanvasMode.SELECT)
 
     def _handle_sensor_marker_selection(self, marker: CanvasMarker, required_count: int) -> None:
-        if self._joint_start_marker is None:
-            self._joint_start_marker = marker
-            self.entitySelected.emit(marker.entity_id)
-            self.update()
+        mid = marker.entity_id
+        if mid in self._sensor_marker_ids:
+            return  # duplicate, ignore
+        self._sensor_marker_ids.append(mid)
+        self.entitySelected.emit(mid)
+        self.update()
+        remaining = required_count - len(self._sensor_marker_ids)
+        if remaining > 0:
+            noun = "marker" if remaining == 1 else "markers"
+            self.modelChanged.emit(f"Select {remaining} more {noun}")
             return
-        marker_ids = [self._joint_start_marker.entity_id]
-        self._joint_start_marker = None
-        if marker.entity_id in marker_ids:
-            self.update()
-            return
-        marker_ids.append(marker.entity_id)
-        if required_count == 4:
-            self.modelChanged.emit("Click two more markers for angle vector sensor")
-            self._creation_points.append((marker.x, marker.y))
-            self._joint_start_marker = None
-            self.update()
-            return
-        sensor_type_map = {
-            2: {"distance": "distance", "horizontal": "angle_horizontal", "vertical": "angle_vertical"},
-        }
-        if len(marker_ids) == required_count:
-            self._create_sensor_from_markers(marker_ids, self._get_sensor_type())
+        ids = list(self._sensor_marker_ids)
+        self._sensor_marker_ids = []
+        self._create_sensor_from_markers(ids, self._get_sensor_type())
 
     def _get_sensor_type(self) -> str:
         mode_map = {

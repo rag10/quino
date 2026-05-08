@@ -8,7 +8,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from quino.application.examples import build_four_bar_example, build_slider_crank_example
 from quino.application.service import ApplicationService
 from quino.domain.inputs import PropertyValueInput
-from quino.domain.model import Body, Driver, Joint, Marker, Parameter, Project, SimulationResult, Slider
+from quino.domain.model import Body, Driver, Joint, Marker, Parameter, Project, Sensor, SimulationResult, Slider
 from quino.gui.canvas import CanvasMode, MechanismCanvas
 from quino.viewer.dataset import SensorDataset
 from quino.viewer.qt_widget import SensorPlotWidget
@@ -50,7 +50,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.tree = QtWidgets.QTreeWidget()
         self.tree.setHeaderLabels(["Model", "Type"])
+        self.tree.setIconSize(QtCore.QSize(18, 18))
+        self.tree.setIndentation(14)
+        self.tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Stretch)
+        self.tree.header().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+        self.tree.setAlternatingRowColors(True)
         self.tree.currentItemChanged.connect(self._on_tree_selection_changed)
+        self.tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
         splitter.addWidget(self.tree)
 
         center_panel = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
@@ -122,6 +128,30 @@ class MainWindow(QtWidgets.QMainWindow):
         right_panel = QtWidgets.QTabWidget()
         splitter.addWidget(right_panel)
 
+        inspector_widget = QtWidgets.QWidget()
+        inspector_vbox = QtWidgets.QVBoxLayout(inspector_widget)
+        inspector_vbox.setContentsMargins(0, 0, 0, 0)
+        inspector_vbox.setSpacing(0)
+
+        # Title label: shows selected entity name + type
+        self.inspector_title = QtWidgets.QLabel()
+        self.inspector_title.setContentsMargins(8, 6, 8, 4)
+        self.inspector_title.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        title_font = self.inspector_title.font()
+        title_font.setPointSize(title_font.pointSize() + 1)
+        self.inspector_title.setFont(title_font)
+        inspector_vbox.addWidget(self.inspector_title)
+
+        sep_line = QtWidgets.QFrame()
+        sep_line.setFrameShape(QtWidgets.QFrame.Shape.HLine)
+        sep_line.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
+        inspector_vbox.addWidget(sep_line)
+
+        # Splitter: table on top, relations below — both always visible
+        inspector_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        inspector_splitter.setChildrenCollapsible(False)
+        inspector_vbox.addWidget(inspector_splitter, stretch=1)
+
         self.inspector = QtWidgets.QTableWidget(0, 3)
         self.inspector.setHorizontalHeaderLabels(["Property", "Value", "Evaluated"])
         self.inspector.itemChanged.connect(self._on_inspector_item_changed)
@@ -129,7 +159,22 @@ class MainWindow(QtWidgets.QMainWindow):
         header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
-        right_panel.addTab(self.inspector, "Inspector")
+        inspector_splitter.addWidget(self.inspector)
+
+        # Relations area: rebuilt on each selection
+        self.relations_widget = QtWidgets.QScrollArea()
+        self.relations_widget.setWidgetResizable(True)
+        self.relations_widget.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        relations_inner = QtWidgets.QWidget()
+        self.relations_vbox = QtWidgets.QVBoxLayout(relations_inner)
+        self.relations_vbox.setContentsMargins(8, 4, 8, 8)
+        self.relations_vbox.setSpacing(1)
+        self.relations_vbox.addStretch(1)
+        self.relations_widget.setWidget(relations_inner)
+        inspector_splitter.addWidget(self.relations_widget)
+        inspector_splitter.setSizes([320, 160])
+
+        right_panel.addTab(inspector_widget, "Inspector")
 
         parameters_widget = QtWidgets.QWidget()
         parameters_layout = QtWidgets.QVBoxLayout(parameters_widget)
@@ -225,33 +270,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_fit_view = QtGui.QAction(get_icon("fit-view", color_base), "Fit View", self)
         self.action_fit_view.setToolTip("Fit mechanism to view")
 
-        self.action_add_rotation_driver = QtGui.QAction(get_icon("rotate-driver", color_base), "Rotation Driver", self)
-        self.action_add_rotation_driver.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_ROTATION_DRIVER))
-        self.action_add_rotation_driver.setToolTip("Add a rotation driver to a joint (select a joint on canvas)")
+        self.action_add_rotation_driver = self._tool_action("Rotation Driver", CanvasMode.CREATE_ROTATION_DRIVER, get_icon("rotate-driver", color_base), "Add a rotation driver to a joint (select a joint on canvas)")
+        self.action_add_translation_driver = self._tool_action("Translation Driver", CanvasMode.CREATE_TRANSLATION_DRIVER, get_icon("translate-driver", color_base), "Add a translation driver to a slider (select a slider joint on canvas)")
 
-        self.action_add_translation_driver = QtGui.QAction(get_icon("translate-driver", color_base), "Translation Driver", self)
-        self.action_add_translation_driver.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_TRANSLATION_DRIVER))
-        self.action_add_translation_driver.setToolTip("Add a translation driver to a slider (select a slider joint on canvas)")
-
-        self.action_point_sensor = QtGui.QAction(get_icon("sensor-point"), "Point", self)
-        self.action_point_sensor.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_POINT_SENSOR))
-        self.action_point_sensor.setToolTip("Create a point sensor (select a marker on canvas)")
-
-        self.action_distance_sensor = QtGui.QAction(get_icon("sensor-distance"), "Distance", self)
-        self.action_distance_sensor.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_DISTANCE_SENSOR))
-        self.action_distance_sensor.setToolTip("Create a distance sensor (select 2 markers on canvas)")
-
-        self.action_angle_h_sensor = QtGui.QAction(get_icon("sensor-angle-h"), "Angle H", self)
-        self.action_angle_h_sensor.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR))
-        self.action_angle_h_sensor.setToolTip("Create an angle (horizontal) sensor (select 2 markers on canvas)")
-
-        self.action_angle_v_sensor = QtGui.QAction(get_icon("sensor-angle-v"), "Angle V", self)
-        self.action_angle_v_sensor.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR))
-        self.action_angle_v_sensor.setToolTip("Create an angle (vertical) sensor (select 2 markers on canvas)")
-
-        self.action_angle_vector_sensor = QtGui.QAction(get_icon("sensor-angle-vec"), "Angle Vec", self)
-        self.action_angle_vector_sensor.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_ANGLE_VECTOR_SENSOR))
-        self.action_angle_vector_sensor.setToolTip("Create an angle (vector) sensor (select 4 markers on canvas)")
+        self.action_point_sensor = self._tool_action("Point", CanvasMode.CREATE_POINT_SENSOR, get_icon("sensor-point"), "Create a point sensor (select a marker on canvas)")
+        self.action_distance_sensor = self._tool_action("Distance", CanvasMode.CREATE_DISTANCE_SENSOR, get_icon("sensor-distance"), "Create a distance sensor (select 2 markers on canvas)")
+        self.action_angle_h_sensor = self._tool_action("Angle H", CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR, get_icon("sensor-angle-h"), "Create an angle (horizontal) sensor (select 2 markers on canvas)")
+        self.action_angle_v_sensor = self._tool_action("Angle V", CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR, get_icon("sensor-angle-v"), "Create an angle (vertical) sensor (select 2 markers on canvas)")
+        self.action_angle_vector_sensor = self._tool_action("Angle Vec", CanvasMode.CREATE_ANGLE_VECTOR_SENSOR, get_icon("sensor-angle-vec"), "Create an angle (vector) sensor (select 4 markers on canvas)")
 
         self.action_new_plot = QtGui.QAction(get_icon("new-graph"), "New Graph", self)
         self.action_new_plot.triggered.connect(self.create_plot_window)
@@ -295,6 +321,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_slider_tool,
             self.action_ground_tool,
             self.action_slider_connect_tool,
+            self.action_add_rotation_driver,
+            self.action_add_translation_driver,
             self.action_point_sensor,
             self.action_distance_sensor,
             self.action_angle_h_sensor,
@@ -416,9 +444,14 @@ class MainWindow(QtWidgets.QMainWindow):
         _sep()
 
         _block([
-            [self.action_validate, self.action_run, self.action_play_pause, self.action_stop],
-            [self.action_new_plot, self.action_show_trajectories, None, None],
-        ], "Simulation / Results")
+            [self.action_validate, self.action_run],
+            [self.action_play_pause, self.action_stop],
+        ], "Simulation")
+        _sep()
+
+        _block([
+            [self.action_new_plot, self.action_show_trajectories],
+        ], "Results")
 
     def refresh_all(self) -> None:
         project = self.app_service.project
@@ -744,19 +777,56 @@ class MainWindow(QtWidgets.QMainWindow):
         self.app_service.save_project(path)
         self._append_message(f"Saved project: {path}")
 
+    # --- icon name per entity kind ---
+    _KIND_ICON: dict[str, str] = {
+        "bar": "bar", "body": "body",
+        "structural": "marker", "com": "marker",
+        "slider": "slider",
+        "revolute": "revolute", "rigid": "rigid",
+        "rotation": "rotate-driver", "translation": "translate-driver",
+        "point": "sensor-point", "distance": "sensor-distance",
+        "angle_horizontal": "sensor-angle-h", "angle_vertical": "sensor-angle-v",
+        "angle_vector": "sensor-angle-vec",
+    }
+    _SECTION_ICON: dict[str, str] = {
+        "Bodies": "body", "Sliders": "slider", "Joints": "revolute",
+        "Drivers": "rotate-driver", "Sensors": "sensor-point",
+    }
+    _SECTION_COLOR: dict[str, str] = {
+        "Bodies": "#31556f", "Sliders": "#457b9d", "Joints": "#2f3a4b",
+        "Drivers": "#7f5539", "Sensors": "#1a6b4a",
+    }
+
     def _populate_tree(self, project: Project) -> None:
+        self.tree.blockSignals(True)
         self.tree.clear()
-        bodies_root = QtWidgets.QTreeWidgetItem(["Bodies", str(len(project.model.bodies))])
-        sliders_root = QtWidgets.QTreeWidgetItem(["Sliders", str(len(project.model.sliders))])
-        joints_root = QtWidgets.QTreeWidgetItem(["Joints", str(len(project.model.joints))])
-        drivers_root = QtWidgets.QTreeWidgetItem(["Drivers", str(len(project.model.drivers))])
-        sensors_root = QtWidgets.QTreeWidgetItem(["Sensors", str(len(project.model.sensors))])
+
+        def _root(label: str, count: int) -> QtWidgets.QTreeWidgetItem:
+            item = QtWidgets.QTreeWidgetItem([f"{label}  ({count})", ""])
+            icon_name = self._SECTION_ICON.get(label, "")
+            if icon_name:
+                item.setIcon(0, get_icon(icon_name, size=18))
+            color = QtGui.QColor(self._SECTION_COLOR.get(label, "#3d3d3d"))
+            font = item.font(0)
+            font.setBold(True)
+            item.setFont(0, font)
+            item.setForeground(0, QtGui.QBrush(color))
+            item.setFlags(item.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
+            return item
+
+        bodies_root = _root("Bodies", len(project.model.bodies))
+        sliders_root = _root("Sliders", len(project.model.sliders))
+        joints_root = _root("Joints", len(project.model.joints))
+        drivers_root = _root("Drivers", len(project.model.drivers))
+        sensors_root = _root("Sensors", len(project.model.sensors))
         self.tree.addTopLevelItems([bodies_root, sliders_root, joints_root, drivers_root, sensors_root])
 
         for body in project.model.bodies:
             body_item = self._entity_item(body.name, body.type.value, body.id)
             bodies_root.addChild(body_item)
             for marker in body.markers:
+                if not marker.visible and marker.type.value == "com":
+                    continue
                 body_item.addChild(self._entity_item(marker.name, marker.type.value, marker.id))
         for slider in project.model.sliders:
             sliders_root.addChild(self._entity_item(slider.name, "slider", slider.id))
@@ -768,6 +838,8 @@ class MainWindow(QtWidgets.QMainWindow):
             sensors_root.addChild(self._entity_item(sensor.name, sensor.type.value, sensor.id))
 
         self.tree.expandAll()
+        self.tree.blockSignals(False)
+
         if self._selected_entity_id:
             matches = self.tree.findItems("", QtCore.Qt.MatchFlag.MatchContains | QtCore.Qt.MatchFlag.MatchRecursive, 0)
             for item in matches:
@@ -778,6 +850,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def _entity_item(self, label: str, kind: str, entity_id: str) -> QtWidgets.QTreeWidgetItem:
         item = QtWidgets.QTreeWidgetItem([label, kind])
         item.setData(0, QtCore.Qt.ItemDataRole.UserRole, entity_id)
+        icon_name = self._KIND_ICON.get(kind, "")
+        if icon_name:
+            item.setIcon(0, get_icon(icon_name, size=13))
         return item
 
     def _populate_parameters(self, project: Project) -> None:
@@ -827,11 +902,27 @@ class MainWindow(QtWidgets.QMainWindow):
                     lines.append(f"  {key} = {value:.6g}")
         self.canvas_summary.setPlainText("\n".join(lines))
 
+    _CREATION_MODES = {
+        CanvasMode.CREATE_BAR, CanvasMode.CREATE_BODY, CanvasMode.ADD_MARKER,
+        CanvasMode.CREATE_REVOLUTE, CanvasMode.CREATE_RIGID,
+        CanvasMode.CREATE_SLIDER, CanvasMode.CONNECT_GROUND, CanvasMode.CONNECT_SLIDER,
+        CanvasMode.CREATE_ROTATION_DRIVER, CanvasMode.CREATE_TRANSLATION_DRIVER,
+        CanvasMode.CREATE_POINT_SENSOR, CanvasMode.CREATE_DISTANCE_SENSOR,
+        CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR, CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR,
+        CanvasMode.CREATE_ANGLE_VECTOR_SENSOR,
+    }
+
     def _on_tree_selection_changed(self, current: QtWidgets.QTreeWidgetItem | None, previous) -> None:
         del previous
-        self._selected_entity_id = current.data(0, QtCore.Qt.ItemDataRole.UserRole) if current else None
+        entity_id = current.data(0, QtCore.Qt.ItemDataRole.UserRole) if current else None
+        if entity_id is not None and self.canvas.mode() in self._CREATION_MODES:
+            # In a creation workflow: route the selection to the canvas without
+            # overwriting canvas internal state (joint start marker, etc.)
+            self.canvas.inject_entity_selection(entity_id)
+            return
+        self._selected_entity_id = entity_id
         self._populate_inspector()
-        self.canvas.set_selection(self._selected_entity_id)
+        self.canvas.set_selection(entity_id)
 
     def _select_entity_by_id(self, entity_id: str) -> None:
         self._selected_entity_id = entity_id
@@ -895,22 +986,48 @@ class MainWindow(QtWidgets.QMainWindow):
         self._suspend_property_updates = True
         try:
             self.inspector.setRowCount(0)
+            self.inspector_title.setText("")
+            # clear old relation widgets
+            while self.relations_vbox.count() > 1:  # keep trailing stretch
+                child = self.relations_vbox.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+
             if not self._selected_entity_id:
                 return
             try:
                 entity = self.app_service._find_entity(self._selected_entity_id)
             except ValueError:
                 return
-            rows = self._inspector_rows(entity)
-            self.inspector.setRowCount(len(rows))
-            for row_index, (label, path, value, kind, evaluated) in enumerate(rows):
+
+            # --- title ---
+            name = getattr(entity, "name", "")
+            kind_label = self._entity_kind_label(entity)
+            icon_name = self._KIND_ICON.get(getattr(getattr(entity, "type", None), "value", ""), "")
+            if not icon_name:
+                icon_name = self._entity_default_icon(entity)
+            icon_html = ""
+            if icon_name:
+                svg_path = Path(__file__).parent / "icons" / f"{icon_name}.svg"
+                if svg_path.exists():
+                    icon_html = f'<img src="{svg_path}" width="16" height="16" style="vertical-align:middle"/> '
+            self.inspector_title.setText(
+                f'{icon_html}<b>{name}</b> &nbsp;<span style="color:#888;font-weight:normal">{kind_label}</span>'
+            )
+
+            # --- property rows ---
+            prop_rows = self._inspector_rows(entity)
+            self.inspector.setRowCount(len(prop_rows))
+            for row_index, (label, path, value, kind, evaluated, _) in enumerate(prop_rows):
                 label_item = QtWidgets.QTableWidgetItem(label)
                 label_item.setFlags(label_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
+                self.inspector.setItem(row_index, 0, label_item)
+
                 evaluated_item = QtWidgets.QTableWidgetItem(evaluated)
                 evaluated_item.setFlags(evaluated_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
                 if evaluated.startswith("ERROR:"):
                     evaluated_item.setForeground(QtGui.QColor("#c0392b"))
-                self.inspector.setItem(row_index, 0, label_item)
+
                 if kind == "boolean":
                     value_item = QtWidgets.QTableWidgetItem(value)
                     value_item.setFlags(value_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
@@ -931,57 +1048,224 @@ class MainWindow(QtWidgets.QMainWindow):
                         value_item.setFlags(value_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
                     self.inspector.setItem(row_index, 1, value_item)
                 self.inspector.setItem(row_index, 2, evaluated_item)
+
+            # --- relations below the table ---
+            relations = self._inspector_relations(entity)
+            if relations:
+                current_group: str | None = None
+                for group, rel_icon, display, detail, ent_id in relations:
+                    if group != current_group:
+                        current_group = group
+                        grp_label = QtWidgets.QLabel(group)
+                        grp_font = grp_label.font()
+                        grp_font.setPointSize(grp_font.pointSize() - 1)
+                        grp_label.setFont(grp_font)
+                        grp_label.setStyleSheet("color: #888; margin-top: 6px;")
+                        grp_label.setContentsMargins(0, 4, 0, 0)
+                        self.relations_vbox.insertWidget(self.relations_vbox.count() - 1, grp_label)
+
+                    row_w = QtWidgets.QWidget()
+                    row_h = QtWidgets.QHBoxLayout(row_w)
+                    row_h.setContentsMargins(0, 1, 0, 1)
+                    row_h.setSpacing(5)
+
+                    if rel_icon:
+                        icon_lbl = QtWidgets.QLabel()
+                        icon_lbl.setPixmap(get_icon(rel_icon, size=13).pixmap(13, 13))
+                        icon_lbl.setFixedSize(16, 16)
+                        icon_lbl.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+                        row_h.addWidget(icon_lbl)
+
+                    text = f"{display}  <span style='color:#999'>{detail}</span>" if detail else display
+                    text_lbl = QtWidgets.QLabel(text)
+                    text_lbl.setTextFormat(QtCore.Qt.TextFormat.RichText)
+                    if ent_id:
+                        text_lbl.setStyleSheet("color: #1a4a8a;")
+                        text_lbl.setToolTip("Double-click to select")
+                        text_lbl.setProperty("nav_entity_id", ent_id)
+                        text_lbl.mouseDoubleClickEvent = (
+                            lambda _ev, eid=ent_id: self._select_entity_by_id(eid)
+                        )
+                    row_h.addWidget(text_lbl, stretch=1)
+                    self.relations_vbox.insertWidget(self.relations_vbox.count() - 1, row_w)
         finally:
             self._suspend_property_updates = False
 
-    def _inspector_rows(self, entity: object) -> list[tuple[str, str, str, str, str]]:
-        rows: list[tuple[str, str, str, str, str]] = []
-        if isinstance(entity, (Body, Marker, Slider, Joint, Driver, Parameter)):
-            rows.append(("name", "name", entity.name, "expression", entity.name))
+    def _entity_kind_label(self, entity: object) -> str:
+        type_val = getattr(getattr(entity, "type", None), "value", None)
+        if type_val:
+            return type_val.replace("_", " ")
         if isinstance(entity, Body):
-            rows.extend(
-                [
-                    ("closed_shape", "closed_shape", str(entity.closed_shape).lower(), "boolean", str(entity.closed_shape).lower()),
-                    ("edge_order", "edge_order", ", ".join(marker.name for marker in entity.structural_markers()), "expression", ", ".join(marker.name for marker in entity.structural_markers())),
-                    ("mass", "mass", entity.mass.expression if entity.mass else "", "expression_or_null", self._evaluate_scalar(entity.mass)),
-                    ("inertia", "inertia", entity.inertia.expression if entity.inertia else "", "expression_or_null", self._evaluate_scalar(entity.inertia)),
-                ]
-            )
+            return "body"
+        if isinstance(entity, Marker):
+            return "marker"
+        if isinstance(entity, Slider):
+            return "slider"
+        if isinstance(entity, Joint):
+            return "joint"
+        if isinstance(entity, Driver):
+            return "driver"
+        if isinstance(entity, Sensor):
+            return "sensor"
+        if isinstance(entity, Parameter):
+            return "parameter"
+        return ""
+
+    def _entity_default_icon(self, entity: object) -> str:
+        if isinstance(entity, Body):
+            return "body"
+        if isinstance(entity, Marker):
+            return "marker"
+        if isinstance(entity, Slider):
+            return "slider"
+        if isinstance(entity, Joint):
+            return "revolute"
+        if isinstance(entity, Driver):
+            return "rotate-driver"
+        if isinstance(entity, Sensor):
+            return "sensor-point"
+        return ""
+
+    def _on_tree_item_double_clicked(self, item: QtWidgets.QTreeWidgetItem, _col: int) -> None:
+        entity_id = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        if entity_id:
+            self._select_entity_by_id(entity_id)
+            self.canvas.center_on_entity(entity_id)
+
+    def _inspector_rows(self, entity: object) -> list[tuple[str, str, str, str, str, str | None]]:
+        # Returns prop rows only: (label, path, value, kind, evaluated, None)
+        rows: list[tuple[str, str, str, str, str, str | None]] = []
+
+        def prop(label, path, value, kind, evaluated):
+            rows.append((label, path, value, kind, evaluated, None))
+
+        if isinstance(entity, (Body, Marker, Slider, Joint, Driver, Sensor, Parameter)):
+            prop("name", "name", entity.name, "expression", entity.name)
+
+        if isinstance(entity, Body):
+            prop("closed_shape", "closed_shape", str(entity.closed_shape).lower(), "boolean", str(entity.closed_shape).lower())
+            prop("mass", "mass", entity.mass.expression if entity.mass else "", "expression_or_null", self._evaluate_scalar(entity.mass))
+            prop("inertia", "inertia", entity.inertia.expression if entity.inertia else "", "expression_or_null", self._evaluate_scalar(entity.inertia))
+
         elif isinstance(entity, Marker):
-            rows.extend(
-                [
-                    ("x", "x", entity.x.expression, "expression", self._evaluate_scalar(entity.x)),
-                    ("y", "y", entity.y.expression, "expression", self._evaluate_scalar(entity.y)),
-                    ("visible", "visible", str(entity.visible).lower(), "boolean", str(entity.visible).lower()),
-                ]
-            )
+            prop("x", "x", entity.x.expression, "expression", self._evaluate_scalar(entity.x))
+            prop("y", "y", entity.y.expression, "expression", self._evaluate_scalar(entity.y))
+            prop("visible", "visible", str(entity.visible).lower(), "boolean", str(entity.visible).lower())
+
         elif isinstance(entity, Slider):
-            rows.extend(
-                [
-                    ("origin_x", "origin_x", entity.origin_x.expression, "expression", self._evaluate_scalar(entity.origin_x)),
-                    ("origin_y", "origin_y", entity.origin_y.expression, "expression", self._evaluate_scalar(entity.origin_y)),
-                    ("angle", "angle", entity.angle.expression, "expression", self._evaluate_scalar(entity.angle)),
-                    ("travel_min", "travel_min", entity.travel_min.expression if entity.travel_min else "", "expression_or_null", self._evaluate_scalar(entity.travel_min)),
-                    ("travel_max", "travel_max", entity.travel_max.expression if entity.travel_max else "", "expression_or_null", self._evaluate_scalar(entity.travel_max)),
-                ]
-            )
+            prop("origin_x", "origin_x", entity.origin_x.expression, "expression", self._evaluate_scalar(entity.origin_x))
+            prop("origin_y", "origin_y", entity.origin_y.expression, "expression", self._evaluate_scalar(entity.origin_y))
+            prop("angle", "angle", entity.angle.expression, "expression", self._evaluate_scalar(entity.angle))
+            prop("travel_min", "travel_min", entity.travel_min.expression if entity.travel_min else "", "expression_or_null", self._evaluate_scalar(entity.travel_min))
+            prop("travel_max", "travel_max", entity.travel_max.expression if entity.travel_max else "", "expression_or_null", self._evaluate_scalar(entity.travel_max))
+
         elif isinstance(entity, Joint):
-            rows.append(("type", "", entity.type.value, "readonly", entity.type.value))
+            prop("type", "", entity.type.value, "readonly", entity.type.value)
+
         elif isinstance(entity, Driver):
-            rows.extend(
-                [
-                    ("type", "", entity.type.value, "readonly", entity.type.value),
-                    ("law", "law", entity.law.expression, "expression", self._evaluate_scalar(entity.law, with_time=True)),
-                ]
-            )
+            prop("type", "", entity.type.value, "readonly", entity.type.value)
+            prop("law", "law", entity.law.expression, "expression", self._evaluate_scalar(entity.law, with_time=True))
+
+        elif isinstance(entity, Sensor):
+            prop("type", "", entity.type.value, "readonly", entity.type.value)
+            output = self.app_service.project.sensor_outputs.get(entity.id)
+            if output and output.columns and output.data:
+                frame = max(0, min(self._current_frame_index, len(output.data) - 1))
+                row_data = output.data[frame]
+                t = output.time[frame] if frame < len(output.time) else 0.0
+                prop("t", "", f"{t:.4g} s", "readonly", f"{t:.4g} s")
+                for col_idx, col_name in enumerate(output.columns):
+                    if col_idx < len(row_data):
+                        val = row_data[col_idx]
+                        prop(col_name, "", f"{val:.6g}", "readonly", f"{val:.6g}")
+
         elif isinstance(entity, Parameter):
-            rows.extend(
-                [
-                    ("expression", "", entity.expression, "readonly", self._evaluate_parameter(entity)),
-                    ("unit", "", entity.unit, "readonly", entity.unit),
-                ]
-            )
+            prop("expression", "", entity.expression, "readonly", self._evaluate_parameter(entity))
+            prop("unit", "", entity.unit, "readonly", entity.unit)
+
         return rows
+
+    # relation tuple: (group, icon_name, display, detail, entity_id | None)
+    def _inspector_relations(self, entity: object) -> list[tuple[str, str, str, str, str | None]]:
+        rels: list[tuple[str, str, str, str, str | None]] = []
+        project = self.app_service.project
+
+        def rel(group: str, icon: str, display: str, detail: str = "", entity_id: str | None = None):
+            rels.append((group, icon, display, detail, entity_id))
+
+        if isinstance(entity, Body):
+            for m in entity.markers:
+                if not m.visible and m.type.value == "com":
+                    continue
+                coords = self._evaluate_scalar(m.x) + " / " + self._evaluate_scalar(m.y)
+                rel("Markers", "marker", m.name, coords, m.id)
+
+        elif isinstance(entity, Marker):
+            try:
+                body = self.app_service._find_body_by_marker(entity.id)
+                rel("Parent Body", "body" if body.type.value == "body" else "bar", body.name, body.type.value, body.id)
+            except Exception:
+                pass
+            joints = [j for j in project.model.joints
+                      if j.endpoint_a.marker_id == entity.id or j.endpoint_b.marker_id == entity.id]
+            for j in joints:
+                icon_j = self._KIND_ICON.get(j.type.value, "revolute")
+                other_ep = j.endpoint_b if j.endpoint_a.marker_id == entity.id else j.endpoint_a
+                if other_ep.kind.value == "ground":
+                    detail = "→ Ground"
+                elif other_ep.kind.value == "slider" and other_ep.slider_id:
+                    try:
+                        sl = self.app_service._find_entity(other_ep.slider_id)
+                        detail = f"→ {sl.name}"
+                    except Exception:
+                        detail = "→ slider"
+                elif other_ep.marker_id:
+                    try:
+                        om = self.app_service._find_entity(other_ep.marker_id)
+                        ob = self.app_service._find_body_by_marker(other_ep.marker_id)
+                        detail = f"→ {ob.name}.{om.name}"
+                    except Exception:
+                        detail = "→ ?"
+                else:
+                    detail = ""
+                rel("Joints", icon_j, j.name, detail, j.id)
+
+        elif isinstance(entity, Joint):
+            for label, ep in [("A", entity.endpoint_a), ("B", entity.endpoint_b)]:
+                if ep.kind.value == "ground":
+                    rel("Endpoints", "ground", f"Endpoint {label}", "Ground", None)
+                elif ep.kind.value == "slider" and ep.slider_id:
+                    try:
+                        sl = self.app_service._find_entity(ep.slider_id)
+                        rel("Endpoints", "slider", f"Endpoint {label}", sl.name, ep.slider_id)
+                    except Exception:
+                        rel("Endpoints", "slider", f"Endpoint {label}", ep.slider_id or "?", ep.slider_id)
+                elif ep.marker_id:
+                    try:
+                        om = self.app_service._find_entity(ep.marker_id)
+                        ob = self.app_service._find_body_by_marker(ep.marker_id)
+                        rel("Endpoints", "marker", f"Endpoint {label}", f"{ob.name}.{om.name}", ep.marker_id)
+                    except Exception:
+                        rel("Endpoints", "marker", f"Endpoint {label}", ep.marker_id or "?", ep.marker_id)
+
+        elif isinstance(entity, Driver):
+            try:
+                joint = self.app_service._find_entity(entity.target_joint_id)
+                icon_j = self._KIND_ICON.get(joint.type.value, "revolute")
+                rel("Target Joint", icon_j, joint.name, joint.type.value, entity.target_joint_id)
+            except Exception:
+                pass
+
+        elif isinstance(entity, Sensor):
+            for mid in (entity.marker_ids or []):
+                try:
+                    om = self.app_service._find_entity(mid)
+                    ob = self.app_service._find_body_by_marker(mid)
+                    rel("Markers", "marker", om.name, ob.name, mid)
+                except Exception:
+                    rel("Markers", "marker", mid, "", mid)
+
+        return rels
 
     def _evaluate_scalar(self, scalar, with_time: bool = False) -> str:
         if scalar is None:

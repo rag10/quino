@@ -328,7 +328,16 @@ class ApplicationService:
     def connect_marker_to_slider(
         self, marker_id: str, slider_id: str, joint_type: str = "revolute", name: str | None = None
     ) -> str:
+        project = self._require_project()
         body = self._find_body_by_marker(marker_id)
+        marker = self._find_entity(marker_id)
+        slider = self._find_entity(slider_id)
+        if isinstance(marker, Marker) and isinstance(slider, Slider):
+            # Snap the marker to the slider origin so there is no gap
+            sx = self._evaluate_scalar_as(slider.origin_x, "mm")
+            sy = self._evaluate_scalar_as(slider.origin_y, "mm")
+            marker.x = ScalarProperty(expression=f"{sx:.3f} mm", unit="mm", expected_dimension=Dimension.LENGTH)
+            marker.y = ScalarProperty(expression=f"{sy:.3f} mm", unit="mm", expected_dimension=Dimension.LENGTH)
         return self.create_joint(
             name=name or f"{marker_id}_{slider_id}",
             joint_type=joint_type,
@@ -663,6 +672,7 @@ class ApplicationService:
             project.model.joints,
             project.model.sliders,
             project.model.drivers,
+            project.model.sensors,
             project.parameters,
         ):
             for entity in collection:
@@ -719,6 +729,8 @@ class ApplicationService:
             self.validation_service.ensure_unique_name(project.model.sliders, new_name, entity.id)
         elif isinstance(entity, Driver):
             self.validation_service.ensure_unique_name(project.model.drivers, new_name, entity.id)
+        elif isinstance(entity, Sensor):
+            self.validation_service.ensure_unique_name(project.model.sensors, new_name, entity.id)
         elif isinstance(entity, Parameter):
             self.validation_service.ensure_unique_name(project.parameters, new_name, entity.id)
         elif isinstance(entity, Marker):
@@ -798,21 +810,39 @@ class ApplicationService:
         delta_x_mm: float,
         delta_y_mm: float,
     ) -> None:
+        # BFS over joint graph: collect all markers/sliders co-located with marker_id
+        project = self._require_project()
+        all_joints = project.model.joints
         moved_marker_ids: set[str] = {marker_id}
         moved_slider_ids: set[str] = set()
-        for joint in joints:
-            for endpoint in (joint.endpoint_a, joint.endpoint_b):
-                if endpoint.kind is JointEndpointKind.MARKER and endpoint.marker_id is not None:
-                    if endpoint.marker_id in moved_marker_ids:
-                        continue
-                    linked_marker = self._find_entity(endpoint.marker_id)
+        frontier: list[str] = [marker_id]
+        while frontier:
+            current_id = frontier.pop()
+            for joint in all_joints:
+                ep_a, ep_b = joint.endpoint_a, joint.endpoint_b
+                # Find the counterpart of current_id in this joint
+                counterpart_marker_id: str | None = None
+                counterpart_slider_id: str | None = None
+                if ep_a.kind is JointEndpointKind.MARKER and ep_a.marker_id == current_id:
+                    if ep_b.kind is JointEndpointKind.MARKER:
+                        counterpart_marker_id = ep_b.marker_id
+                    elif ep_b.kind is JointEndpointKind.SLIDER:
+                        counterpart_slider_id = ep_b.slider_id
+                elif ep_b.kind is JointEndpointKind.MARKER and ep_b.marker_id == current_id:
+                    if ep_a.kind is JointEndpointKind.MARKER:
+                        counterpart_marker_id = ep_a.marker_id
+                    elif ep_a.kind is JointEndpointKind.SLIDER:
+                        counterpart_slider_id = ep_a.slider_id
+                else:
+                    continue
+                if counterpart_marker_id and counterpart_marker_id not in moved_marker_ids:
+                    linked_marker = self._find_entity(counterpart_marker_id)
                     if isinstance(linked_marker, Marker):
                         self._translate_marker_expression(linked_marker, delta_x_mm, delta_y_mm)
-                        moved_marker_ids.add(endpoint.marker_id)
-                elif endpoint.kind is JointEndpointKind.SLIDER and endpoint.slider_id is not None:
-                    if endpoint.slider_id in moved_slider_ids:
-                        continue
-                    linked_slider = self._find_entity(endpoint.slider_id)
+                        moved_marker_ids.add(counterpart_marker_id)
+                        frontier.append(counterpart_marker_id)
+                if counterpart_slider_id and counterpart_slider_id not in moved_slider_ids:
+                    linked_slider = self._find_entity(counterpart_slider_id)
                     if isinstance(linked_slider, Slider):
                         self._translate_slider_expression(
                             linked_slider,
@@ -820,7 +850,7 @@ class ApplicationService:
                             delta_y_mm,
                             moved_marker_ids=moved_marker_ids,
                         )
-                        moved_slider_ids.add(endpoint.slider_id)
+                        moved_slider_ids.add(counterpart_slider_id)
 
     def _move_slider_origin(self, slider_id: str, x_expression: str, y_expression: str) -> None:
         slider = self._find_entity(slider_id)

@@ -41,3 +41,31 @@ El viewer está basado en pyqtgraph, esto quiero mantenerlo, así como las utili
 
 ------------------------------------------------
 
+A la hora de crear juntas, unir markers con ground o sliders, etc. es necesario que no solo se puedan seleccionar en el canvas, si no que también e indistintamente se puedan seleccioanar en el model tree.
+
+Vamos a modernizar el model tree, añade iconos visuales y mejoras en cuanto a la experiencia de usuario.
+
+Hay un tema que corregir también: las rótulas solo unen dos markers, pero un mismo marker puede estar unido a dos rótulas y por tanto a dos markers distintos. Esto puede producir errores, ya que tal como está implementado ahora el desplazamiento de markers en el canvas, a veces se mueven solo dos rótulas, pero las otra no, etc. Hay que hacer más robusto esto y buscar todos los markers que estén conectados en serie por medio de juntas para meverlos todos a la vez. Ejemplo: junta B1.M1-B2.M1 y junta B2.M1-B3.M1. Si muevo B3.M1 ahora se mueve solo B2.M1, pero no B1.M1. Corrije la función para que busque en cadena todos los markers conectados en el mismo punto espacial por medio de jutnas y los mueva a la vez. Recuerda que el resto de markers del modelo no se deben modificar.
+
+Ahora mismo cuando se usa "connect marker to slider" el marker no se actualiza a la posición del slider o viceversa y hay un gap espacial. corrige eso tambén.
+
+Separa los botones de New Graph y Trajectories de los de simulación en el bloque de Results.
+
+Cuando se selecciona un botón para alguna función que después requiere alguna acción sobre el canvas, deben activarse. Hay algunos que lo hacen como crear bar o body, gorund joint, etc., pero hay otros que no, como los de crear sensores o drivers. 
+Cuando se presiona la tecla ESC debe volver a la función seleccionar.
+
+En el inspector, cuando se seleccione un bar o body quiero que se indiquen los markers que lo forman y si se hace doble clic sobre el marker, se selecciona el marker.
+En el inspector, cuando se seleccione un marker, quiero que se indique el bar o body al que esté unido, las juntas a las que esté unido inidando el tipo de junta y el marker con el que la une (o ground o slider) y si se hace doble clic sobre alguno de ellos se seleccione.
+En el inspector, cuando se seleccione una junta, quiero que se indique los marker que una indicando el bar/body al que pertenecen y si se hace doble clic sobre alguno de ellos se seleccione.
+Lo mismo con los drivers y lo sensores.
+
+------------------------------------------------
+
+A continuación vamos a crear un plan para implementar la función de sketch. Vvamos a hacerlo despacio, quiero ser yo quien guie las decisiones, dame respuestas cortas y hazme preguntas, propón ideas, pero no las ejecutes hasta que nos las consesues conmigo. No quiero respuestas largas, la forma de trabajar tiene que ser como si estuvieramos teniendo una conversación. Para empezar lee docs/Specification y docs/spec_part002.md, ya que ahí está bastante bien indicado. 
+
+Lo primero vamso a hacer un commit y push y crear una nueva rama para poder volver atrás en caso de romper algo.
+
+
+
+
+
