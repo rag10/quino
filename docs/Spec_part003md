@@ -14,4 +14,18 @@ Al crear bar, si se clica en un marker existente, debe aparecer un diálogo para
 
 También hay que corregir la forma de unir un marker con un slider.  
 
+------------------------------------------------
 
+Vamos a corregir varias cosas que creo que están relacionadas.
+Tras simular, al volver a editar el modelo arrastrando markers en el canvas, se producen errores.
+Para empezar, si no hay simulación, desactiva los botones de play,pause, etc.
+Una vez haya simulación, si se intenta editar el modelo aparecerá un warning que indicará que si se modifica algo del modelo, la simulación se eliminará. Esto evitará errores.
+Revisa todo esto con criterio. Si tienes cualqueir duda, vete preguntándome.
+
+
+-------------------------------------------------
+
+Vamos a añadir sensores al software. Los sensores nos van a ayudar a medir por el momento posiciones (lineales y angulares). Por el momento vamos a implmentar:
+- Sensor puntual: en un marker, qeu va a registrar posiciónes, velocidades y aceleraciones x,y y absoluta.
+- Sensor de distancia: entre dos markers, va a registrar la distancia entre ellos, así como la velocidad y aceleración relativa.
+Sensor de ángulo: va a registrar el ángulo enter dos pares de markers, así como la velocidad angular y aceleración angular.

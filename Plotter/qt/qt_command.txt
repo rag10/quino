@@ -1,0 +1,1 @@
+pyuic5 -x widget_Plotter.ui -o widget_Plotter.py

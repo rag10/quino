@@ -10,6 +10,8 @@ from quino.application.service import ApplicationService
 from quino.domain.inputs import PropertyValueInput
 from quino.domain.model import Body, Driver, Joint, Marker, Parameter, Project, SimulationResult, Slider
 from quino.gui.canvas import CanvasMode, MechanismCanvas
+from quino.viewer.dataset import SensorDataset
+from quino.viewer.qt_widget import SensorPlotWidget
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -248,6 +250,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_angle_vector_sensor.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_ANGLE_VECTOR_SENSOR))
         self.action_angle_vector_sensor.setToolTip("Create an angle (vector) sensor (select 4 markers on canvas)")
 
+        self.action_new_plot = QtGui.QAction("New Plot", self)
+        self.action_new_plot.triggered.connect(self.create_plot_window)
+        self.action_new_plot.setToolTip("Create a new plot from sensor data")
+
         self.action_delete = QtGui.QAction(get_icon("delete", color_danger), "Delete", self)
         self.action_delete.setShortcut(QtGui.QKeySequence.StandardKey.Delete)
         self.action_delete.triggered.connect(self.delete_selected_entity)
@@ -363,6 +369,9 @@ class MainWindow(QtWidgets.QMainWindow):
         toolbar.addAction(self.action_run)
         toolbar.addAction(self.action_play_pause)
         toolbar.addAction(self.action_stop)
+        toolbar.addSeparator()
+
+        toolbar.addAction(self.action_new_plot)
 
     def refresh_all(self) -> None:
         project = self.app_service.project
@@ -463,6 +472,51 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_current_frame()
         self._update_timeline_controls()
         self._update_interaction_state()
+
+    def create_plot_window(self) -> None:
+        if self.app_service.project is None:
+            self._append_message("No project loaded")
+            return
+        dataset = SensorDataset(self.app_service.project)
+        if not dataset.has_data():
+            QtWidgets.QMessageBox.information(self, "No Data", "No sensor data available. Run a simulation first.")
+            return
+        sensor_names = dataset.get_matrix_names()
+        if not sensor_names:
+            QtWidgets.QMessageBox.information(self, "No Data", "No sensor data available.")
+            return
+        dialog = QtWidgets.QDialog(self, QtCore.Qt.WindowType.Window)
+        dialog.setWindowTitle("Select Sensors to Plot")
+        dialog.resize(300, 400)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        layout.addWidget(QtWidgets.QLabel("Select sensors to load:"))
+        list_widget = QtWidgets.QListWidget()
+        for name in sensor_names:
+            list_widget.addItem(name)
+        list_widget.setSelectionMode(QtWidgets.QListWidget.SelectionMode.MultiSelection)
+        layout.addWidget(list_widget)
+        button_layout = QtWidgets.QHBoxLayout()
+        btn_ok = QtWidgets.QPushButton("OK")
+        btn_cancel = QtWidgets.QPushButton("Cancel")
+        button_layout.addWidget(btn_ok)
+        button_layout.addWidget(btn_cancel)
+        layout.addLayout(button_layout)
+        btn_ok.clicked.connect(dialog.accept)
+        btn_cancel.clicked.connect(dialog.reject)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        selected = [item.text() for item in list_widget.selectedItems()]
+        if not selected:
+            return
+        plot_window = QtWidgets.QMainWindow()
+        plot_window.setWindowTitle(f"QUINO Plot - {', '.join(selected[:2])}{'...' if len(selected) > 2 else ''}")
+        plot_window.resize(1200, 600)
+        plot_widget = SensorPlotWidget(dataset, plot_window)
+        plot_window.setCentralWidget(plot_widget)
+        for sensor_name in selected:
+            plot_widget.load_sensor(sensor_name)
+        plot_window.show()
+        self._append_message(f"Created plot with {len(selected)} sensor(s)")
 
     def delete_selected_entity(self) -> None:
         if not self._editing_allowed():

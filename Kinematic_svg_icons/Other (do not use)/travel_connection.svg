@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+<title id="title">Travel Connection</title>
+<style>
+  .s { fill: none; stroke: #253246; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .sf { fill: white; stroke: #253246; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .a { fill: none; stroke: #2DA34A; stroke-width: 3.8; stroke-linecap: round; stroke-linejoin: round; }
+  .af { fill: #2DA34A; stroke: #253246; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .ag { fill: #2DA34A; stroke: #253246; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+  .thin { stroke-width: 2.2; }
+  .arrow { marker-end: url(#arrowhead); }
+</style>
+<defs>
+  <marker id="arrowhead" markerUnits="userSpaceOnUse" viewBox="0 0 10 10" refX="8.9" refY="5" markerWidth="9" markerHeight="9" orient="auto">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#2DA34A" stroke="#253246" stroke-width="1.1" stroke-linejoin="round"/>
+  </marker>
+</defs>
+<rect class="sf" x="24" y="10" width="20" height="14" rx="2"/>
+<rect class="sf" x="20" y="40" width="20" height="14" rx="2"/>
+<path class="s" d="M10 17 H24 M44 17 H54"/>
+<path class="s" d="M10 47 H20 M40 47 H54"/>
+<path class="s" d="M34 24 L30 40"/>
+<circle class="af" cx="34" cy="17" r="2.8"/>
+<circle class="af" cx="30" cy="47" r="2.8"/>
+<path class="a arrow" d="M55 17 H61"/>
+<path class="a arrow" d="M9 47 H3"/>
+</svg>

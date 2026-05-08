@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+<title id="title">Belt Transmission</title>
+<style>
+  .s { fill: none; stroke: #253246; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .sf { fill: white; stroke: #253246; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .a { fill: none; stroke: #2DA34A; stroke-width: 3.8; stroke-linecap: round; stroke-linejoin: round; }
+  .af { fill: #2DA34A; stroke: #253246; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .ag { fill: #2DA34A; stroke: #253246; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+  .thin { stroke-width: 2.2; }
+  .arrow { marker-end: url(#arrowhead); }
+</style>
+<defs>
+  <marker id="arrowhead" markerUnits="userSpaceOnUse" viewBox="0 0 10 10" refX="8.9" refY="5" markerWidth="9" markerHeight="9" orient="auto">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#2DA34A" stroke="#253246" stroke-width="1.1" stroke-linejoin="round"/>
+  </marker>
+</defs>
+<path class="s" d="M23 45 L41 15"/>
+<path class="s" d="M14 39 L34 9"/>
+<circle class="sf" cx="18" cy="42" r="9"/>
+<circle class="sf" cx="46" cy="17" r="9"/>
+<circle class="af" cx="18" cy="42" r="3"/>
+<circle class="af" cx="46" cy="17" r="3"/>
+<path class="a arrow" d="M48 9 C54 11, 58 16, 58 22"/>
+</svg>

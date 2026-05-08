@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+<title id="title">Rack-and-Pinion</title>
+<style>
+  .s { fill: none; stroke: #253246; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .sf { fill: white; stroke: #253246; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .a { fill: none; stroke: #2DA34A; stroke-width: 3.8; stroke-linecap: round; stroke-linejoin: round; }
+  .af { fill: #2DA34A; stroke: #253246; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .ag { fill: #2DA34A; stroke: #253246; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+  .thin { stroke-width: 2.2; }
+  .arrow { marker-end: url(#arrowhead); }
+</style>
+<defs>
+  <marker id="arrowhead" markerUnits="userSpaceOnUse" viewBox="0 0 10 10" refX="8.9" refY="5" markerWidth="9" markerHeight="9" orient="auto">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#2DA34A" stroke="#253246" stroke-width="1.1" stroke-linejoin="round"/>
+  </marker>
+</defs>
+<path class="sf" d="M 32.00 9.00 L 34.85 13.37 L 39.50 11.01 L 39.78 16.22 L 44.99 16.50 L 42.63 21.15 L 47.00 24.00 L 42.63 26.85 L 44.99 31.50 L 39.78 31.78 L 39.50 36.99 L 34.85 34.63 L 32.00 39.00 L 29.15 34.63 L 24.50 36.99 L 24.22 31.78 L 19.01 31.50 L 21.37 26.85 L 17.00 24.00 L 21.37 21.15 L 19.01 16.50 L 24.22 16.22 L 24.50 11.01 L 29.15 13.37 Z"/>
+<circle class="af" cx="32" cy="24" r="3.5"/>
+<path class="s" d="M12 48 H52"/>
+<path class="s thin" d="M14 48 l4 -6 l4 6 l4 -6 l4 6 l4 -6 l4 6 l4 -6 l4 6 l4 -6 l4 6"/>
+</svg>

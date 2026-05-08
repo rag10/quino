@@ -32,6 +32,19 @@ def test_main_window_loads_examples_and_runs_validation() -> None:
     qt_app.processEvents()
 
 
+def test_playback_controls_are_disabled_without_simulation() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.refresh_all()
+
+    assert not window.action_play_pause.isEnabled()
+    assert not window.action_stop.isEnabled()
+    assert not window.timeline_slider.isEnabled()
+
+    window.close()
+    qt_app.processEvents()
+
+
 def test_main_window_can_load_slider_crank_example_and_run_timeline() -> None:
     qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = MainWindow(ApplicationService())
@@ -58,6 +71,61 @@ def test_main_window_can_load_slider_crank_example_and_run_timeline() -> None:
         assert "Playback frame" in window.statusBar().currentMessage() and "(read-only)" in window.statusBar().currentMessage()
 
     assert not window.canvas.grab().isNull()
+    window.close()
+    qt_app.processEvents()
+
+
+def test_editing_after_simulation_discards_simulation_when_confirmed(monkeypatch) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.load_four_bar_example()
+    window.run_simulation()
+    qt_app.processEvents()
+
+    assert window._last_simulation_result is not None
+    assert window._last_simulation_result.frames
+    assert window.action_play_pause.isEnabled()
+
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "warning",
+        staticmethod(lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Ok),
+    )
+    marker_id = window.app_service.project.model.bodies[0].structural_markers()[0].id
+
+    window._apply_property_update(marker_id, "x", "5 mm", "expression")
+    qt_app.processEvents()
+
+    assert window._last_simulation_result is None
+    assert not window.action_play_pause.isEnabled()
+    assert not window.action_stop.isEnabled()
+    assert "Simulation discarded because the model was edited" in window.messages.toPlainText()
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_editing_after_simulation_can_be_cancelled(monkeypatch) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.load_four_bar_example()
+    window.run_simulation()
+    qt_app.processEvents()
+
+    marker = window.app_service.project.model.bodies[0].structural_markers()[0]
+    original_expression = marker.x.expression
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "warning",
+        staticmethod(lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Cancel),
+    )
+
+    window._apply_property_update(marker.id, "x", "5 mm", "expression")
+    qt_app.processEvents()
+
+    assert window._last_simulation_result is not None
+    assert marker.x.expression == original_expression
+
     window.close()
     qt_app.processEvents()
 
