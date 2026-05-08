@@ -54,6 +54,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas = MechanismCanvas(self.app_service)
         self.canvas.entitySelected.connect(self._select_entity_by_id)
         self.canvas.modelChanged.connect(self._on_canvas_model_changed)
+        self.canvas.modeChanged.connect(self._on_canvas_mode_changed)
         self.action_fit_view.triggered.connect(self.canvas.fit_view)
         center_panel.addWidget(self.canvas)
 
@@ -625,6 +626,22 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_canvas_model_changed(self, message: str) -> None:
         self._append_message(message)
         self.refresh_all()
+
+    def _on_canvas_mode_changed(self, mode: str) -> None:
+        action_for_mode = {
+            CanvasMode.SELECT: self.action_select_tool,
+            CanvasMode.CREATE_BAR: self.action_bar_tool,
+            CanvasMode.CREATE_BODY: self.action_body_tool,
+            CanvasMode.ADD_MARKER: self.action_add_marker_tool,
+            CanvasMode.CREATE_REVOLUTE: self.action_joint_tool,
+            CanvasMode.CREATE_RIGID: self.action_rigid_joint_tool,
+            CanvasMode.CREATE_SLIDER: self.action_slider_tool,
+            CanvasMode.CONNECT_GROUND: self.action_ground_tool,
+            CanvasMode.CONNECT_SLIDER: self.action_slider_connect_tool,
+        }.get(mode)
+        if action_for_mode and action_for_mode in self.tool_group.actions():
+            action_for_mode.setChecked(True)
+        self._update_status_message()
 
     def _set_canvas_mode(self, mode: str) -> None:
         if mode != CanvasMode.SELECT and not self._editing_allowed():

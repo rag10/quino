@@ -51,6 +51,7 @@ class CanvasMode:
 class MechanismCanvas(QtWidgets.QWidget):
     entitySelected = QtCore.Signal(str)
     modelChanged = QtCore.Signal(str)
+    modeChanged = QtCore.Signal(str)
 
     def __init__(self, app_service: ApplicationService, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -97,6 +98,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._drag_preview = None
         self._dragging_slider = None
         self._dragging_slider_preview = None
+        self.modeChanged.emit(mode)
         self.update()
 
     def fit_view(self) -> None:
