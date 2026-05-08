@@ -29,3 +29,15 @@ Vamos a añadir sensores al software. Los sensores nos van a ayudar a medir por 
 - Sensor puntual: en un marker, qeu va a registrar posiciónes, velocidades y aceleraciones x,y y absoluta.
 - Sensor de distancia: entre dos markers, va a registrar la distancia entre ellos, así como la velocidad y aceleración relativa.
 Sensor de ángulo: va a registrar el ángulo enter dos pares de markers, así como la velocidad angular y aceleración angular.
+
+Esas señales se podrán utilizar a continuación para ser ploteadas en un viewer, pero para esto, espera a que te de detalles.
+
+Vamso a crear un plan de implementación y vamos a hacerlo despacio, quiero ser yo quien guie las decisiones, dame respuestas cortas y hazme preguntas, propón ideas, pero no las ejecutes hasta que nos las consesues conmigo. No quiero respuestas largas, la forma de trabajar tiene que ser como si estuvieramos teniendo una conversación.
+
+------------------------------------------------
+
+Con respecto al viewer, quiero que sea una pieza separada para que no solo se pueda usar con la app GUI si no que se pueda llamar desde un un script (sin GUI) simplemente para plotear resultados, manipularlos, etc. Tengo un proyecto antiguo para esto. Estáa muy mal ejecutado, pero la idea y las funcionalidades se pueden extraer. Quiero que lo actualicemos y lo integremos. 
+El viewer está basado en pyqtgraph, esto quiero mantenerlo, así como las utilidades de seleccionar los canales a plotear y si ponerlos en el eje x o y, mostrar el min y máximo, etc. Tracemos un plan para modificarlo de tal form que encaje de la mejor manera posible dentro de QUINO. Propón ideas, pero no las ejecutes hasta que nos las consesues conmigo.
+
+------------------------------------------------
+

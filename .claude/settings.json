@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\application\\\\service.py' -Pattern 'def create_sensor' | Select-Object -ExpandProperty LineNumber\")",
+      "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\gui\\\\canvas.py' -Pattern '_create_sensor_from_markers|app_service.create_sensor' | Select-Object -ExpandProperty LineNumber\")",
+      "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\gui\\\\main_window.py' -Pattern 'def refresh_all|def _populate_tree|modelChanged.connect' | Select-Object -ExpandProperty LineNumber\")",
+      "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\gui\\\\main_window.py' -Pattern 'def _populate_tree' | Select-Object -ExpandProperty LineNumber\")",
+      "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\application\\\\service.py' -Pattern '_push_undo_state|_snapshot' | Select-Object -ExpandProperty LineNumber | Head -5\")",
+      "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\application\\\\service.py' -Pattern 'def _push_undo_state|def _snapshot' | Select-Object -ExpandProperty LineNumber\")",
+      "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\application\\\\service.py' -Pattern '_push_undo_state' | Select-Object -ExpandProperty LineNumber\")",
+      "Bash(python -m quino.gui)",
+      "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\application\\\\service.py' -Pattern 'def create_driver' | Select-Object -ExpandProperty LineNumber\")",
+      "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\solver_adapters\\\\exudyn_adapter.py' -Pattern \\\\\"'str' object has no attribute 'value'|_record_sensor\\\\\" | Select-Object -ExpandProperty LineNumber\")",
+      "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\simulation\\\\runner.py' -Pattern 'Assembly failed|except.*:' | Select-Object -ExpandProperty LineNumber\")",
+      "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\solver_adapters\\\\exudyn_adapter.py' -Pattern 'def run|Assembly failed' | Select-Object -ExpandProperty LineNumber\")",
+      "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\solver_adapters' -Pattern \\\\\"'str' object has no attribute 'value'\\\\\" -Recurse | Select-Object -ExpandProperty LineNumber\")",
+      "Bash(PowerShell -Command \"Get-ChildItem -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\solver_adapters' -Filter '*.py' | Select-Object -ExpandProperty Name\")",
+      "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\solver_adapters\\\\exudyn_adapter.py' -Pattern 'self.assembler|Assembler' | Select-Object -ExpandProperty LineNumber\")",
+      "Bash(Find c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src -name 'assembler.py' -type f)",
+      "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\simulation\\\\assembler.py' -Pattern '.value|sensor' | Select-Object -ExpandProperty LineNumber\")",
+      "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\domain\\\\model.py' -Pattern 'class Marker' | Select-Object -ExpandProperty LineNumber\")",
+      "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\domain\\\\model.py' -Pattern 'class Sensor' | Select-Object -ExpandProperty LineNumber\")",
+      "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\serialization\\\\json_io.py' -Pattern '_sensor_from_dict|SensorType' | Select-Object -ExpandProperty LineNumber\")",
+      "Bash(git commit -m 'Fix sensor creation by correcting method calls *)",
+      "PowerShell(cd \"c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\"; python -W all test_plot_in_app.py 2>&1; echo \"exit: $LASTEXITCODE\")",
+      "PowerShell(cd \"c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\"; python test_plot_in_app.py 2>&1; echo \"exit: $LASTEXITCODE\")",
+      "PowerShell(cd \"c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\"; python test_plot_in_app.py 2>&1; echo \"EXIT: $LASTEXITCODE\")"
+    ]
+  }
+}

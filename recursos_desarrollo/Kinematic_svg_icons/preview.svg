@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="354" viewBox="0 0 900 354">
+<rect width="100%" height="100%" fill="#cbd0ee"/>
+<style>
+  .s { fill: none; stroke: #253246; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .sf { fill: white; stroke: #253246; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .a { fill: none; stroke: #2DA34A; stroke-width: 3.8; stroke-linecap: round; stroke-linejoin: round; }
+  .af { fill: #2DA34A; stroke: #253246; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .ag { fill: #2DA34A; stroke: #253246; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+  .thin { stroke-width: 2.2; }
+  .dash { stroke-dasharray: 5 5; }
+  .dotdash { stroke-dasharray: 1 7; stroke-linecap: round; }
+  .arrow { marker-end: url(#arrowhead); }
+  .txt { font-family: Arial, Helvetica, sans-serif; font-size: 19px; font-weight: 700; fill: #253246; text-anchor: middle; dominant-baseline: middle; }
+  .smalltxt { font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 700; fill: #253246; text-anchor: middle; dominant-baseline: middle; }
+</style>
+<defs>
+  <marker id="arrowhead" markerUnits="userSpaceOnUse" viewBox="0 0 10 10" refX="8.9" refY="5" markerWidth="9" markerHeight="9" orient="auto">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#2DA34A" stroke="#253246" stroke-width="1.1" stroke-linejoin="round"/>
+  </marker>
+</defs>
+<style>
+  .label { font-family: Arial, Helvetica, sans-serif; font-size: 13px; fill: #1d2539; text-anchor: middle; }
+</style>
+<g transform="translate(43 10)"><path class="s" d="M32 7 V13"/>
+<path class="s thin" d="M25 14 C25 10 39 10 39 14"/>
+<path class="sf" d="M21 20 H43 V49 C43 52 40 55 37 55 H27 C24 55 21 52 21 49 Z"/>
+<path class="s thin" d="M26 20 V15 H38 V20"/>
+<text class="txt" x="32" y="39">m</text></g>
+<text class="label" x="75.0" y="91">Center of</text>
+<text class="label" x="75.0" y="107">Gravity</text>
+<g transform="translate(193 10)"><circle class="sf" cx="32" cy="32" r="17"/>
+<circle class="af" cx="32" cy="32" r="4.5"/></g>
+<text class="label" x="225.0" y="91">Flexible Force</text>
+<g transform="translate(343 10)"><path class="a arrow" d="M17 47 L48 16"/></g>
+<text class="label" x="375.0" y="91">Force</text>
+<g transform="translate(493 10)"><path class="a arrow" d="M18 39 C14 29 20 18 31 16 C43 14 51 24 49 35"/>
+<circle class="sf" cx="32" cy="32" r="14"/>
+<path class="s" d="M17 49 L51 15"/></g>
+<text class="label" x="525.0" y="91">Torque</text>
+<g transform="translate(643 10)"><path class="a arrow" d="M31 33 L16 48"/>
+<path class="a arrow" d="M33 31 L48 16"/></g>
+<text class="label" x="675.0" y="91">Relative Force</text>
+<g transform="translate(793 10)"><path class="a arrow" d="M19 38 C16 29 21 20 31 18 C41 17 48 24 48 33"/>
+<circle class="sf" cx="32" cy="32" r="12"/>
+<circle class="af" cx="32" cy="32" r="3.8"/>
+<path class="s" d="M44 32 H57"/>
+<path class="s" d="M8 32 H20"/></g>
+<text class="label" x="825.0" y="91">Relative Torque</text>
+<g transform="translate(43 128)"><path class="sf" d="M18 45 L39 24 L47 32 L26 53 Z"/>
+<path class="s" d="M39 24 L50 13"/>
+<path class="s" d="M47 32 L58 21"/>
+<path class="s thin" d="M25 48 L43 30"/>
+<path class="a thin" d="M18 45 L13 50"/></g>
+<text class="label" x="75.0" y="209">Gas Spring</text>
+<g transform="translate(193 128)"><path class="s" d="M16 49 L20 41 L25 47 L29 39 L34 45 L38 37 L43 43 L47 35 L52 41"/>
+<path class="s thin" d="M12 53 L16 49 M52 41 L56 37"/></g>
+<text class="label" x="225.0" y="209">Pressure Spring</text>
+<g transform="translate(343 128)"><path class="s" d="M13 50 L17 42 L22 48 L26 40 L31 46 L35 38 L40 44 L44 36 L49 42"/>
+<path class="s thin" d="M8 55 L13 50 M49 42 L54 37"/>
+<circle class="sf" cx="56" cy="35" r="3.5"/></g>
+<text class="label" x="375.0" y="209">Tension Spring</text>
+<g transform="translate(493 128)"><path class="s" d="M16 10 V50"/>
+<path class="s" d="M49 15 V49"/>
+<path class="s" d="M48 31 C48 43 39 51 28 49 C17 47 13 36 18 27 C24 16 37 14 45 22 C54 31 50 43 41 47 C31 52 21 44 22 34 C23 24 35 20 42 27 C49 34 44 43 36 43 C28 44 23 36 27 30 C31 24 39 25 43 31"/></g>
+<text class="label" x="525.0" y="209">Torsion Spring</text>
+<g transform="translate(643 128)"><circle class="a dotdash" cx="32" cy="32" r="17"/>
+<circle class="sf" cx="32" cy="32" r="3.5"/></g>
+<text class="label" x="675.0" y="209">Flexible Holding</text>
+<text class="label" x="675.0" y="225">Force</text>
+<g transform="translate(793 128)"><path class="a arrow" d="M18 47 L49 16"/>
+<path class="s" d="M14 51 L23 42"/>
+<circle class="sf" cx="18" cy="47" r="2.8"/></g>
+<text class="label" x="825.0" y="209">Holding Force</text>
+<g transform="translate(43 246)"><path class="a arrow" d="M18 39 C14 29 20 18 31 16 C43 14 51 24 49 35"/>
+<circle class="sf" cx="32" cy="32" r="13"/>
+<path class="s" d="M17 49 L51 15"/>
+<path class="s thin" d="M41 41 L51 51"/></g>
+<text class="label" x="75.0" y="327">Holding Torque</text>
+<g transform="translate(193 246)"><path class="a arrow" d="M30 34 L15 49"/>
+<path class="a arrow" d="M34 30 L49 15"/>
+<path class="s" d="M11 53 L19 45"/>
+<path class="s" d="M45 19 L53 11"/></g>
+<text class="label" x="225.0" y="327">Relative Holding</text>
+<text class="label" x="225.0" y="343">Force</text>
+<g transform="translate(343 246)"><path class="a dash arrow" d="M18 39 C14 29 20 18 31 16 C43 14 51 24 49 35"/>
+<circle class="sf" cx="32" cy="32" r="12"/>
+<circle class="af" cx="32" cy="32" r="3.6"/>
+<path class="s" d="M44 32 H57"/>
+<path class="s" d="M8 32 H20"/>
+<path class="s thin" d="M21 45 L14 52"/></g>
+<text class="label" x="375.0" y="327">Relative Holding</text>
+<text class="label" x="375.0" y="343">Torque</text>
+<g transform="translate(493 246)"><path class="s" d="M9 28 H55"/>
+<path class="a arrow" d="M18 20 H10"/>
+<rect class="sf" x="23" y="18" width="20" height="20" rx="2"/>
+<circle class="af" cx="33" cy="28" r="3.8"/>
+<path class="a arrow" d="M48 20 H56"/>
+<path class="s thin" d="M33 38 V47"/>
+<text class="smalltxt" x="33" y="54">μ</text></g>
+<text class="label" x="525.0" y="327">Slider Friction</text>
+<g transform="translate(643 246)"><circle class="sf" cx="24" cy="32" r="6"/>
+<circle class="af" cx="24" cy="32" r="2.8"/>
+<path class="s" d="M24 32 L48 18"/>
+<path class="s thin" d="M48 18 H56"/>
+<path class="a arrow" d="M15 38 C19 48 35 50 43 41"/>
+<text class="smalltxt" x="39" y="55">μ</text></g>
+<text class="label" x="675.0" y="327">Joint Friction</text>
+<g transform="translate(793 246)"><circle class="sf" cx="24" cy="29" r="11"/>
+<circle class="sf" cx="42" cy="29" r="11"/>
+<path class="a arrow" d="M16 23 C20 15 31 14 36 21"/>
+<path class="a arrow" d="M50 35 C46 43 35 44 30 37"/>
+<path class="s thin" d="M24 18 V40 M42 18 V40"/>
+<text class="smalltxt" x="34" y="54">η</text></g>
+<text class="label" x="825.0" y="327">Gear Friction</text>
+</svg>

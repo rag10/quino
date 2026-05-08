@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+<title id="title">Relative Holding Force</title>
+<style>
+  .s { fill: none; stroke: #253246; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .sf { fill: white; stroke: #253246; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .a { fill: none; stroke: #2DA34A; stroke-width: 3.8; stroke-linecap: round; stroke-linejoin: round; }
+  .af { fill: #2DA34A; stroke: #253246; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .ag { fill: #2DA34A; stroke: #253246; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+  .thin { stroke-width: 2.2; }
+  .dash { stroke-dasharray: 5 5; }
+  .dotdash { stroke-dasharray: 1 7; stroke-linecap: round; }
+  .arrow { marker-end: url(#arrowhead); }
+  .txt { font-family: Arial, Helvetica, sans-serif; font-size: 19px; font-weight: 700; fill: #253246; text-anchor: middle; dominant-baseline: middle; }
+  .smalltxt { font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 700; fill: #253246; text-anchor: middle; dominant-baseline: middle; }
+</style>
+<defs>
+  <marker id="arrowhead" markerUnits="userSpaceOnUse" viewBox="0 0 10 10" refX="8.9" refY="5" markerWidth="9" markerHeight="9" orient="auto">
+    <path d="M0 0 L10 5 L0 10 Z" fill="#2DA34A" stroke="#253246" stroke-width="1.1" stroke-linejoin="round"/>
+  </marker>
+</defs>
+<path class="a arrow" d="M30 34 L15 49"/>
+<path class="a arrow" d="M34 30 L49 15"/>
+<path class="s" d="M11 53 L19 45"/>
+<path class="s" d="M45 19 L53 11"/>
+</svg>
