@@ -557,6 +557,7 @@ class ApplicationService:
             validation_messages.append(
                 "Preflight detected unreachable kinematics; attempting solver for partial trajectory"
             )
+        project.sensor_outputs.clear()
         result = self.simulation_runner.run(project, duration=duration, steps=steps)
         result.warnings = [*validation_messages, *result.warnings]
         result.messages = [*validation_messages, *result.messages]

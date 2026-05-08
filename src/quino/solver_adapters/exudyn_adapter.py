@@ -590,8 +590,21 @@ class ExudynAdapter(SolverAdapter):
             elif sensor.type.value == "angle_vector":
                 self._record_angle_vector_sensor(output, sensor, assembled, frames)
             if output.columns and output.data:
-                project.__dict__["_sensor_outputs"] = getattr(project, "_sensor_outputs", {})
-                project._sensor_outputs[sensor.id] = output
+                project.sensor_outputs[sensor.id] = output
+
+    def _marker_global_pos(
+        self, assembled: AssembledMechanism, body_id: str, marker_id: str, frame: dict[str, float]
+    ) -> tuple[float, float]:
+        body = assembled.bodies[body_id]
+        assembled_marker = body.markers[marker_id]
+        bx = frame.get(f"{body_id}.x", 0.0)
+        by = frame.get(f"{body_id}.y", 0.0)
+        ba = frame.get(f"{body_id}.angle", body.angle)
+        cos_a = math.cos(ba)
+        sin_a = math.sin(ba)
+        lx = assembled_marker.local_x
+        ly = assembled_marker.local_y
+        return bx + cos_a * lx - sin_a * ly, by + sin_a * lx + cos_a * ly
 
     def _record_point_sensor(
         self, output: SensorOutput, sensor, assembled: AssembledMechanism, frames: list[dict[str, float]]
@@ -603,40 +616,26 @@ class ExudynAdapter(SolverAdapter):
         if not body_id:
             return
         output.columns = ["x [mm]", "y [mm]", "vx [mm/s]", "vy [mm/s]", "v [mm/s]", "ax [mm/s²]", "ay [mm/s²]", "a [mm/s²]"]
-        marker = next((m for b in assembled.bodies.values() for m in b.markers if m.id == marker_id), None)
-        if not marker:
-            return
-        for i, frame in enumerate(frames):
-            x = frame.get(f"{body_id}.x", 0.0)
-            y = frame.get(f"{body_id}.y", 0.0)
-            vx = 0.0
-            vy = 0.0
-            if i > 0 and len(output.time) > 1:
+        positions: list[tuple[float, float]] = []
+        for frame in frames:
+            positions.append(self._marker_global_pos(assembled, body_id, marker_id, frame))
+        for i, (x, y) in enumerate(positions):
+            vx = vy = 0.0
+            if i > 0:
                 dt = output.time[i] - output.time[i - 1]
-                prev_frame = frames[i - 1]
-                prev_x = prev_frame.get(f"{body_id}.x", 0.0)
-                prev_y = prev_frame.get(f"{body_id}.y", 0.0)
-                vx = (x - prev_x) / dt if dt > 0 else 0.0
-                vy = (y - prev_y) / dt if dt > 0 else 0.0
+                if dt > 0:
+                    vx = (x - positions[i - 1][0]) / dt
+                    vy = (y - positions[i - 1][1]) / dt
             v = math.sqrt(vx**2 + vy**2)
-            ax = 0.0
-            ay = 0.0
-            if i > 0 and len(output.time) > 1:
+            ax = ay = 0.0
+            if i > 1:
                 dt = output.time[i] - output.time[i - 1]
-                prev_vx = 0.0
-                prev_vy = 0.0
-                if i > 1:
-                    prev_frame = frames[i - 1]
-                    prev_prev_frame = frames[i - 2]
-                    prev_x = prev_frame.get(f"{body_id}.x", 0.0)
-                    prev_y = prev_frame.get(f"{body_id}.y", 0.0)
-                    prev_prev_x = prev_prev_frame.get(f"{body_id}.x", 0.0)
-                    prev_prev_y = prev_prev_frame.get(f"{body_id}.y", 0.0)
-                    dt_prev = output.time[i - 1] - output.time[i - 2] if i > 1 else dt
-                    prev_vx = (prev_x - prev_prev_x) / dt_prev if dt_prev > 0 else 0.0
-                    prev_vy = (prev_y - prev_prev_y) / dt_prev if dt_prev > 0 else 0.0
-                    ax = (vx - prev_vx) / dt if dt > 0 else 0.0
-                    ay = (vy - prev_vy) / dt if dt > 0 else 0.0
+                dt_prev = output.time[i - 1] - output.time[i - 2]
+                if dt > 0 and dt_prev > 0:
+                    prev_vx = (positions[i - 1][0] - positions[i - 2][0]) / dt_prev
+                    prev_vy = (positions[i - 1][1] - positions[i - 2][1]) / dt_prev
+                    ax = (vx - prev_vx) / dt
+                    ay = (vy - prev_vy) / dt
             a = math.sqrt(ax**2 + ay**2)
             output.data.append([x, y, vx, vy, v, ax, ay, a])
 
@@ -651,20 +650,24 @@ class ExudynAdapter(SolverAdapter):
         if not body_id_a or not body_id_b:
             return
         output.columns = ["distance [mm]", "velocity [mm/s]", "acceleration [mm/s²]"]
-        prev_distance = None
-        for i, frame in enumerate(frames):
-            xa = frame.get(f"{body_id_a}.x", 0.0)
-            ya = frame.get(f"{body_id_a}.y", 0.0)
-            xb = frame.get(f"{body_id_b}.x", 0.0)
-            yb = frame.get(f"{body_id_b}.y", 0.0)
-            distance = math.sqrt((xb - xa) ** 2 + (yb - ya) ** 2)
+        distances: list[float] = []
+        for frame in frames:
+            xa, ya = self._marker_global_pos(assembled, body_id_a, marker_id_a, frame)
+            xb, yb = self._marker_global_pos(assembled, body_id_b, marker_id_b, frame)
+            distances.append(math.sqrt((xb - xa) ** 2 + (yb - ya) ** 2))
+        for i, distance in enumerate(distances):
             velocity = 0.0
-            if i > 0 and len(output.time) > 1 and prev_distance is not None:
+            if i > 0:
                 dt = output.time[i] - output.time[i - 1]
-                velocity = (distance - prev_distance) / dt if dt > 0 else 0.0
+                velocity = (distance - distances[i - 1]) / dt if dt > 0 else 0.0
             acceleration = 0.0
+            if i > 1:
+                dt = output.time[i] - output.time[i - 1]
+                dt_prev = output.time[i - 1] - output.time[i - 2]
+                if dt > 0 and dt_prev > 0:
+                    prev_vel = (distances[i - 1] - distances[i - 2]) / dt_prev
+                    acceleration = (velocity - prev_vel) / dt
             output.data.append([distance, velocity, acceleration])
-            prev_distance = distance
 
     def _record_angle_sensor(
         self, output: SensorOutput, sensor, assembled: AssembledMechanism, frames: list[dict[str, float]]
@@ -678,31 +681,37 @@ class ExudynAdapter(SolverAdapter):
         if not body_id_a or not body_id_b:
             return
         output.columns = ["angle [deg]", "angular_velocity [deg/s]", "angular_acceleration [deg/s²]"]
-        prev_angle = None
-        for i, frame in enumerate(frames):
-            xa = frame.get(f"{body_id_a}.x", 0.0)
-            ya = frame.get(f"{body_id_a}.y", 0.0)
-            xb = frame.get(f"{body_id_b}.x", 0.0)
-            yb = frame.get(f"{body_id_b}.y", 0.0)
-            dx = xb - xa
-            dy = yb - ya
-            if reference_axis == "horizontal":
-                angle_rad = math.atan2(dy, dx)
-            else:
-                angle_rad = math.atan2(dx, dy)
-            angle_deg = math.degrees(angle_rad)
+        angles: list[float] = []
+        for frame in frames:
+            xa, ya = self._marker_global_pos(assembled, body_id_a, marker_id_a, frame)
+            xb, yb = self._marker_global_pos(assembled, body_id_b, marker_id_b, frame)
+            dx, dy = xb - xa, yb - ya
+            angle_rad = math.atan2(dy, dx) if reference_axis == "horizontal" else math.atan2(dx, dy)
+            angles.append(math.degrees(angle_rad))
+        for i, angle_deg in enumerate(angles):
             angular_velocity = 0.0
-            if i > 0 and len(output.time) > 1 and prev_angle is not None:
+            if i > 0:
                 dt = output.time[i] - output.time[i - 1]
-                angle_diff = angle_deg - prev_angle
-                if angle_diff > 180:
-                    angle_diff -= 360
-                elif angle_diff < -180:
-                    angle_diff += 360
-                angular_velocity = angle_diff / dt if dt > 0 else 0.0
+                if dt > 0:
+                    angle_diff = angle_deg - angles[i - 1]
+                    if angle_diff > 180:
+                        angle_diff -= 360
+                    elif angle_diff < -180:
+                        angle_diff += 360
+                    angular_velocity = angle_diff / dt
             angular_acceleration = 0.0
+            if i > 1:
+                dt = output.time[i] - output.time[i - 1]
+                dt_prev = output.time[i - 1] - output.time[i - 2]
+                if dt > 0 and dt_prev > 0:
+                    diff_prev = angles[i - 1] - angles[i - 2]
+                    if diff_prev > 180:
+                        diff_prev -= 360
+                    elif diff_prev < -180:
+                        diff_prev += 360
+                    prev_vel = diff_prev / dt_prev
+                    angular_acceleration = (angular_velocity - prev_vel) / dt
             output.data.append([angle_deg, angular_velocity, angular_acceleration])
-            prev_angle = angle_deg
 
     def _record_angle_vector_sensor(
         self, output: SensorOutput, sensor, assembled: AssembledMechanism, frames: list[dict[str, float]]
@@ -717,44 +726,48 @@ class ExudynAdapter(SolverAdapter):
         if not all([body_a, body_b, body_c, body_d]):
             return
         output.columns = ["angle [deg]", "angular_velocity [deg/s]", "angular_acceleration [deg/s²]"]
-        prev_angle = None
-        for i, frame in enumerate(frames):
-            xa = frame.get(f"{body_a}.x", 0.0)
-            ya = frame.get(f"{body_a}.y", 0.0)
-            xb = frame.get(f"{body_b}.x", 0.0)
-            yb = frame.get(f"{body_b}.y", 0.0)
-            xc = frame.get(f"{body_c}.x", 0.0)
-            yc = frame.get(f"{body_c}.y", 0.0)
-            xd = frame.get(f"{body_d}.x", 0.0)
-            yd = frame.get(f"{body_d}.y", 0.0)
-            vec1_x = xb - xa
-            vec1_y = yb - ya
-            vec2_x = xd - xc
-            vec2_y = yd - yc
-            angle1 = math.atan2(vec1_y, vec1_x)
-            angle2 = math.atan2(vec2_y, vec2_x)
+        angles: list[float] = []
+        for frame in frames:
+            xa, ya = self._marker_global_pos(assembled, body_a, m_a_id, frame)
+            xb, yb = self._marker_global_pos(assembled, body_b, m_b_id, frame)
+            xc, yc = self._marker_global_pos(assembled, body_c, m_c_id, frame)
+            xd, yd = self._marker_global_pos(assembled, body_d, m_d_id, frame)
+            angle1 = math.atan2(yb - ya, xb - xa)
+            angle2 = math.atan2(yd - yc, xd - xc)
             angle_diff_rad = angle2 - angle1
             if angle_diff_rad > math.pi:
                 angle_diff_rad -= 2 * math.pi
             elif angle_diff_rad < -math.pi:
                 angle_diff_rad += 2 * math.pi
-            angle_deg = math.degrees(angle_diff_rad)
+            angles.append(math.degrees(angle_diff_rad))
+        for i, angle_deg in enumerate(angles):
             angular_velocity = 0.0
-            if i > 0 and len(output.time) > 1 and prev_angle is not None:
+            if i > 0:
                 dt = output.time[i] - output.time[i - 1]
-                angle_diff = angle_deg - prev_angle
-                if angle_diff > 180:
-                    angle_diff -= 360
-                elif angle_diff < -180:
-                    angle_diff += 360
-                angular_velocity = angle_diff / dt if dt > 0 else 0.0
+                if dt > 0:
+                    angle_diff = angle_deg - angles[i - 1]
+                    if angle_diff > 180:
+                        angle_diff -= 360
+                    elif angle_diff < -180:
+                        angle_diff += 360
+                    angular_velocity = angle_diff / dt
             angular_acceleration = 0.0
+            if i > 1:
+                dt = output.time[i] - output.time[i - 1]
+                dt_prev = output.time[i - 1] - output.time[i - 2]
+                if dt > 0 and dt_prev > 0:
+                    diff_prev = angles[i - 1] - angles[i - 2]
+                    if diff_prev > 180:
+                        diff_prev -= 360
+                    elif diff_prev < -180:
+                        diff_prev += 360
+                    prev_vel = diff_prev / dt_prev
+                    angular_acceleration = (angular_velocity - prev_vel) / dt
             output.data.append([angle_deg, angular_velocity, angular_acceleration])
-            prev_angle = angle_deg
 
     def _find_body_id_for_marker(self, assembled: AssembledMechanism, marker_id: str) -> str | None:
         for body_id, body in assembled.bodies.items():
-            if any(m.id == marker_id for m in body.markers):
+            if marker_id in body.markers:
                 return body_id
         return None
 

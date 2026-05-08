@@ -162,6 +162,7 @@ class Project:
     parameters: list[Parameter] = field(default_factory=list)
     view_state: ViewState = field(default_factory=ViewState)
     metadata: Metadata = field(default_factory=Metadata)
+    sensor_outputs: dict[str, SensorOutput] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

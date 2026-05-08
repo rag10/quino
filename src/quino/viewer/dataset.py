@@ -13,9 +13,8 @@ class SensorDataset:
         self._load_sensor_outputs()
 
     def _load_sensor_outputs(self) -> None:
-        """Load sensor outputs from project._sensor_outputs if available."""
-        sensor_outputs = getattr(self.project, "_sensor_outputs", {})
-        for sensor_id, output in sensor_outputs.items():
+        """Load sensor outputs recorded during the last simulation run."""
+        for sensor_id, output in self.project.sensor_outputs.items():
             sensor = next((s for s in self.project.model.sensors if s.id == sensor_id), None)
             if not sensor or not output.data:
                 continue
