@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+  <!-- circular refresh arrows -->
+  <path d="M 6 16 A 10 10 0 1 1 16 26" stroke="#3d3d3d" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+  <!-- arrowhead at end of arc -->
+  <polyline points="12,26 16,26 16,22" stroke="#3d3d3d" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -15,17 +15,4 @@ def get_icon(name: str, color: str | None = None) -> QtGui.QIcon:
     pixmap = QtGui.QPixmap(str(svg_path))
     if pixmap.isNull():
         return QtGui.QIcon()
-    if color:
-        pixmap = _recolor_pixmap(pixmap, color)
     return QtGui.QIcon(pixmap)
-
-
-def _recolor_pixmap(pixmap: QtGui.QPixmap, color: str) -> QtGui.QPixmap:
-    image = pixmap.toImage()
-    qcolor = QtGui.QColor(color)
-    for y in range(image.height()):
-        for x in range(image.width()):
-            pixel = image.pixel(x, y)
-            if pixel != 0:
-                image.setPixel(x, y, qcolor.rgba())
-    return QtGui.QPixmap.fromImage(image)

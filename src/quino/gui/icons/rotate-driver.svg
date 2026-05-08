@@ -1,13 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
-  <circle cx="16" cy="16" r="11" stroke="#7f5539" stroke-width="2" fill="none"/>
-  <path d="M16 5L16 9" stroke="#7f5539" stroke-width="2" stroke-linecap="round"/>
-  <path d="M21 10L24 7" stroke="#7f5539" stroke-width="2" stroke-linecap="round"/>
-  <path d="M26 16L22 16" stroke="#7f5539" stroke-width="2" stroke-linecap="round"/>
-  <path d="M21 22L24 25" stroke="#7f5539" stroke-width="2" stroke-linecap="round"/>
-  <path d="M16 27L16 23" stroke="#7f5539" stroke-width="2" stroke-linecap="round"/>
-  <path d="M11 22L8 25" stroke="#7f5539" stroke-width="2" stroke-linecap="round"/>
-  <path d="M6 16L10 16" stroke="#7f5539" stroke-width="2" stroke-linecap="round"/>
-  <path d="M11 10L8 7" stroke="#7f5539" stroke-width="2" stroke-linecap="round"/>
-  <circle cx="16" cy="16" r="4" fill="#7f5539"/>
-  <circle cx="16" cy="16" r="1.5" fill="#faf8f2"/>
+  <!-- driver motor body (square) -->
+  <rect x="5" y="5" width="14" height="14" rx="2" stroke="#7f5539" stroke-width="2" fill="#ddd9cc"/>
+  <!-- motor winding symbol (coil lines) -->
+  <line x1="8" y1="10" x2="16" y2="10" stroke="#7f5539" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="8" y1="13" x2="16" y2="13" stroke="#7f5539" stroke-width="1.5" stroke-linecap="round"/>
+  <!-- shaft from motor to revolute -->
+  <line x1="19" y1="12" x2="22" y2="12" stroke="#7f5539" stroke-width="2" stroke-linecap="round"/>
+  <!-- revolute joint at shaft end -->
+  <circle cx="25" cy="12" r="4" stroke="#7f5539" stroke-width="2" fill="#faf8f2"/>
+  <circle cx="25" cy="12" r="1.5" fill="#7f5539"/>
+  <!-- curved rotation arrow below -->
+  <path d="M 11 22 A 6 6 0 0 0 21 26" stroke="#7f5539" stroke-width="2" stroke-linecap="round" fill="none"/>
+  <polyline points="19,23 21,26 18,27.5" stroke="#7f5539" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

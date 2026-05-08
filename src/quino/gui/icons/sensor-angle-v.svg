@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+  <!-- pivot marker at bottom -->
+  <circle cx="16" cy="25" r="3.5" stroke="#3d3d3d" stroke-width="2" fill="#faf8f2"/>
+  <circle cx="16" cy="25" r="1.5" fill="#3d3d3d"/>
+  <!-- vertical reference line -->
+  <line x1="16" y1="25" x2="16" y2="5" stroke="#3d3d3d" stroke-width="1.5" stroke-dasharray="3 2" stroke-linecap="round"/>
+  <!-- angled arm -->
+  <line x1="16" y1="25" x2="27" y2="10" stroke="#3d3d3d" stroke-width="2" stroke-linecap="round"/>
+  <!-- end marker -->
+  <circle cx="27" cy="10" r="3.5" stroke="#3d3d3d" stroke-width="2" fill="#faf8f2"/>
+  <circle cx="27" cy="10" r="1.5" fill="#3d3d3d"/>
+  <!-- angle arc -->
+  <path d="M 16 14 A 11 11 0 0 1 22 18.5" stroke="#1a6b4a" stroke-width="2" stroke-linecap="round" fill="none"/>
+  <!-- V label -->
+  <text x="5" y="13" font-size="8" font-family="monospace" fill="#1a6b4a" font-weight="bold">V</text>
+</svg>

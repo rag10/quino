@@ -200,11 +200,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_validate.triggered.connect(self.validate_model)
         self.action_validate.setToolTip("Validate model")
 
-        self.action_run = QtGui.QAction(get_icon("play", color_success), "Run", self)
+        self.action_run = QtGui.QAction(get_icon("run-simulation", color_success), "Run", self)
         self.action_run.triggered.connect(self.run_simulation)
         self.action_run.setToolTip("Run kinematic simulation")
 
-        self.action_play_pause = QtGui.QAction(get_icon("pause", color_success), "Play", self)
+        self._icon_play = get_icon("play")
+        self._icon_pause = get_icon("pause")
+        self.action_play_pause = QtGui.QAction(self._icon_play, "Play", self)
         self.action_play_pause.triggered.connect(self.toggle_playback)
         self.action_play_pause.setToolTip("Play/pause animation")
 
@@ -231,31 +233,35 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_add_translation_driver.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_TRANSLATION_DRIVER))
         self.action_add_translation_driver.setToolTip("Add a translation driver to a slider (select a slider joint on canvas)")
 
-        self.action_point_sensor = QtGui.QAction(get_icon("marker-plus", color_base), "Point Sensor", self)
+        self.action_point_sensor = QtGui.QAction(get_icon("sensor-point"), "Point", self)
         self.action_point_sensor.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_POINT_SENSOR))
         self.action_point_sensor.setToolTip("Create a point sensor (select a marker on canvas)")
 
-        self.action_distance_sensor = QtGui.QAction(get_icon("marker-plus", color_base), "Distance Sensor", self)
+        self.action_distance_sensor = QtGui.QAction(get_icon("sensor-distance"), "Distance", self)
         self.action_distance_sensor.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_DISTANCE_SENSOR))
         self.action_distance_sensor.setToolTip("Create a distance sensor (select 2 markers on canvas)")
 
-        self.action_angle_h_sensor = QtGui.QAction(get_icon("marker-plus", color_base), "Angle (H) Sensor", self)
+        self.action_angle_h_sensor = QtGui.QAction(get_icon("sensor-angle-h"), "Angle H", self)
         self.action_angle_h_sensor.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR))
         self.action_angle_h_sensor.setToolTip("Create an angle (horizontal) sensor (select 2 markers on canvas)")
 
-        self.action_angle_v_sensor = QtGui.QAction(get_icon("marker-plus", color_base), "Angle (V) Sensor", self)
+        self.action_angle_v_sensor = QtGui.QAction(get_icon("sensor-angle-v"), "Angle V", self)
         self.action_angle_v_sensor.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR))
         self.action_angle_v_sensor.setToolTip("Create an angle (vertical) sensor (select 2 markers on canvas)")
 
-        self.action_angle_vector_sensor = QtGui.QAction(get_icon("marker-plus", color_base), "Angle (Vector) Sensor", self)
+        self.action_angle_vector_sensor = QtGui.QAction(get_icon("sensor-angle-vec"), "Angle Vec", self)
         self.action_angle_vector_sensor.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_ANGLE_VECTOR_SENSOR))
         self.action_angle_vector_sensor.setToolTip("Create an angle (vector) sensor (select 4 markers on canvas)")
 
-        self.action_new_plot = QtGui.QAction("New Plot", self)
+        self.action_new_plot = QtGui.QAction(get_icon("new-graph"), "New Graph", self)
         self.action_new_plot.triggered.connect(self.create_plot_window)
         self.action_new_plot.setToolTip("Create a new plot from sensor data")
 
-        self.action_show_trajectories = QtGui.QAction(get_icon("fit-view", color_base), "Trajectories", self)
+        self.action_refresh = QtGui.QAction(get_icon("refresh"), "Refresh", self)
+        self.action_refresh.triggered.connect(self.refresh_all)
+        self.action_refresh.setToolTip("Force a full UI refresh (use if display seems out of sync)")
+
+        self.action_show_trajectories = QtGui.QAction(get_icon("trajectories"), "Trajectories", self)
         self.action_show_trajectories.setCheckable(True)
         self.action_show_trajectories.setChecked(True)
         self.action_show_trajectories.setEnabled(False)
@@ -332,55 +338,87 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _build_toolbar(self) -> None:
         toolbar = self.addToolBar("Modeling")
-        toolbar.setIconSize(QtCore.QSize(24, 24))
+        toolbar.setIconSize(QtCore.QSize(28, 28))
+        toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        toolbar.setMovable(False)
 
-        toolbar.addAction(self.action_new)
-        toolbar.addAction(self.action_open)
-        toolbar.addAction(self.action_save)
-        toolbar.addSeparator()
+        def _block(actions_grid: list[list[QtGui.QAction | None]], label: str) -> None:
+            """Add a labeled block widget with a grid of tool buttons."""
+            container = QtWidgets.QWidget()
+            outer = QtWidgets.QVBoxLayout(container)
+            outer.setContentsMargins(2, 2, 2, 0)
+            outer.setSpacing(0)
 
-        toolbar.addAction(self.action_undo)
-        toolbar.addAction(self.action_redo)
-        toolbar.addSeparator()
+            grid_widget = QtWidgets.QWidget()
+            grid = QtWidgets.QGridLayout(grid_widget)
+            grid.setContentsMargins(0, 0, 0, 0)
+            grid.setSpacing(1)
 
-        toolbar.addAction(self.action_select_tool)
-        toolbar.addAction(self.action_fit_view)
-        toolbar.addSeparator()
+            for row_idx, row in enumerate(actions_grid):
+                for col_idx, action in enumerate(row):
+                    if action is None:
+                        grid.addWidget(QtWidgets.QWidget(), row_idx, col_idx)
+                        continue
+                    btn = QtWidgets.QToolButton()
+                    btn.setDefaultAction(action)
+                    btn.setIconSize(QtCore.QSize(28, 28))
+                    btn.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+                    btn.setFixedSize(52, 52)
+                    font = btn.font()
+                    font.setPointSize(7)
+                    btn.setFont(font)
+                    grid.addWidget(btn, row_idx, col_idx)
 
-        toolbar.addAction(self.action_bar_tool)
-        toolbar.addAction(self.action_body_tool)
-        toolbar.addAction(self.action_add_marker_tool)
-        toolbar.addSeparator()
+            outer.addWidget(grid_widget)
 
-        toolbar.addAction(self.action_joint_tool)
-        toolbar.addAction(self.action_rigid_joint_tool)
-        toolbar.addAction(self.action_slider_tool)
-        toolbar.addAction(self.action_ground_tool)
-        toolbar.addAction(self.action_slider_connect_tool)
-        toolbar.addSeparator()
+            lbl = QtWidgets.QLabel(label)
+            lbl.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
+            font = lbl.font()
+            font.setPointSize(7)
+            lbl.setFont(font)
+            lbl.setStyleSheet("color: #888; padding-bottom: 2px;")
+            outer.addWidget(lbl)
 
-        toolbar.addAction(self.action_delete)
-        toolbar.addSeparator()
+            wa = QtWidgets.QWidgetAction(toolbar)
+            wa.setDefaultWidget(container)
+            toolbar.addAction(wa)
 
-        toolbar.addAction(self.action_add_rotation_driver)
-        toolbar.addAction(self.action_add_translation_driver)
-        toolbar.addSeparator()
+        def _sep() -> None:
+            sep = QtWidgets.QFrame()
+            sep.setFrameShape(QtWidgets.QFrame.Shape.VLine)
+            sep.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
+            sep.setFixedWidth(8)
+            wa = QtWidgets.QWidgetAction(toolbar)
+            wa.setDefaultWidget(sep)
+            toolbar.addAction(wa)
 
-        toolbar.addAction(self.action_point_sensor)
-        toolbar.addAction(self.action_distance_sensor)
-        toolbar.addAction(self.action_angle_h_sensor)
-        toolbar.addAction(self.action_angle_v_sensor)
-        toolbar.addAction(self.action_angle_vector_sensor)
-        toolbar.addSeparator()
+        _block([
+            [self.action_new, self.action_open, self.action_save],
+            [self.action_undo, self.action_redo, self.action_refresh],
+        ], "File / Edit")
+        _sep()
 
-        toolbar.addAction(self.action_validate)
-        toolbar.addAction(self.action_run)
-        toolbar.addAction(self.action_play_pause)
-        toolbar.addAction(self.action_stop)
-        toolbar.addSeparator()
+        _block([
+            [self.action_select_tool, self.action_fit_view, self.action_delete],
+        ], "View")
+        _sep()
 
-        toolbar.addAction(self.action_new_plot)
-        toolbar.addAction(self.action_show_trajectories)
+        _block([
+            [self.action_bar_tool, self.action_body_tool, self.action_add_marker_tool, self.action_joint_tool, self.action_rigid_joint_tool],
+            [self.action_ground_tool, self.action_slider_tool, self.action_slider_connect_tool, self.action_add_rotation_driver, self.action_add_translation_driver],
+        ], "Geometry / Drivers")
+        _sep()
+
+        _block([
+            [self.action_point_sensor, self.action_distance_sensor, self.action_angle_h_sensor],
+            [self.action_angle_v_sensor, self.action_angle_vector_sensor, None],
+        ], "Sensors")
+        _sep()
+
+        _block([
+            [self.action_validate, self.action_run, self.action_play_pause, self.action_stop],
+            [self.action_new_plot, self.action_show_trajectories, None, None],
+        ], "Simulation / Results")
 
     def refresh_all(self) -> None:
         project = self.app_service.project
@@ -425,7 +463,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def run_simulation(self) -> None:
         self._playback_timer.stop()
-        self.action_play_pause.setText("Play")
+        self._sync_play_pause_icon()
         result = self.app_service.run_kinematic_simulation(
             duration=float(self.duration_spin.value()),
             steps=int(self.steps_spin.value()),
@@ -468,20 +506,28 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if self._playback_timer.isActive():
             self._playback_timer.stop()
-            self.action_play_pause.setText("Play")
+            self._sync_play_pause_icon()
             self._update_interaction_state()
             return
         self._playback_timer.start(40)
-        self.action_play_pause.setText("Pause")
+        self._sync_play_pause_icon()
         self._update_interaction_state()
 
     def stop_playback(self) -> None:
         self._playback_timer.stop()
-        self.action_play_pause.setText("Play")
         self._current_frame_index = 0
         self._apply_current_frame()
         self._update_timeline_controls()
+        self._sync_play_pause_icon()
         self._update_interaction_state()
+
+    def _sync_play_pause_icon(self) -> None:
+        if self._playback_timer.isActive():
+            self.action_play_pause.setIcon(self._icon_pause)
+            self.action_play_pause.setText("Pause")
+        else:
+            self.action_play_pause.setIcon(self._icon_play)
+            self.action_play_pause.setText("Play")
 
     def create_plot_window(self) -> None:
         if self.app_service.project is None:
@@ -595,7 +641,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _clear_simulation_state(self, message: str | None = None) -> None:
         self._playback_timer.stop()
-        self.action_play_pause.setText("Play")
+        self._sync_play_pause_icon()
         self._last_simulation_result = None
         self._last_simulation_state = None
         self._current_frame_index = 0
@@ -635,7 +681,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._has_simulation_frames():
             return True
         self._playback_timer.stop()
-        self.action_play_pause.setText("Play")
+        self._sync_play_pause_icon()
         answer = QtWidgets.QMessageBox.warning(
             self,
             "Discard Simulation?",

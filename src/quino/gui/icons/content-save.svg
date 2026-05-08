@@ -1,6 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
-  <path d="M6 4L6 28C6 29.1 6.9 30 8 30L24 30C25.1 30 26 29.1 26 28L26 10L12 10L12 4L6 4Z" stroke="#3d3d3d" stroke-width="2" fill="none"/>
-  <path d="M12 4L12 10L26 10" stroke="#3d3d3d" stroke-width="2" fill="none"/>
-  <rect x="10" y="16" width="12" height="10" rx="1" stroke="#3d3d3d" stroke-width="2" fill="none"/>
-  <circle cx="16" cy="21" r="2" fill="#3d3d3d"/>
+  <!-- floppy disk shape -->
+  <path d="M5 4 L24 4 L28 8 L28 28 L4 28 L4 4 Z" stroke="#3d3d3d" stroke-width="2" stroke-linejoin="round" fill="#ddd9cc"/>
+  <!-- label area top -->
+  <rect x="8" y="4" width="14" height="9" rx="0" stroke="#3d3d3d" stroke-width="1.5" fill="#faf8f2"/>
+  <!-- window slot on label -->
+  <line x1="11" y1="7" x2="11" y2="11" stroke="#3d3d3d" stroke-width="2" stroke-linecap="round"/>
+  <!-- disk read area bottom -->
+  <rect x="9" y="18" width="14" height="8" rx="1" stroke="#3d3d3d" stroke-width="1.5" fill="#faf8f2"/>
 </svg>

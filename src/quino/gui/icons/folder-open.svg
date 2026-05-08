@@ -1,4 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
-  <path d="M4 10L4 26C4 27.1 4.9 28 6 28L26 28C27.1 28 28 27.1 28 26L28 12C28 10.9 27.1 10 26 10L14 10L10 6L6 10C4.9 10 4 10.9 4 12L4 10Z" stroke="#3d3d3d" stroke-width="2" fill="none"/>
-  <line x1="2" y1="10" x2="30" y2="10" stroke="#3d3d3d" stroke-width="2"/>
+  <!-- folder back -->
+  <path d="M4 10 L4 26 C4 27.1 4.9 28 6 28 L26 28 C27.1 28 28 27.1 28 26 L28 14 C28 12.9 27.1 12 26 12 L15 12 L12 8 L6 8 C4.9 8 4 8.9 4 10 Z" stroke="#3d3d3d" stroke-width="2" stroke-linejoin="round" fill="#ddd9cc"/>
+  <!-- open flap line -->
+  <path d="M4 14 L28 14" stroke="#3d3d3d" stroke-width="1.5"/>
+  <!-- upward arrow indicating open/load -->
+  <line x1="16" y1="20" x2="16" y2="26" stroke="#3d3d3d" stroke-width="2" stroke-linecap="round"/>
+  <polyline points="12,23 16,20 20,23" stroke="#3d3d3d" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

@@ -1,5 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
-  <circle cx="16" cy="16" r="9" stroke="#3d3d3d" stroke-width="2" fill="#faf8f2"/>
-  <circle cx="16" cy="16" r="4" fill="#3d3d3d"/>
-  <circle cx="16" cy="16" r="1.5" fill="#faf8f2"/>
+  <!-- outer bearing ring -->
+  <circle cx="16" cy="16" r="11" stroke="#3d3d3d" stroke-width="2" fill="#ddd9cc"/>
+  <!-- inner race -->
+  <circle cx="16" cy="16" r="6.5" stroke="#3d3d3d" stroke-width="1.5" fill="#faf8f2"/>
+  <!-- center pin -->
+  <circle cx="16" cy="16" r="2.5" stroke="#3d3d3d" stroke-width="1.5" fill="#faf8f2"/>
+  <circle cx="16" cy="16" r="1" fill="#3d3d3d"/>
+  <!-- rotation arc arrow indicating rotation DOF -->
+  <path d="M 16 4.5 A 11.5 11.5 0 0 1 27.5 16" stroke="#3d3d3d" stroke-width="1.5" stroke-linecap="round" fill="none" stroke-dasharray="3 2"/>
 </svg>
