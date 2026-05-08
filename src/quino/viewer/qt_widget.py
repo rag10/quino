@@ -70,7 +70,7 @@ class ChannelItem(QtWidgets.QTreeWidgetItem):
     def __init__(self, parent: MatrixItem, name: str, data: np.ndarray, is_time: bool = False, color: tuple = (255, 255, 255)):
         super().__init__(parent)
         self.name = name
-        self.data = data
+        self.values = data
         self.is_time = is_time
         self.color = color
         self.curve: pg.PlotDataItem | None = None
@@ -102,8 +102,8 @@ class ChannelItem(QtWidgets.QTreeWidgetItem):
         self.setBackground(2, QtGui.QColor(*self.color))
 
         self.setText(3, self.name)
-        self.setText(4, f"{np.min(self.data):.6g}")
-        self.setText(5, f"{np.max(self.data):.6g}")
+        self.setText(4, f"{np.min(self.values):.6g}")
+        self.setText(5, f"{np.max(self.values):.6g}")
 
         self.spin_shift = QtWidgets.QDoubleSpinBox()
         self.spin_shift.setDecimals(6)
@@ -130,7 +130,7 @@ class ChannelItem(QtWidgets.QTreeWidgetItem):
 
     def data_to_plot(self) -> np.ndarray:
         """Get transformed data."""
-        return self.transform.apply(self.data)
+        return self.transform.apply(self.values)
 
     def update_plot(self, x: np.ndarray) -> None:
         """Update curve with transformed data."""
@@ -139,7 +139,7 @@ class ChannelItem(QtWidgets.QTreeWidgetItem):
         self.transform.set_shift(self.spin_shift.value())
         if not self.is_time:
             self.transform.set_multiplier(self.spin_mult.value())
-        data_min, data_max = np.min(self.data), np.max(self.data)
+        data_min, data_max = np.min(self.values), np.max(self.values)
         self.spin_shift.setDecimals(6)
         self.spin_shift.setRange(
             -abs(data_min) - abs(100 * (data_max - data_min)),
@@ -232,8 +232,8 @@ class SensorPlotWidget(QtWidgets.QWidget):
             if not is_time:
                 channel.spin_mult.valueChanged.connect(partial(self._on_channel_plot, channel))
 
-        self.tree.expandAll()
-        self._update_all_plots()
+        matrix.setExpanded(True)
+        QtCore.QTimer.singleShot(0, self._update_all_plots)
 
     def _on_selection_changed(self) -> None:
         """Handle tree selection change."""

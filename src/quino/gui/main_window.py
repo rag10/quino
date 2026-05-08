@@ -514,9 +514,9 @@ class MainWindow(QtWidgets.QMainWindow):
         plot_window.resize(1200, 600)
         plot_widget = SensorPlotWidget(dataset, plot_window)
         plot_window.setCentralWidget(plot_widget)
+        plot_window.show()
         for sensor_name in selected:
             plot_widget.load_sensor(sensor_name)
-        plot_window.show()
         self._plot_windows.append(plot_window)
         self._append_message(f"Created plot with {len(selected)} sensor(s)")
 

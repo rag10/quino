@@ -32,11 +32,14 @@ class SensorDataset:
         return list(self._matrices.keys())
 
     def get_matrix(self, name: str) -> tuple[np.ndarray, list[str]] | None:
-        """Get matrix data and headers by sensor name."""
+        """Get matrix data and headers by sensor name. First column is always time."""
         if name not in self._matrices:
             return None
         matrix = self._matrices[name]
-        return matrix["data"], matrix["columns"]
+        time_col = matrix["time"].reshape(-1, 1)
+        data = np.hstack([time_col, matrix["data"]])
+        headers = ["time [s]"] + list(matrix["columns"])
+        return data, headers
 
     def get_sensor_metadata(self, name: str) -> dict | None:
         """Get sensor metadata (type, marker_ids, etc)."""
