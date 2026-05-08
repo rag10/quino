@@ -1563,7 +1563,7 @@ class ApplicationService:
     def create_sensor(self, name: str, sensor_type: str, marker_ids: list[str]) -> str:
         if self.project is None:
             raise ValueError("No project loaded")
-        sensor_id = self.id_service.next_id("sensor")
+        sensor_id = self.id_service.new("sensor")
         sensor = Sensor(
             id=sensor_id,
             name=name,
@@ -1571,20 +1571,20 @@ class ApplicationService:
             marker_ids=marker_ids,
             metadata=Metadata(),
         )
+        self._snapshot()
         self.project.model.sensors.append(sensor)
-        self._push_undo_state()
         return sensor_id
 
     def delete_sensor(self, sensor_id: str) -> None:
         if self.project is None:
             raise ValueError("No project loaded")
+        self._snapshot()
         self.project.model.sensors = [s for s in self.project.model.sensors if s.id != sensor_id]
-        self._push_undo_state()
 
     def rename_sensor(self, sensor_id: str, name: str) -> None:
         if self.project is None:
             raise ValueError("No project loaded")
         sensor = next((s for s in self.project.model.sensors if s.id == sensor_id), None)
         if sensor is not None:
+            self._snapshot()
             sensor.name = name
-            self._push_undo_state()
