@@ -42,3 +42,11 @@ class Dimension(StrEnum):
 class DriverType(StrEnum):
     ROTATION = "rotation"
     TRANSLATION = "translation"
+
+
+class SensorType(StrEnum):
+    POINT = "point"
+    DISTANCE = "distance"
+    ANGLE_HORIZONTAL = "angle_horizontal"
+    ANGLE_VERTICAL = "angle_vertical"
+    ANGLE_VECTOR = "angle_vector"

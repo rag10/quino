@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6 import QtCore, QtTest, QtWidgets
 
 from quino.application.service import ApplicationService
-from quino.domain.inputs import MarkerInput
+from quino.domain.inputs import MarkerInput, SliderInput
 from quino.gui.main_window import MainWindow
 
 
@@ -96,6 +96,79 @@ def test_canvas_can_create_bar_body_and_slider_from_tools() -> None:
     qt_app.processEvents()
 
 
+def test_create_bar_can_start_from_existing_marker_with_named_joint(monkeypatch) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_body("Base", [MarkerInput("0 mm", "0 mm", "A")])
+    existing_marker = next(marker.id for marker in window.app_service._find_body(body_id).structural_markers())
+    window.refresh_all()
+    monkeypatch.setattr(window.canvas, "_request_creation_marker_joint", lambda clicked_marker: ("JointFromStart", "revolute"))
+
+    window.action_bar_tool.trigger()
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=window.canvas.screen_position_for_entity(existing_marker))
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=window.canvas.screen_position_for_world(80.0, 0.0))
+    qt_app.processEvents()
+
+    assert len(window.app_service.project.model.bodies) == 2
+    assert any(joint.name == "JointFromStart" for joint in window.app_service.project.model.joints)
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_create_bar_can_end_on_existing_marker_with_named_joint(monkeypatch) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_body("Base", [MarkerInput("100 mm", "0 mm", "A")])
+    existing_marker = next(marker.id for marker in window.app_service._find_body(body_id).structural_markers())
+    window.refresh_all()
+    monkeypatch.setattr(window.canvas, "_request_creation_marker_joint", lambda clicked_marker: ("JointAtEnd", "rigid"))
+
+    window.action_bar_tool.trigger()
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=window.canvas.screen_position_for_world(0.0, 0.0))
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=window.canvas.screen_position_for_entity(existing_marker))
+    qt_app.processEvents()
+
+    assert len(window.app_service.project.model.bodies) == 2
+    joint = next(joint for joint in window.app_service.project.model.joints if joint.name == "JointAtEnd")
+    assert joint.type.value == "rigid"
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_canvas_can_select_body_and_escape_clears_selection() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_bar("Crank", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    window.refresh_all()
+    window.action_select_tool.trigger()
+
+    body_click = window.canvas.screen_position_for_world(50.0, 0.0)
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=body_click)
+    qt_app.processEvents()
+
+    assert window._selected_entity_id == body_id
+
+    QtTest.QTest.keyClick(window.canvas, QtCore.Qt.Key.Key_Escape)
+    qt_app.processEvents()
+
+    assert window._selected_entity_id is None
+    assert window.tree.currentItem() is None
+
+    window.close()
+    qt_app.processEvents()
+
+
 def test_canvas_can_drag_marker_create_joints_and_add_marker(monkeypatch) -> None:
     qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = MainWindow(ApplicationService())
@@ -158,6 +231,26 @@ def test_canvas_can_drag_marker_create_joints_and_add_marker(monkeypatch) -> Non
     qt_app.processEvents()
 
 
+def test_inspector_boolean_fields_use_combo_box() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    body_id = window.app_service.create_body("Mass1", [MarkerInput("0 mm", "0 mm", "P1")])
+    marker_id = next(marker.id for marker in window.app_service._find_body(body_id).markers if marker.name == "P1")
+    window.refresh_all()
+    window._select_entity_by_id(marker_id)
+    qt_app.processEvents()
+
+    combo = window.inspector.cellWidget(3, 1)
+    assert isinstance(combo, QtWidgets.QComboBox)
+    combo.setCurrentText("false")
+    qt_app.processEvents()
+
+    assert window.app_service._find_entity(marker_id).visible is False
+
+    window.close()
+    qt_app.processEvents()
+
+
 def test_canvas_can_drag_slider_center_in_t0() -> None:
     qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = MainWindow(ApplicationService())
@@ -179,6 +272,23 @@ def test_canvas_can_drag_slider_center_in_t0() -> None:
     slider = window.app_service._find_entity(slider_id)
     assert abs(_expr_value(slider.origin_x.expression) - 200.0) < 0.5
     assert abs(_expr_value(slider.origin_y.expression) - 20.0) < 0.5
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_slider_center_preview_preserves_angle_units() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    slider_id = window.app_service.create_slider("Guide", SliderInput("0 mm", "0 mm", "45 deg"))
+    window.refresh_all()
+
+    preview = window.canvas._slider_preview_for_handle(slider_id, "center", (10.0, 10.0))
+
+    assert preview["angle_deg"] == 45.0
 
     window.close()
     qt_app.processEvents()

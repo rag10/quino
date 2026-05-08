@@ -16,6 +16,8 @@ from quino.domain.model import (
     Parameter,
     Project,
     ScalarProperty,
+    Sensor,
+    SensorOutput,
     SimulationResult,
     Slider,
     Style,
@@ -23,7 +25,7 @@ from quino.domain.model import (
     ValidationReport,
     ViewState,
 )
-from quino.domain.types import BodyType, Dimension, DriverType, JointEndpointKind, JointType, MarkerType
+from quino.domain.types import BodyType, Dimension, DriverType, JointEndpointKind, JointType, MarkerType, SensorType
 from quino.serialization.json_io import JsonMapper
 from quino.services.expressions import ExpressionService
 from quino.services.ids import IdService
@@ -347,14 +349,50 @@ class ApplicationService:
         project = self._require_project()
         new_x = ScalarProperty(expression=x_expression, unit=marker.x.unit, expected_dimension=Dimension.LENGTH)
         new_y = ScalarProperty(expression=y_expression, unit=marker.y.unit, expected_dimension=Dimension.LENGTH)
-        self.expression_service.evaluate_property(new_x, project.parameters)
-        self.expression_service.evaluate_property(new_y, project.parameters)
+        target_x_eval = self.expression_service.evaluate_property(new_x, project.parameters)
+        target_y_eval = self.expression_service.evaluate_property(new_y, project.parameters)
+        current_x_eval = self.expression_service.evaluate_property(marker.x, project.parameters)
+        current_y_eval = self.expression_service.evaluate_property(marker.y, project.parameters)
+        target_x = self.unit_service.convert(self.unit_service.quantity(target_x_eval.value, target_x_eval.unit), "mm")
+        target_y = self.unit_service.convert(self.unit_service.quantity(target_y_eval.value, target_y_eval.unit), "mm")
+        current_x = self.unit_service.convert(self.unit_service.quantity(current_x_eval.value, current_x_eval.unit), "mm")
+        current_y = self.unit_service.convert(self.unit_service.quantity(current_y_eval.value, current_y_eval.unit), "mm")
+        delta_x = target_x - current_x
+        delta_y = target_y - current_y
+        if abs(delta_x) < 1e-12 and abs(delta_y) < 1e-12:
+            return
+        linked_joints = self._joints_for_marker(marker_id)
+        if linked_joints:
+            self._snapshot()
+            marker.x = new_x
+            marker.y = new_y
+            self._translate_direct_joint_counterparts(marker_id, linked_joints, delta_x, delta_y)
+            return
         self._snapshot()
         marker.x = new_x
         marker.y = new_y
 
     def update_property(self, entity_id: str, property_path: str, value: PropertyValueInput) -> None:
         entity = self._find_entity(entity_id)
+        if isinstance(entity, Marker) and property_path in {"x", "y"}:
+            if value.kind != "expression" or not isinstance(value.value, str):
+                raise ValueError("Marker coordinates require an expression value")
+            target_x = value.value if property_path == "x" else entity.x.expression
+            target_y = value.value if property_path == "y" else entity.y.expression
+            self.move_marker(entity.id, target_x, target_y)
+            return
+        if isinstance(entity, Slider) and property_path in {"origin_x", "origin_y"}:
+            if value.kind != "expression" or not isinstance(value.value, str):
+                raise ValueError("Slider origin coordinates require an expression value")
+            target_x = value.value if property_path == "origin_x" else entity.origin_x.expression
+            target_y = value.value if property_path == "origin_y" else entity.origin_y.expression
+            self._move_slider_origin(entity.id, target_x, target_y)
+            return
+        if isinstance(entity, Slider) and property_path == "angle":
+            if value.kind != "expression" or not isinstance(value.value, str):
+                raise ValueError("Slider angle requires an expression value")
+            self._rotate_slider(entity.id, value.value)
+            return
         if property_path == "name":
             if value.kind != "expression" or not isinstance(value.value, str):
                 raise ValueError("Name updates require an expression/string value")
@@ -462,6 +500,10 @@ class ApplicationService:
             self._snapshot()
             project.model.drivers = [item for item in project.model.drivers if item.id != entity_id]
             return
+        if any(sensor.id == entity_id for sensor in project.model.sensors):
+            self._snapshot()
+            project.model.sensors = [item for item in project.model.sensors if item.id != entity_id]
+            return
         body = self._find_body_by_marker(entity_id)
         if any(marker.id == entity_id and marker.type is MarkerType.COM for marker in body.markers):
             raise ValueError("CoM marker cannot be deleted")
@@ -483,23 +525,39 @@ class ApplicationService:
         project.model.drivers = [
             driver for driver in project.model.drivers if driver.target_joint_id not in removed_joint_ids
         ]
+        project.model.sensors = [
+            sensor
+            for sensor in project.model.sensors
+            if entity_id not in sensor.marker_ids
+        ]
         if len(body.structural_markers()) == 1:
             body.type = BodyType.POINT_MASS
             body.closed_shape = False
         elif body.type is BodyType.BODY and len(body.structural_markers()) == 2:
             body.closed_shape = True
 
-    def validate_model(self) -> ValidationReport:
+    def validate_model(self, duration: float = 1.0, steps: int = 20) -> ValidationReport:
         project = self._require_project()
         report = self.validation_service.validate_project(project)
+        self._validate_joint_geometry(project, report)
+        self._validate_kinematic_reach(project, report, duration, steps)
         self._evaluate_all(project, report)
         return report
 
     def run_kinematic_simulation(self, duration: float = 1.0, steps: int = 100) -> SimulationResult:
         project = self._require_project()
-        report = self.validate_model()
-        result = self.simulation_runner.run(project, duration=duration, steps=steps)
+        report = self.validate_model(duration=duration, steps=steps)
         validation_messages = [message.message for message in report.messages]
+        blocking_messages = [
+            message
+            for message in report.messages
+            if message.code in {"kinematic_reach", "kinematic_travel", "kinematic_loop_reach"}
+        ]
+        if blocking_messages:
+            validation_messages.append(
+                "Preflight detected unreachable kinematics; attempting solver for partial trajectory"
+            )
+        result = self.simulation_runner.run(project, duration=duration, steps=steps)
         result.warnings = [*validation_messages, *result.warnings]
         result.messages = [*validation_messages, *result.messages]
         return result
@@ -724,6 +782,746 @@ class ApplicationService:
     def _joint_has_slider(self, joint: Joint) -> bool:
         return joint.endpoint_a.kind is JointEndpointKind.SLIDER or joint.endpoint_b.kind is JointEndpointKind.SLIDER
 
+    def _joints_for_marker(self, marker_id: str) -> list[Joint]:
+        project = self._require_project()
+        return [
+            joint
+            for joint in project.model.joints
+            if joint.endpoint_a.marker_id == marker_id or joint.endpoint_b.marker_id == marker_id
+        ]
+
+    def _translate_direct_joint_counterparts(
+        self,
+        marker_id: str,
+        joints: list[Joint],
+        delta_x_mm: float,
+        delta_y_mm: float,
+    ) -> None:
+        moved_marker_ids: set[str] = {marker_id}
+        moved_slider_ids: set[str] = set()
+        for joint in joints:
+            for endpoint in (joint.endpoint_a, joint.endpoint_b):
+                if endpoint.kind is JointEndpointKind.MARKER and endpoint.marker_id is not None:
+                    if endpoint.marker_id in moved_marker_ids:
+                        continue
+                    linked_marker = self._find_entity(endpoint.marker_id)
+                    if isinstance(linked_marker, Marker):
+                        self._translate_marker_expression(linked_marker, delta_x_mm, delta_y_mm)
+                        moved_marker_ids.add(endpoint.marker_id)
+                elif endpoint.kind is JointEndpointKind.SLIDER and endpoint.slider_id is not None:
+                    if endpoint.slider_id in moved_slider_ids:
+                        continue
+                    linked_slider = self._find_entity(endpoint.slider_id)
+                    if isinstance(linked_slider, Slider):
+                        self._translate_slider_expression(
+                            linked_slider,
+                            delta_x_mm,
+                            delta_y_mm,
+                            moved_marker_ids=moved_marker_ids,
+                        )
+                        moved_slider_ids.add(endpoint.slider_id)
+
+    def _move_slider_origin(self, slider_id: str, x_expression: str, y_expression: str) -> None:
+        slider = self._find_entity(slider_id)
+        if not isinstance(slider, Slider):
+            raise ValueError("move_slider_origin requires a slider entity")
+        new_x = ScalarProperty(
+            expression=x_expression,
+            unit=slider.origin_x.unit,
+            expected_dimension=Dimension.LENGTH,
+        )
+        new_y = ScalarProperty(
+            expression=y_expression,
+            unit=slider.origin_y.unit,
+            expected_dimension=Dimension.LENGTH,
+        )
+        target_x = self._evaluate_scalar_as(new_x, "mm")
+        target_y = self._evaluate_scalar_as(new_y, "mm")
+        current_x = self._evaluate_scalar_as(slider.origin_x, "mm")
+        current_y = self._evaluate_scalar_as(slider.origin_y, "mm")
+        delta_x = target_x - current_x
+        delta_y = target_y - current_y
+        if abs(delta_x) < 1e-12 and abs(delta_y) < 1e-12:
+            if (
+                slider.origin_x.expression != x_expression
+                or slider.origin_y.expression != y_expression
+            ):
+                self._snapshot()
+                slider.origin_x = new_x
+                slider.origin_y = new_y
+            return
+        self._snapshot()
+        slider.origin_x = new_x
+        slider.origin_y = new_y
+        moved_marker_ids: set[str] = set()
+        self._translate_markers_linked_to_slider(slider.id, delta_x, delta_y, moved_marker_ids)
+
+    def _rotate_slider(self, slider_id: str, angle_expression: str) -> None:
+        slider = self._find_entity(slider_id)
+        if not isinstance(slider, Slider):
+            raise ValueError("rotate_slider requires a slider entity")
+        new_angle = ScalarProperty(
+            expression=angle_expression,
+            unit=slider.angle.unit,
+            expected_dimension=Dimension.ANGLE,
+        )
+        old_angle = self._evaluate_scalar_as(slider.angle, "rad")
+        target_angle = self._evaluate_scalar_as(new_angle, "rad")
+        origin_x = self._evaluate_scalar_as(slider.origin_x, "mm")
+        origin_y = self._evaluate_scalar_as(slider.origin_y, "mm")
+        old_axis = (math.cos(old_angle), math.sin(old_angle))
+        new_axis = (math.cos(target_angle), math.sin(target_angle))
+        linked_markers = self._markers_linked_to_slider(slider.id)
+        marker_targets: list[tuple[Marker, float, float]] = []
+        for marker in linked_markers:
+            marker_x = self._evaluate_scalar_as(marker.x, "mm")
+            marker_y = self._evaluate_scalar_as(marker.y, "mm")
+            slider_coordinate = (
+                (marker_x - origin_x) * old_axis[0]
+                + (marker_y - origin_y) * old_axis[1]
+            )
+            marker_targets.append(
+                (
+                    marker,
+                    origin_x + slider_coordinate * new_axis[0],
+                    origin_y + slider_coordinate * new_axis[1],
+                )
+            )
+        if abs(target_angle - old_angle) < 1e-12:
+            if slider.angle.expression == angle_expression:
+                return
+            self._snapshot()
+            slider.angle = new_angle
+            return
+        self._snapshot()
+        slider.angle = new_angle
+        for marker, marker_x, marker_y in marker_targets:
+            self._set_marker_absolute_mm(marker, marker_x, marker_y)
+
+    def _translate_slider_expression(
+        self,
+        slider: Slider,
+        delta_x_mm: float,
+        delta_y_mm: float,
+        moved_marker_ids: set[str] | None = None,
+    ) -> None:
+        slider.origin_x.expression = self._offset_expression(
+            slider.origin_x.expression,
+            delta_x_mm,
+            "mm",
+        )
+        slider.origin_y.expression = self._offset_expression(
+            slider.origin_y.expression,
+            delta_y_mm,
+            "mm",
+        )
+        self._translate_markers_linked_to_slider(
+            slider.id,
+            delta_x_mm,
+            delta_y_mm,
+            moved_marker_ids or set(),
+        )
+
+    def _translate_markers_linked_to_slider(
+        self,
+        slider_id: str,
+        delta_x_mm: float,
+        delta_y_mm: float,
+        moved_marker_ids: set[str],
+    ) -> None:
+        for linked_marker in self._markers_linked_to_slider(slider_id):
+            if linked_marker.id in moved_marker_ids:
+                continue
+            self._translate_marker_expression(linked_marker, delta_x_mm, delta_y_mm)
+            moved_marker_ids.add(linked_marker.id)
+
+    def _markers_linked_to_slider(self, slider_id: str) -> list[Marker]:
+        project = self._require_project()
+        marker_ids: list[str] = []
+        for joint in project.model.joints:
+            endpoints = (joint.endpoint_a, joint.endpoint_b)
+            has_slider = any(
+                endpoint.kind is JointEndpointKind.SLIDER and endpoint.slider_id == slider_id
+                for endpoint in endpoints
+            )
+            if not has_slider:
+                continue
+            for endpoint in endpoints:
+                if endpoint.kind is JointEndpointKind.MARKER and endpoint.marker_id is not None:
+                    marker_ids.append(endpoint.marker_id)
+        markers: list[Marker] = []
+        seen: set[str] = set()
+        for marker_id in marker_ids:
+            if marker_id in seen:
+                continue
+            entity = self._find_entity(marker_id)
+            if isinstance(entity, Marker):
+                markers.append(entity)
+                seen.add(marker_id)
+        return markers
+
+    def _translate_marker_expression(
+        self,
+        marker: Marker,
+        delta_x_mm: float,
+        delta_y_mm: float,
+    ) -> None:
+        marker.x.expression = self._offset_expression(marker.x.expression, delta_x_mm, "mm")
+        marker.y.expression = self._offset_expression(marker.y.expression, delta_y_mm, "mm")
+
+    def _set_marker_absolute_mm(self, marker: Marker, x_mm: float, y_mm: float) -> None:
+        marker.x.expression = f"{x_mm:.6f} mm"
+        marker.y.expression = f"{y_mm:.6f} mm"
+
+    def _evaluate_scalar_as(self, scalar: ScalarProperty, unit: str) -> float:
+        result = self.expression_service.evaluate_property(
+            scalar,
+            self._require_project().parameters,
+        )
+        return self.unit_service.convert(
+            self.unit_service.quantity(result.value, result.unit),
+            unit,
+        )
+
+    def _offset_expression(self, expression: str, delta: float, unit: str) -> str:
+        if abs(delta) < 1e-12:
+            return expression
+        sign = "+" if delta >= 0 else "-"
+        return f"({expression}) {sign} {abs(delta):.6f} {unit}"
+
+    def _validate_joint_geometry(self, project: Project, report: ValidationReport) -> None:
+        try:
+            assembled = self.simulation_runner.adapter.assembler.assemble(project)
+        except Exception as exc:
+            report.messages.append(
+                ValidationMessage(
+                    "warning",
+                    "geometry_assembly_failed",
+                    f"Could not evaluate joint geometry: {exc}",
+                )
+            )
+            return
+        tolerance = 1e-6
+        for joint in project.model.joints:
+            endpoints = (joint.endpoint_a, joint.endpoint_b)
+            marker_endpoints = [
+                endpoint for endpoint in endpoints if endpoint.kind is JointEndpointKind.MARKER
+            ]
+            slider_endpoints = [
+                endpoint for endpoint in endpoints if endpoint.kind is JointEndpointKind.SLIDER
+            ]
+            if len(marker_endpoints) == 2:
+                first = self._assembled_marker(assembled, marker_endpoints[0])
+                second = self._assembled_marker(assembled, marker_endpoints[1])
+                if first is None or second is None:
+                    continue
+                gap = (
+                    (first.global_x - second.global_x) ** 2
+                    + (first.global_y - second.global_y) ** 2
+                ) ** 0.5
+                if gap > tolerance:
+                    report.messages.append(
+                        ValidationMessage(
+                            "warning",
+                            "joint_gap",
+                            f"Joint {joint.name} marker-marker gap is {gap:.6g} mm",
+                            joint.id,
+                        )
+                    )
+            elif len(marker_endpoints) == 1 and slider_endpoints:
+                marker = self._assembled_marker(assembled, marker_endpoints[0])
+                slider = assembled.sliders.get(slider_endpoints[0].slider_id)
+                if marker is None or slider is None:
+                    continue
+                dx = marker.global_x - slider.origin_x
+                dy = marker.global_y - slider.origin_y
+                normal_gap = abs(dx * slider.normal_x + dy * slider.normal_y)
+                slider_coordinate = dx * slider.axis_x + dy * slider.axis_y
+                if normal_gap > tolerance:
+                    report.messages.append(
+                        ValidationMessage(
+                            "warning",
+                            "slider_joint_gap",
+                            f"Joint {joint.name} marker-slider normal gap is {normal_gap:.6g} mm",
+                            joint.id,
+                        )
+                    )
+                if (
+                    slider.travel_min is not None
+                    and slider_coordinate < slider.travel_min - tolerance
+                ):
+                    report.messages.append(
+                        ValidationMessage(
+                            "warning",
+                            "slider_joint_travel",
+                            (
+                                f"Joint {joint.name} slider coordinate {slider_coordinate:.6g} mm "
+                                f"is below travel_min {slider.travel_min:.6g} mm"
+                            ),
+                            joint.id,
+                        )
+                    )
+                if (
+                    slider.travel_max is not None
+                    and slider_coordinate > slider.travel_max + tolerance
+                ):
+                    report.messages.append(
+                        ValidationMessage(
+                            "warning",
+                            "slider_joint_travel",
+                            (
+                                f"Joint {joint.name} slider coordinate {slider_coordinate:.6g} mm "
+                                f"is above travel_max {slider.travel_max:.6g} mm"
+                            ),
+                            joint.id,
+                        )
+                    )
+
+    def _assembled_marker(self, assembled, endpoint):
+        if endpoint.body_id not in assembled.bodies:
+            return None
+        return assembled.bodies[endpoint.body_id].markers.get(endpoint.marker_id)
+
+    def _validate_kinematic_reach(
+        self,
+        project: Project,
+        report: ValidationReport,
+        duration: float,
+        steps: int,
+    ) -> None:
+        try:
+            assembled = self.simulation_runner.adapter.assembler.assemble(project)
+        except Exception:
+            return
+        sample_times = self._simulation_sample_times(duration, steps)
+        reported: set[tuple[str, str, str]] = set()
+        for driver in project.model.drivers:
+            if driver.type is not DriverType.ROTATION:
+                continue
+            try:
+                driven_joint = self._find_joint(driver.target_joint_id)
+            except ValueError:
+                continue
+            grounded_endpoint = self._marker_ground_endpoint(driven_joint)
+            if grounded_endpoint is None or grounded_endpoint.body_id is None:
+                continue
+            driven_body = assembled.bodies.get(grounded_endpoint.body_id)
+            if driven_body is None or grounded_endpoint.marker_id is None:
+                continue
+            ground_marker = driven_body.markers.get(grounded_endpoint.marker_id)
+            if ground_marker is None:
+                continue
+            for joint in project.model.joints:
+                if joint.id == driven_joint.id:
+                    continue
+                marker_endpoints = [
+                    endpoint
+                    for endpoint in (joint.endpoint_a, joint.endpoint_b)
+                    if endpoint.kind is JointEndpointKind.MARKER
+                ]
+                if len(marker_endpoints) != 2:
+                    continue
+                driven_endpoints = [
+                    endpoint
+                    for endpoint in marker_endpoints
+                    if endpoint.body_id == driven_body.body_id
+                ]
+                follower_endpoints = [
+                    endpoint for endpoint in marker_endpoints if endpoint.body_id != driven_body.body_id
+                ]
+                for driven_endpoint in driven_endpoints:
+                    if driven_endpoint.marker_id is None:
+                        continue
+                    driven_marker = driven_body.markers.get(driven_endpoint.marker_id)
+                    if driven_marker is None:
+                        continue
+                    for follower_endpoint in follower_endpoints:
+                        if follower_endpoint.body_id is None or follower_endpoint.marker_id is None:
+                            continue
+                        follower_body = assembled.bodies.get(follower_endpoint.body_id)
+                        if follower_body is None:
+                            continue
+                        follower_marker = follower_body.markers.get(follower_endpoint.marker_id)
+                        if follower_marker is None:
+                            continue
+                        slider_links = self._slider_links_for_body(
+                            project,
+                            follower_endpoint.body_id,
+                            exclude_marker_id=follower_endpoint.marker_id,
+                        )
+                        for slider_joint, slider_marker_endpoint, slider_endpoint in slider_links:
+                            key = (driver.id, joint.id, slider_joint.id)
+                            if key in reported:
+                                continue
+                            slider = assembled.sliders.get(slider_endpoint.slider_id)
+                            slider_marker = follower_body.markers.get(slider_marker_endpoint.marker_id)
+                            if slider is None or slider_marker is None:
+                                continue
+                            reach = (
+                                (slider_marker.local_x - follower_marker.local_x) ** 2
+                                + (slider_marker.local_y - follower_marker.local_y) ** 2
+                            ) ** 0.5
+                            failure = self._first_slider_reach_failure(
+                                project,
+                                driver,
+                                driven_body,
+                                ground_marker,
+                                driven_marker,
+                                slider,
+                                reach,
+                                sample_times,
+                            )
+                            if failure is None:
+                                continue
+                            reported.add(key)
+                            report.messages.append(
+                                ValidationMessage(
+                                    "warning",
+                                    failure[0],
+                                    failure[1],
+                                    slider_joint.id,
+                                )
+                            )
+
+        self._validate_rotational_loop_reach(project, report, assembled, sample_times)
+
+    def _validate_rotational_loop_reach(
+        self,
+        project: Project,
+        report: ValidationReport,
+        assembled,
+        sample_times: list[float],
+    ) -> None:
+        reported: set[tuple[str, str, str, str]] = set()
+        for driver in project.model.drivers:
+            if driver.type is not DriverType.ROTATION:
+                continue
+            try:
+                driven_joint = self._find_joint(driver.target_joint_id)
+            except ValueError:
+                continue
+            grounded_endpoint = self._marker_ground_endpoint(driven_joint)
+            if grounded_endpoint is None or grounded_endpoint.body_id is None:
+                continue
+            driven_body = assembled.bodies.get(grounded_endpoint.body_id)
+            if driven_body is None or grounded_endpoint.marker_id is None:
+                continue
+            ground_marker = driven_body.markers.get(grounded_endpoint.marker_id)
+            if ground_marker is None:
+                continue
+            for input_joint in project.model.joints:
+                if input_joint.id == driven_joint.id:
+                    continue
+                input_endpoints = self._marker_marker_endpoints(input_joint)
+                if input_endpoints is None:
+                    continue
+                driven_endpoint = next(
+                    (
+                        endpoint
+                        for endpoint in input_endpoints
+                        if endpoint.body_id == driven_body.body_id
+                    ),
+                    None,
+                )
+                follower_endpoint = next(
+                    (
+                        endpoint
+                        for endpoint in input_endpoints
+                        if endpoint.body_id != driven_body.body_id
+                    ),
+                    None,
+                )
+                if (
+                    driven_endpoint is None
+                    or follower_endpoint is None
+                    or driven_endpoint.marker_id is None
+                    or follower_endpoint.body_id is None
+                    or follower_endpoint.marker_id is None
+                ):
+                    continue
+                driven_marker = driven_body.markers.get(driven_endpoint.marker_id)
+                follower_body = assembled.bodies.get(follower_endpoint.body_id)
+                if driven_marker is None or follower_body is None:
+                    continue
+                follower_input_marker = follower_body.markers.get(follower_endpoint.marker_id)
+                if follower_input_marker is None:
+                    continue
+                for output_joint in project.model.joints:
+                    if output_joint.id in {driven_joint.id, input_joint.id}:
+                        continue
+                    output_endpoints = self._marker_marker_endpoints(output_joint)
+                    if output_endpoints is None:
+                        continue
+                    follower_output_endpoint = next(
+                        (
+                            endpoint
+                            for endpoint in output_endpoints
+                            if (
+                                endpoint.body_id == follower_body.body_id
+                                and endpoint.marker_id != follower_endpoint.marker_id
+                            )
+                        ),
+                        None,
+                    )
+                    terminal_endpoint = next(
+                        (
+                            endpoint
+                            for endpoint in output_endpoints
+                            if endpoint.body_id != follower_body.body_id
+                        ),
+                        None,
+                    )
+                    if (
+                        follower_output_endpoint is None
+                        or terminal_endpoint is None
+                        or follower_output_endpoint.marker_id is None
+                        or terminal_endpoint.body_id is None
+                        or terminal_endpoint.marker_id is None
+                    ):
+                        continue
+                    terminal_body = assembled.bodies.get(terminal_endpoint.body_id)
+                    if terminal_body is None:
+                        continue
+                    follower_output_marker = follower_body.markers.get(
+                        follower_output_endpoint.marker_id
+                    )
+                    terminal_output_marker = terminal_body.markers.get(terminal_endpoint.marker_id)
+                    if follower_output_marker is None or terminal_output_marker is None:
+                        continue
+                    terminal_ground = self._ground_endpoint_for_body(
+                        project,
+                        terminal_body.body_id,
+                        exclude_marker_id=terminal_endpoint.marker_id,
+                    )
+                    if terminal_ground is None or terminal_ground.marker_id is None:
+                        continue
+                    terminal_ground_marker = terminal_body.markers.get(terminal_ground.marker_id)
+                    if terminal_ground_marker is None:
+                        continue
+                    key = (driver.id, input_joint.id, output_joint.id, terminal_ground.marker_id)
+                    if key in reported:
+                        continue
+                    follower_length = self._local_distance(
+                        follower_input_marker,
+                        follower_output_marker,
+                    )
+                    terminal_length = self._local_distance(
+                        terminal_ground_marker,
+                        terminal_output_marker,
+                    )
+                    failure = self._first_four_bar_reach_failure(
+                        project,
+                        driver,
+                        driven_body,
+                        ground_marker,
+                        driven_marker,
+                        terminal_ground_marker,
+                        follower_length,
+                        terminal_length,
+                        sample_times,
+                    )
+                    if failure is None:
+                        continue
+                    reported.add(key)
+                    report.messages.append(
+                        ValidationMessage(
+                            "warning",
+                            "kinematic_loop_reach",
+                            failure,
+                            output_joint.id,
+                        )
+                    )
+
+    def _first_four_bar_reach_failure(
+        self,
+        project: Project,
+        driver: Driver,
+        driven_body,
+        ground_marker,
+        driven_marker,
+        terminal_ground_marker,
+        follower_length: float,
+        terminal_length: float,
+        sample_times: list[float],
+    ) -> str | None:
+        tolerance = 1e-6
+        minimum = abs(follower_length - terminal_length)
+        maximum = follower_length + terminal_length
+        for time_value in sample_times:
+            try:
+                driver_angle = self._driver_value_at(driver, project, time_value, "rad")
+            except Exception:
+                return None
+            marker_x, marker_y = self._driven_marker_position(
+                driven_body,
+                ground_marker,
+                driven_marker,
+                driver_angle,
+            )
+            distance = (
+                (marker_x - terminal_ground_marker.global_x) ** 2
+                + (marker_y - terminal_ground_marker.global_y) ** 2
+            ) ** 0.5
+            if distance > maximum + tolerance or distance < minimum - tolerance:
+                return (
+                    f"Driver {driver.name} may make the closed loop unreachable at "
+                    f"t={time_value:.3g}s: distance between driven joint and fixed rocker "
+                    f"ground is {distance:.6g} mm, but the connected links require "
+                    f"{minimum:.6g} mm <= distance <= {maximum:.6g} mm"
+                )
+        return None
+
+    def _first_slider_reach_failure(
+        self,
+        project: Project,
+        driver: Driver,
+        driven_body,
+        ground_marker,
+        driven_marker,
+        slider,
+        reach: float,
+        sample_times: list[float],
+    ) -> tuple[str, str] | None:
+        tolerance = 1e-6
+        for time_value in sample_times:
+            try:
+                driver_angle = self._driver_value_at(driver, project, time_value, "rad")
+            except Exception:
+                return None
+            marker_x, marker_y = self._driven_marker_position(
+                driven_body,
+                ground_marker,
+                driven_marker,
+                driver_angle,
+            )
+            dx = marker_x - slider.origin_x
+            dy = marker_y - slider.origin_y
+            normal_distance = abs(dx * slider.normal_x + dy * slider.normal_y)
+            if normal_distance > reach + tolerance:
+                return (
+                    "kinematic_reach",
+                    (
+                        f"Driver {driver.name} may make the mechanism unreachable at "
+                        f"t={time_value:.3g}s: driven joint is {normal_distance:.6g} mm "
+                        f"from slider {slider.name}, but connected body reach is {reach:.6g} mm"
+                    ),
+                )
+            slider_coordinate = dx * slider.axis_x + dy * slider.axis_y
+            half_chord = max(reach**2 - normal_distance**2, 0.0) ** 0.5
+            min_possible = slider_coordinate - half_chord
+            max_possible = slider_coordinate + half_chord
+            if slider.travel_min is not None and max_possible < slider.travel_min - tolerance:
+                return (
+                    "kinematic_travel",
+                    (
+                        f"Driver {driver.name} may move beyond slider {slider.name} travel at "
+                        f"t={time_value:.3g}s: reachable slider coordinate is at most "
+                        f"{max_possible:.6g} mm, below travel_min {slider.travel_min:.6g} mm"
+                    ),
+                )
+            if slider.travel_max is not None and min_possible > slider.travel_max + tolerance:
+                return (
+                    "kinematic_travel",
+                    (
+                        f"Driver {driver.name} may move beyond slider {slider.name} travel at "
+                        f"t={time_value:.3g}s: reachable slider coordinate is at least "
+                        f"{min_possible:.6g} mm, above travel_max {slider.travel_max:.6g} mm"
+                    ),
+                )
+        return None
+
+    def _simulation_sample_times(self, duration: float, steps: int) -> list[float]:
+        count = max(2, min(max(steps, 1) + 1, 80))
+        return [duration * index / (count - 1) for index in range(count)]
+
+    def _marker_ground_endpoint(self, joint: Joint) -> JointEndpoint | None:
+        endpoints = (joint.endpoint_a, joint.endpoint_b)
+        if not any(endpoint.kind is JointEndpointKind.GROUND for endpoint in endpoints):
+            return None
+        for endpoint in endpoints:
+            if endpoint.kind is JointEndpointKind.MARKER:
+                return endpoint
+        return None
+
+    def _marker_marker_endpoints(self, joint: Joint) -> tuple[JointEndpoint, JointEndpoint] | None:
+        if (
+            joint.endpoint_a.kind is JointEndpointKind.MARKER
+            and joint.endpoint_b.kind is JointEndpointKind.MARKER
+        ):
+            return joint.endpoint_a, joint.endpoint_b
+        return None
+
+    def _ground_endpoint_for_body(
+        self,
+        project: Project,
+        body_id: str,
+        exclude_marker_id: str,
+    ) -> JointEndpoint | None:
+        for joint in project.model.joints:
+            marker_endpoint = self._marker_ground_endpoint(joint)
+            if (
+                marker_endpoint is not None
+                and marker_endpoint.body_id == body_id
+                and marker_endpoint.marker_id != exclude_marker_id
+            ):
+                return marker_endpoint
+        return None
+
+    def _local_distance(self, first, second) -> float:
+        return ((first.local_x - second.local_x) ** 2 + (first.local_y - second.local_y) ** 2) ** 0.5
+
+    def _slider_links_for_body(
+        self,
+        project: Project,
+        body_id: str,
+        exclude_marker_id: str,
+    ) -> list[tuple[Joint, JointEndpoint, JointEndpoint]]:
+        links: list[tuple[Joint, JointEndpoint, JointEndpoint]] = []
+        for joint in project.model.joints:
+            marker_endpoint = None
+            slider_endpoint = None
+            for endpoint in (joint.endpoint_a, joint.endpoint_b):
+                if (
+                    endpoint.kind is JointEndpointKind.MARKER
+                    and endpoint.body_id == body_id
+                    and endpoint.marker_id != exclude_marker_id
+                ):
+                    marker_endpoint = endpoint
+                elif endpoint.kind is JointEndpointKind.SLIDER:
+                    slider_endpoint = endpoint
+            if marker_endpoint is not None and slider_endpoint is not None:
+                links.append((joint, marker_endpoint, slider_endpoint))
+        return links
+
+    def _driver_value_at(
+        self,
+        driver: Driver,
+        project: Project,
+        time_value: float,
+        unit: str,
+    ) -> float:
+        quantity = self.expression_service.evaluate_expression(
+            driver.law.expression,
+            project.parameters,
+            variables={"t": self.unit_service.quantity(time_value, "s")},
+        )
+        return self.unit_service.convert(quantity, unit)
+
+    def _driven_marker_position(self, body, ground_marker, driven_marker, driver_angle: float) -> tuple[float, float]:
+        absolute_angle = body.angle + driver_angle
+        cos_a = math.cos(absolute_angle)
+        sin_a = math.sin(absolute_angle)
+        origin_x = ground_marker.global_x - (
+            cos_a * ground_marker.local_x - sin_a * ground_marker.local_y
+        )
+        origin_y = ground_marker.global_y - (
+            sin_a * ground_marker.local_x + cos_a * ground_marker.local_y
+        )
+        return (
+            origin_x + cos_a * driven_marker.local_x - sin_a * driven_marker.local_y,
+            origin_y + sin_a * driven_marker.local_x + cos_a * driven_marker.local_y,
+        )
+
     def _evaluate_all(self, project: Project, report: ValidationReport) -> None:
         for parameter in project.parameters:
             try:
@@ -761,3 +1559,32 @@ class ApplicationService:
                         driver.id,
                     )
                 )
+
+    def create_sensor(self, name: str, sensor_type: str, marker_ids: list[str]) -> str:
+        if self.project is None:
+            raise ValueError("No project loaded")
+        sensor_id = self.id_service.next_id("sensor")
+        sensor = Sensor(
+            id=sensor_id,
+            name=name,
+            type=SensorType(sensor_type),
+            marker_ids=marker_ids,
+            metadata=Metadata(),
+        )
+        self.project.model.sensors.append(sensor)
+        self._push_undo_state()
+        return sensor_id
+
+    def delete_sensor(self, sensor_id: str) -> None:
+        if self.project is None:
+            raise ValueError("No project loaded")
+        self.project.model.sensors = [s for s in self.project.model.sensors if s.id != sensor_id]
+        self._push_undo_state()
+
+    def rename_sensor(self, sensor_id: str, name: str) -> None:
+        if self.project is None:
+            raise ValueError("No project loaded")
+        sensor = next((s for s in self.project.model.sensors if s.id == sensor_id), None)
+        if sensor is not None:
+            sensor.name = name
+            self._push_undo_state()

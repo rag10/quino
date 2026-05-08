@@ -18,7 +18,10 @@ class EvaluationResult:
 
 
 class ExpressionService:
-    _number_unit_pattern = re.compile(r"(?P<num>(?<![A-Za-z_])[-+]?\d+(?:\.\d+)?)\s+(?P<unit>[A-Za-z_][A-Za-z0-9_]*)")
+    _number_unit_pattern = re.compile(
+        r"(?P<num>(?<![A-Za-z_])[-+]?\d+(?:[\.,]\d+)?)\s*"
+        r"(?P<unit>unitless|deg|rad|kg|mm|m|s)\b"
+    )
 
     def __init__(self, unit_service: UnitService) -> None:
         self.unit_service = unit_service
@@ -65,7 +68,7 @@ class ExpressionService:
 
     def _prepare(self, expression: str) -> str:
         return self._number_unit_pattern.sub(
-            lambda match: f"({match.group('num')}*{match.group('unit')})",
+            lambda match: f"({match.group('num').replace(',', '.')}*{match.group('unit')})",
             expression,
         )
 

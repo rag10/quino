@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Callable
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -46,10 +47,16 @@ class CanvasMode:
     CONNECT_SLIDER = "connect_slider"
     CREATE_ROTATION_DRIVER = "create_rotation_driver"
     CREATE_TRANSLATION_DRIVER = "create_translation_driver"
+    CREATE_POINT_SENSOR = "create_point_sensor"
+    CREATE_DISTANCE_SENSOR = "create_distance_sensor"
+    CREATE_ANGLE_HORIZONTAL_SENSOR = "create_angle_horizontal_sensor"
+    CREATE_ANGLE_VERTICAL_SENSOR = "create_angle_vertical_sensor"
+    CREATE_ANGLE_VECTOR_SENSOR = "create_angle_vector_sensor"
 
 
 class MechanismCanvas(QtWidgets.QWidget):
     entitySelected = QtCore.Signal(str)
+    selectionCleared = QtCore.Signal()
     modelChanged = QtCore.Signal(str)
     modeChanged = QtCore.Signal(str)
 
@@ -59,6 +66,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._selected_entity_id: str | None = None
         self._state_overlay: dict[str, float] | None = None
         self._screen_markers: list[tuple[CanvasMarker, QtCore.QPointF]] = []
+        self._screen_bodies: list[tuple[str, str, object]] = []
         self._screen_sliders: list[tuple[CanvasSlider, QtCore.QLineF, QtCore.QPointF]] = []
         self._screen_slider_handles: list[tuple[str, str, QtCore.QPointF]] = []
         self._screen_joints: list[tuple[str, QtCore.QPointF]] = []
@@ -79,7 +87,8 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._view_center_y = 0.0
         self._panning = False
         self._pan_last_screen: QtCore.QPointF | None = None
-        self._pending_joint_creation: dict[str, str | None] | None = None
+        self._pending_joint_creation: dict[str, str | int | None] | None = None
+        self._edit_guard: Callable[[], bool] | None = None
         self.setMinimumSize(420, 320)
         self.setMouseTracking(True)
         self.setAutoFillBackground(True)
@@ -129,6 +138,9 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._dragging_slider = None
             self._dragging_slider_preview = None
         self.update()
+
+    def set_edit_guard(self, guard: Callable[[], bool] | None) -> None:
+        self._edit_guard = guard
 
     def screen_position_for_world(self, x: float, y: float) -> QtCore.QPoint:
         point = self._to_screen(x, y, self._current_transform())
@@ -213,6 +225,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self.setFocus()
         clicked = event.position()
         clicked_marker = self._marker_at(clicked)
+        clicked_body = self._body_at(clicked)
         clicked_slider = self._slider_at(clicked)
         clicked_slider_handle = self._slider_handle_at(clicked)
         clicked_joint = self._joint_at(clicked)
@@ -247,6 +260,11 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self.entitySelected.emit(clicked_driver)
                 self.update()
                 return
+            if clicked_body is not None:
+                self._selected_entity_id = clicked_body
+                self.entitySelected.emit(clicked_body)
+                self.update()
+                return
             super().mousePressEvent(event)
             return
 
@@ -254,8 +272,10 @@ class MechanismCanvas(QtWidgets.QWidget):
             return
 
         if self._mode == CanvasMode.CREATE_BAR:
-            if clicked_marker is not None and self._creation_points:
+            if clicked_marker is not None:
                 self._handle_marker_click_during_creation(clicked_marker)
+                if len(self._creation_points) == 2:
+                    self._create_bar_from_points()
                 return
             self._creation_points.append(world)
             if len(self._creation_points) == 2:
@@ -315,6 +335,36 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._create_driver_for_joint(clicked_joint, driver_type)
             return
 
+        if self._mode == CanvasMode.CREATE_POINT_SENSOR:
+            if clicked_marker is None:
+                return
+            self._create_sensor_from_markers([clicked_marker.entity_id], "point")
+            return
+
+        if self._mode == CanvasMode.CREATE_DISTANCE_SENSOR:
+            if clicked_marker is None:
+                return
+            self._handle_sensor_marker_selection(clicked_marker, 2)
+            return
+
+        if self._mode == CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR:
+            if clicked_marker is None:
+                return
+            self._handle_sensor_marker_selection(clicked_marker, 2)
+            return
+
+        if self._mode == CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR:
+            if clicked_marker is None:
+                return
+            self._handle_sensor_marker_selection(clicked_marker, 2)
+            return
+
+        if self._mode == CanvasMode.CREATE_ANGLE_VECTOR_SENSOR:
+            if clicked_marker is None:
+                return
+            self._handle_sensor_marker_selection(clicked_marker, 4)
+            return
+
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:  # pragma: no cover - exercised indirectly in GUI tests
@@ -357,9 +407,10 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._drag_preview = (self._dragging_marker.entity_id, x, y)
             marker_id, x, y = self._drag_preview
             self.app_service.move_marker(marker_id, self._mm_expression(x), self._mm_expression(y))
+            marker_label = self._marker_label(marker_id)
             self._dragging_marker = None
             self._drag_preview = None
-            self.modelChanged.emit(f"Moved marker to ({x:.2f}, {y:.2f}) mm")
+            self.modelChanged.emit(f"Moved marker {marker_label} to ({x:.2f}, {y:.2f}) mm")
             self.update()
             return
         if event.button() == QtCore.Qt.MouseButton.LeftButton and self._dragging_slider is not None:
@@ -409,6 +460,8 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._hover_world = None
             self._drag_preview = None
             self._dragging_marker = None
+            self._selected_entity_id = None
+            self.selectionCleared.emit()
             self.update()
             return
         super().keyPressEvent(event)
@@ -782,6 +835,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         markers: list[CanvasMarker],
         transform,
     ) -> None:
+        self._screen_bodies = []
         marker_map = {marker.entity_id: marker for marker in markers}
         for body in project.model.bodies:
             structural = [marker_map[marker.id] for marker in body.structural_markers() if marker.id in marker_map]
@@ -797,6 +851,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             painter.setPen(pen)
             if len(structural) == 1:
                 point = self._to_screen(structural[0].x, structural[0].y, transform)
+                self._screen_bodies.append((body.id, "point", point))
                 painter.setBrush(QtGui.QBrush(fill))
                 painter.drawEllipse(point, 9.0, 9.0)
                 painter.setPen(QtGui.QPen(QtGui.QColor("#5b5247")))
@@ -810,6 +865,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             if len(ordered) < 2:
                 ordered = structural
             polygon = QtGui.QPolygonF([self._to_screen(marker.x, marker.y, transform) for marker in ordered])
+            self._screen_bodies.append((body.id, "closed" if body.closed_shape and len(ordered) >= 3 else "open", polygon))
             if body.closed_shape and len(ordered) >= 3:
                 painter.setBrush(QtGui.QBrush(fill))
                 painter.drawPolygon(polygon)
@@ -944,6 +1000,55 @@ class MechanismCanvas(QtWidgets.QWidget):
             painter.setPen(QtGui.QPen(QtGui.QColor("#5b5247")))
             painter.drawText(point + QtCore.QPointF(6.0, -6.0), marker.name)
 
+    def _body_at(self, point: QtCore.QPointF) -> str | None:
+        project = self.app_service.project
+        if project is None:
+            return None
+        if not self._screen_bodies:
+            assembled = self._assembled_mechanism(project)
+            markers = self._collect_markers(project, assembled)
+            marker_map = {marker.entity_id: marker for marker in markers}
+            cached_bodies: list[tuple[str, str, object]] = []
+            for body in project.model.bodies:
+                structural = [marker_map[marker.id] for marker in body.structural_markers() if marker.id in marker_map]
+                if not structural:
+                    continue
+                if len(structural) == 1:
+                    cached_bodies.append((body.id, "point", self._to_screen(structural[0].x, structural[0].y, self._current_transform())))
+                    continue
+                ordered = [
+                    marker_map[marker_id]
+                    for marker_id in body.edge_order
+                    if marker_id in marker_map and marker_map[marker_id].marker_type is MarkerType.STRUCTURAL
+                ]
+                if len(ordered) < 2:
+                    ordered = structural
+                polygon = QtGui.QPolygonF([self._to_screen(marker.x, marker.y, self._current_transform()) for marker in ordered])
+                cached_bodies.append((body.id, "closed" if body.closed_shape and len(ordered) >= 3 else "open", polygon))
+            self._screen_bodies = cached_bodies
+        tolerance = 8.0
+        for body_id, shape_kind, shape in reversed(self._screen_bodies):
+            if shape_kind == "point":
+                center = shape
+                if math.hypot(point.x() - center.x(), point.y() - center.y()) <= 12.0:
+                    return body_id
+                continue
+            polygon = shape
+            if shape_kind == "closed":
+                if polygon.containsPoint(point, QtCore.Qt.FillRule.OddEvenFill):
+                    return body_id
+            for index in range(len(polygon) - 1):
+                line = QtCore.QLineF(polygon[index], polygon[index + 1])
+                if line.length() <= 1e-9:
+                    continue
+                if self._distance_to_segment(point, line) <= tolerance:
+                    return body_id
+            if shape_kind == "closed" and len(polygon) >= 3:
+                line = QtCore.QLineF(polygon[-1], polygon[0])
+                if self._distance_to_segment(point, line) <= tolerance:
+                    return body_id
+        return None
+
     def _draw_sliders(self, painter: QtGui.QPainter, sliders: list[CanvasSlider], transform) -> None:
         self._screen_sliders = []
         self._screen_slider_handles = []
@@ -1021,40 +1126,25 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._creation_points.append(world)
 
     def _handle_marker_click_during_creation(self, clicked_marker: CanvasMarker) -> None:
-        if not self._creation_points:
+        if not self._require_editing():
             return
-        dialog = QtWidgets.QDialog(self)
-        dialog.setWindowTitle("Create Joint")
-        layout = QtWidgets.QFormLayout(dialog)
-        message = QtWidgets.QLabel(
-            f"A marker '{clicked_marker.name}' exists at this location.\n"
-            "Do you want to create a joint between the new marker and this one?"
-        )
-        layout.addRow(message)
-        type_combo = QtWidgets.QComboBox()
-        type_combo.addItems(["revolute", "rigid"])
-        layout.addRow("Joint type:", type_combo)
-        buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.StandardButton.Yes
-            | QtWidgets.QDialogButtonBox.StandardButton.No
-            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        layout.addRow(buttons)
-
-        result = dialog.exec()
-        if result == int(QtWidgets.QDialog.DialogCode.Rejected):
+        details = self._request_creation_marker_joint(clicked_marker)
+        if details is None:
             self._creation_points.clear()
             self.set_mode(CanvasMode.SELECT)
             self.update()
             return
+        joint_name, joint_type = details
+        new_marker_index = len(self._creation_points)
         self._creation_points.append((clicked_marker.x, clicked_marker.y))
-        if result == int(QtWidgets.QDialog.DialogCode.Accepted):
-            joint_type = type_combo.currentText()
+        if joint_name is not None and joint_type is not None:
             self._pending_joint_creation = {
                 "clicked_marker_id": clicked_marker.entity_id,
+                "clicked_body_id": clicked_marker.body_id,
                 "joint_type": joint_type,
+                "joint_name": joint_name,
+                "new_marker_index": new_marker_index,
+                "creation_mode": self._mode,
             }
         self.update()
 
@@ -1072,9 +1162,9 @@ class MechanismCanvas(QtWidgets.QWidget):
         )
         self._creation_points.clear()
         self.entitySelected.emit(body_id)
-        self.modelChanged.emit(f"Created {name}")
         if self._pending_joint_creation:
             self._create_pending_joint(body_id)
+        self.modelChanged.emit(f"Created {name}")
         self.set_mode(CanvasMode.SELECT)
 
     def _finalize_body_creation(self) -> None:
@@ -1090,9 +1180,9 @@ class MechanismCanvas(QtWidgets.QWidget):
         body_id = self.app_service.create_body(name, markers)
         self._creation_points.clear()
         self.entitySelected.emit(body_id)
-        self.modelChanged.emit(f"Created {name}")
         if self._pending_joint_creation:
             self._create_pending_joint(body_id)
+        self.modelChanged.emit(f"Created {name}")
         self.set_mode(CanvasMode.SELECT)
 
     def _create_slider_from_points(self) -> None:
@@ -1118,14 +1208,18 @@ class MechanismCanvas(QtWidgets.QWidget):
         if not self._pending_joint_creation:
             return
         clicked_marker_id = self._pending_joint_creation.get("clicked_marker_id")
+        clicked_body_id = self._pending_joint_creation.get("clicked_body_id")
         joint_type = self._pending_joint_creation.get("joint_type")
-        if not clicked_marker_id or not joint_type:
-            self._pending_joint_creation = None
-            return
-        clicked_marker = next(
-            (m for all_m, _ in self._screen_markers if all_m.entity_id == clicked_marker_id), None
-        )
-        if not clicked_marker:
+        joint_name = self._pending_joint_creation.get("joint_name")
+        new_marker_index = self._pending_joint_creation.get("new_marker_index")
+        creation_mode = self._pending_joint_creation.get("creation_mode")
+        if (
+            not isinstance(clicked_marker_id, str)
+            or not isinstance(clicked_body_id, str)
+            or not isinstance(joint_type, str)
+            or not isinstance(joint_name, str)
+            or not isinstance(new_marker_index, int)
+        ):
             self._pending_joint_creation = None
             return
         new_body = next(
@@ -1134,26 +1228,25 @@ class MechanismCanvas(QtWidgets.QWidget):
         if not new_body:
             self._pending_joint_creation = None
             return
-        if self._mode == CanvasMode.CREATE_BAR and len(new_body.markers) >= 2:
-            new_marker_idx = 1
-        elif self._mode == CanvasMode.CREATE_BODY and new_body.markers:
-            new_marker_idx = len(new_body.markers) - 1
-        else:
+        structural = new_body.structural_markers()
+        if creation_mode not in {CanvasMode.CREATE_BAR, CanvasMode.CREATE_BODY}:
             self._pending_joint_creation = None
             return
-        new_marker_id = new_body.markers[new_marker_idx].id
-        joint_name = self._next_name("Joint", [joint.name for joint in self.app_service.project.model.joints])
+        if new_marker_index < 0 or new_marker_index >= len(structural):
+            self._pending_joint_creation = None
+            return
+        new_marker_id = structural[new_marker_index].id
         if joint_type == "rigid":
             self.app_service.create_rigid_joint(
                 joint_name,
-                JointEndpointInput(JointEndpointKind.MARKER, body_id=clicked_marker.body_id, marker_id=clicked_marker_id),
+                JointEndpointInput(JointEndpointKind.MARKER, body_id=clicked_body_id, marker_id=clicked_marker_id),
                 JointEndpointInput(JointEndpointKind.MARKER, body_id=new_body_id, marker_id=new_marker_id),
             )
         else:
             self.app_service.create_joint(
                 joint_name,
                 "revolute",
-                JointEndpointInput(JointEndpointKind.MARKER, body_id=clicked_marker.body_id, marker_id=clicked_marker_id),
+                JointEndpointInput(JointEndpointKind.MARKER, body_id=clicked_body_id, marker_id=clicked_marker_id),
                 JointEndpointInput(JointEndpointKind.MARKER, body_id=new_body_id, marker_id=new_marker_id),
             )
         self.modelChanged.emit(f"Created {joint_name}")
@@ -1265,6 +1358,14 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _deg_expression(self, value: float) -> str:
         return f"{value:.6f} deg"
 
+    def _marker_label(self, marker_id: str) -> str:
+        try:
+            marker = self.app_service._find_entity(marker_id)
+            body = self.app_service._find_body_by_marker(marker_id)
+            return f"{body.name}.{marker.name}"
+        except Exception:
+            return marker_id
+
     def _next_name(self, prefix: str, existing: list[str]) -> str:
         index = 1
         candidate = f"{prefix}{index}"
@@ -1282,6 +1383,55 @@ class MechanismCanvas(QtWidgets.QWidget):
         if not accepted or not name.strip():
             return None
         return name.strip()
+
+    def _request_creation_marker_joint(self, clicked_marker: CanvasMarker) -> tuple[str | None, str | None] | None:
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Existing Marker")
+        layout = QtWidgets.QFormLayout(dialog)
+        message = QtWidgets.QLabel(
+            f"A marker '{clicked_marker.name}' exists at this location.\n"
+            "Create the new marker here and optionally connect it."
+        )
+        layout.addRow(message)
+        joint_name = QtWidgets.QLineEdit(
+            self._next_name("Joint", [joint.name for joint in self.app_service.project.model.joints])
+        )
+        type_combo = QtWidgets.QComboBox()
+        type_combo.addItems(["revolute", "rigid"])
+        layout.addRow("Joint name:", joint_name)
+        layout.addRow("Joint type:", type_combo)
+        buttons = QtWidgets.QDialogButtonBox(self)
+        connect_button = buttons.addButton("Create joint", QtWidgets.QDialogButtonBox.ButtonRole.AcceptRole)
+        no_joint_button = buttons.addButton("No joint", QtWidgets.QDialogButtonBox.ButtonRole.DestructiveRole)
+        cancel_button = buttons.addButton(QtWidgets.QDialogButtonBox.StandardButton.Cancel)
+        layout.addRow(buttons)
+
+        selected: dict[str, str] = {}
+
+        def choose_connect() -> None:
+            selected["action"] = "connect"
+            dialog.accept()
+
+        def choose_no_joint() -> None:
+            selected["action"] = "no_joint"
+            dialog.accept()
+
+        def choose_cancel() -> None:
+            selected["action"] = "cancel"
+            dialog.reject()
+
+        connect_button.clicked.connect(choose_connect)
+        no_joint_button.clicked.connect(choose_no_joint)
+        cancel_button.clicked.connect(choose_cancel)
+
+        if dialog.exec() != int(QtWidgets.QDialog.DialogCode.Accepted):
+            return None
+        if selected.get("action") == "no_joint":
+            return None, None
+        name = joint_name.text().strip()
+        if not name:
+            return None
+        return name, type_combo.currentText()
 
     def _request_ground_or_slider_joint(self, prefix: str) -> tuple[str, str] | None:
         if not self._require_editing():
@@ -1407,7 +1557,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             return {
                 "origin_x": world[0],
                 "origin_y": world[1],
-                "angle_deg": math.degrees(angle),
+                "angle_deg": angle,
                 "travel_min": travel_min,
                 "travel_max": travel_max,
             }
@@ -1514,9 +1664,76 @@ class MechanismCanvas(QtWidgets.QWidget):
             self.modelChanged.emit(f"Driver creation failed: {exc}")
             self.set_mode(CanvasMode.SELECT)
 
+    def _handle_sensor_marker_selection(self, marker: CanvasMarker, required_count: int) -> None:
+        if self._joint_start_marker is None:
+            self._joint_start_marker = marker
+            self.entitySelected.emit(marker.entity_id)
+            self.update()
+            return
+        marker_ids = [self._joint_start_marker.entity_id]
+        self._joint_start_marker = None
+        if marker.entity_id in marker_ids:
+            self.update()
+            return
+        marker_ids.append(marker.entity_id)
+        if required_count == 4:
+            self.modelChanged.emit("Click two more markers for angle vector sensor")
+            self._creation_points.append((marker.x, marker.y))
+            self._joint_start_marker = None
+            self.update()
+            return
+        sensor_type_map = {
+            2: {"distance": "distance", "horizontal": "angle_horizontal", "vertical": "angle_vertical"},
+        }
+        if len(marker_ids) == required_count:
+            self._create_sensor_from_markers(marker_ids, self._get_sensor_type())
+
+    def _get_sensor_type(self) -> str:
+        mode_map = {
+            CanvasMode.CREATE_DISTANCE_SENSOR: "distance",
+            CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR: "angle_horizontal",
+            CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR: "angle_vertical",
+            CanvasMode.CREATE_ANGLE_VECTOR_SENSOR: "angle_vector",
+        }
+        return mode_map.get(self._mode, "point")
+
+    def _create_sensor_from_markers(self, marker_ids: list[str], sensor_type: str) -> None:
+        if not self._require_editing():
+            return
+        type_labels = {
+            "point": "Point Sensor",
+            "distance": "Distance Sensor",
+            "angle_horizontal": "Angle (Horizontal) Sensor",
+            "angle_vertical": "Angle (Vertical) Sensor",
+            "angle_vector": "Angle (Vector) Sensor",
+        }
+        default_name = self._next_name(
+            type_labels.get(sensor_type, "Sensor"),
+            [sensor.name for sensor in self.app_service.project.model.sensors],
+        )
+        name, accepted = QtWidgets.QInputDialog.getText(
+            self,
+            "Create Sensor",
+            "Sensor name:",
+            text=default_name,
+        )
+        if not accepted or not name.strip():
+            self.set_mode(CanvasMode.SELECT)
+            return
+        try:
+            self.app_service.create_sensor(name.strip(), sensor_type, marker_ids)
+            self.modelChanged.emit(f"Created {type_labels.get(sensor_type, 'sensor')} {name.strip()}")
+            self.set_mode(CanvasMode.SELECT)
+        except Exception as exc:  # pragma: no cover - UI feedback
+            self.modelChanged.emit(f"Sensor creation failed: {exc}")
+            self.set_mode(CanvasMode.SELECT)
+
     def _require_editing(self) -> bool:
         if self._editing_enabled:
-            return True
+            if self._edit_guard is None or self._edit_guard():
+                return True
+            self.modelChanged.emit("Model edit cancelled")
+            return False
         self.modelChanged.emit("Editing is only available at t=0")
         return False
 

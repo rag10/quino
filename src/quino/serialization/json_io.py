@@ -14,11 +14,12 @@ from quino.domain.model import (
     Parameter,
     Project,
     ScalarProperty,
+    Sensor,
     Slider,
     Style,
     ViewState,
 )
-from quino.domain.types import BodyType, Dimension, DriverType, JointEndpointKind, JointType, MarkerType
+from quino.domain.types import BodyType, Dimension, DriverType, JointEndpointKind, JointType, MarkerType, SensorType
 
 
 class JsonMapper:
@@ -36,6 +37,7 @@ class JsonMapper:
                 "sliders": [self._slider_to_dict(slider) for slider in project.model.sliders],
                 "joints": [self._joint_to_dict(joint) for joint in project.model.joints],
                 "drivers": [self._driver_to_dict(driver) for driver in project.model.drivers],
+                "sensors": [self._sensor_to_dict(sensor) for sensor in project.model.sensors],
             },
             "view_state": {
                 "zoom": project.view_state.zoom,
@@ -61,6 +63,7 @@ class JsonMapper:
                 sliders=[self._slider_from_dict(item) for item in model_block.get("sliders", [])],
                 joints=[self._joint_from_dict(item) for item in model_block.get("joints", [])],
                 drivers=[self._driver_from_dict(item) for item in model_block.get("drivers", [])],
+                sensors=[self._sensor_from_dict(item) for item in model_block.get("sensors", [])],
             ),
             view_state=ViewState(**data.get("view_state", {})),
             metadata=Metadata(project_block.get("metadata", {})),
@@ -258,5 +261,23 @@ class JsonMapper:
             type=DriverType(data["type"]),
             target_joint_id=data["target_joint_id"],
             law=self._scalar_from_dict(data["law"]),
+            metadata=Metadata(data.get("metadata", {})),
+        )
+
+    def _sensor_to_dict(self, sensor: Sensor) -> dict:
+        return {
+            "id": sensor.id,
+            "name": sensor.name,
+            "type": sensor.type.value,
+            "marker_ids": sensor.marker_ids,
+            "metadata": sensor.metadata.values,
+        }
+
+    def _sensor_from_dict(self, data: dict) -> Sensor:
+        return Sensor(
+            id=data["id"],
+            name=data["name"],
+            type=SensorType(data["type"]),
+            marker_ids=data.get("marker_ids", []),
             metadata=Metadata(data.get("metadata", {})),
         )

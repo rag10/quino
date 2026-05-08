@@ -1,0 +1,17 @@
+Acciones correctivas requeridas:
+
+- Ahora mismo no se pueden seleccionar bar o body en el canvas. Arregla esto par que se puedan seleccionar.
+- Cuando se pulsa la tecla esc. se debe de deselccionar lo que haya seleccionado.
+- Hay un error con los markers cuando el elemento que los contiene está linkado. A la hora de moverlos, se desplazan otros markers que no tienen por qué hacerlo. Lo único que hay que chequear a la hoar de mover un marker es si hay alguna junta que lo esté enlazando con otro marker, ground o slider. En ese caso se debe mover el marker seleccionado, la junta y el otro marker/ground/slider. Esto aplica también si se modifica la posición de un marker desde el inspector. 
+- Cuando se desplza un marker.
+- En el inspector, los campos a editar true/false, com el de visibilidad deberán hacerse por medio de un desplegable.
+
+----------------------------------------------
+
+Acciones correctivas requeridas:
+
+Al crear bar, si se clica en un marker existente, debe aparecer un diálogo para crear una junta. Este diálogo aparece, pero falta incluir el nombre de la junta. Además, luego se produce un bug en el que no se permite completar la creación de la barra, tanto si es el primer como el segundo marker. Al crear el body parece que este bug no ocurre, pero revisalo también.
+
+También hay que corregir la forma de unir un marker con un slider.  
+
+

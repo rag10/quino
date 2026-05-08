@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from quino.domain.types import BodyType, Dimension, DriverType, JointEndpointKind, JointType, MarkerType
+from quino.domain.types import BodyType, Dimension, DriverType, JointEndpointKind, JointType, MarkerType, SensorType
 
 
 @dataclass(slots=True)
@@ -117,11 +117,29 @@ class Driver:
 
 
 @dataclass(slots=True)
+class Sensor:
+    id: str
+    name: str
+    type: SensorType
+    marker_ids: list[str] = field(default_factory=list)
+    metadata: Metadata = field(default_factory=Metadata)
+
+
+@dataclass(slots=True)
+class SensorOutput:
+    sensor_id: str
+    time: list[float] = field(default_factory=list)
+    columns: list[str] = field(default_factory=list)
+    data: list[list[float]] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class Model:
     bodies: list[Body] = field(default_factory=list)
     sliders: list[Slider] = field(default_factory=list)
     joints: list[Joint] = field(default_factory=list)
     drivers: list[Driver] = field(default_factory=list)
+    sensors: list[Sensor] = field(default_factory=list)
 
 
 @dataclass(slots=True)

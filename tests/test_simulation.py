@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import importlib
-import types
 import math
+from pathlib import Path
+import types
 
 from quino import (
     ApplicationService,
@@ -12,6 +13,8 @@ from quino import (
     MarkerInput,
     SliderInput,
 )
+from quino.application.examples import build_slider_crank_example
+from quino.solver_adapters.exudyn_adapter import ExudynAdapter
 
 
 def _marker_world(assembled, frame: dict[str, float], body_id: str, marker_id: str) -> tuple[float, float]:
@@ -234,6 +237,69 @@ def test_slider_crank_uses_prismatic_joint_in_fake_exudyn(monkeypatch) -> None:
     assert result.time
 
 
+def test_exudyn_adapter_returns_partial_frames_when_dynamic_solve_fails(monkeypatch) -> None:
+    class _FailingPartialMbs(_FakeMbs):
+        def SolveDynamic(self, simulationSettings=None):
+            Path(simulationSettings.solutionSettings.coordinatesSolutionFileName).write_text("partial")
+            raise ValueError("dynamic boom")
+
+    class _FailingPartialSystemContainer:
+        def __init__(self):
+            self.mbs = _FailingPartialMbs()
+
+        def AddSystem(self):
+            return self.mbs
+
+    class _Rows(list):
+        ndim = 2
+
+    fake_sc = _FailingPartialSystemContainer()
+    fake_exu = types.SimpleNamespace(
+        SystemContainer=lambda: fake_sc,
+        OutputVariableType=types.SimpleNamespace(Coordinates="Coordinates"),
+    )
+    fake_exu.SimulationSettings = lambda: types.SimpleNamespace(
+        timeIntegration=types.SimpleNamespace(numberOfSteps=0, endTime=0.0),
+        staticSolver=types.SimpleNamespace(numberOfLoadSteps=0),
+        solutionSettings=types.SimpleNamespace(writeSolutionToFile=True),
+    )
+    fake_item_interface = _FakeItemInterface()
+    fake_utilities = types.SimpleNamespace(
+        LoadSolutionFile=lambda *args, **kwargs: {
+            "data": _Rows(
+                [
+                    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    [0.1, 1.0, 2.0, 0.1, 3.0, 4.0, 0.2],
+                ]
+            ),
+            "columnsExported": [6],
+        }
+    )
+
+    def fake_import_module(name: str):
+        if name == "exudyn":
+            return fake_exu
+        if name == "exudyn.itemInterface":
+            return fake_item_interface
+        if name == "exudyn.utilities":
+            return fake_utilities
+        raise ImportError(name)
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object() if name == "exudyn" else None)
+    monkeypatch.setattr(importlib, "import_module", fake_import_module)
+
+    app = ApplicationService()
+    build_slider_crank_example(app)
+
+    result = app.simulation_runner.adapter.run(app.project, duration=1.0, steps=10)
+
+    assert result.success is False
+    assert result.frames
+    assert result.time == [0.0, 0.1]
+    assert "partial trajectory" in result.error
+    assert any("partial frames" in message for message in result.messages)
+
+
 def test_slider_crank_runs_with_real_exudyn_if_available() -> None:
     import importlib.util
 
@@ -393,3 +459,23 @@ def test_convenience_api_supports_slider_from_points_and_rigid_joints() -> None:
     assert joint_id in {joint.id for joint in app.project.model.joints}
     assert any(marker.name == "P3" for marker in body.markers)
     assert body.type.value == "body"
+
+
+def test_exudyn_adapter_reports_diagnostics_on_execution_failure(monkeypatch) -> None:
+    app = ApplicationService()
+    build_slider_crank_example(app)
+    adapter = ExudynAdapter(app.expression_service)
+    monkeypatch.setattr(adapter, "is_available", lambda: True)
+    monkeypatch.setattr(
+        adapter,
+        "_run_with_exudyn",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    result = adapter.run(app.project)
+
+    assert result.success is False
+    assert "boom" in result.error
+    assert any("Solver phase:" in message for message in result.messages)
+    assert any("Model summary:" in message for message in result.messages)
+    assert any("RuntimeError: boom" in message for message in result.messages)

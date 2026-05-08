@@ -11,6 +11,7 @@ from quino import (
     PropertyValueInput,
     SliderInput,
 )
+from quino.domain.model import SimulationResult
 
 
 def make_app() -> ApplicationService:
@@ -18,6 +19,13 @@ def make_app() -> ApplicationService:
     app.new_project("Demo")
     app.create_parameter("L1", "120 mm", "mm")
     return app
+
+
+def _mm(app: ApplicationService, expression: str) -> float:
+    return app.unit_service.convert(
+        app.expression_service.evaluate_expression(expression, app.project.parameters),
+        "mm",
+    )
 
 
 def test_bar_gets_com_and_can_turn_into_body() -> None:
@@ -76,6 +84,124 @@ def test_update_property_supports_expression_boolean_and_null() -> None:
     assert body.mass is None
 
 
+def test_move_marker_translates_only_direct_joint_counterparts() -> None:
+    app = make_app()
+    body1 = app.create_bar("Crank", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    body2 = app.create_body("Coupler", [MarkerInput("100 mm", "0 mm", "P"), MarkerInput("120 mm", "10 mm", "Q")])
+    body3 = app.create_body("Rocker", [MarkerInput("120 mm", "10 mm", "R"), MarkerInput("140 mm", "10 mm", "S")])
+    marker_b = next(marker.id for marker in app._find_body(body1).markers if marker.name == "B")
+    marker_p = next(marker.id for marker in app._find_body(body2).markers if marker.name == "P")
+    marker_q = next(marker.id for marker in app._find_body(body2).markers if marker.name == "Q")
+    marker_r = next(marker.id for marker in app._find_body(body3).markers if marker.name == "R")
+    app.create_joint(
+        "JointBP",
+        "revolute",
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body1, marker_id=marker_b),
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body2, marker_id=marker_p),
+    )
+    app.create_joint(
+        "JointQR",
+        "revolute",
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body2, marker_id=marker_q),
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body3, marker_id=marker_r),
+    )
+
+    app.move_marker(marker_b, "110 mm", "15 mm")
+
+    body1_obj = app._find_body(body1)
+    body2_obj = app._find_body(body2)
+    body3_obj = app._find_body(body3)
+    body1_markers = {marker.name: marker for marker in body1_obj.structural_markers()}
+    body2_markers = {marker.name: marker for marker in body2_obj.structural_markers()}
+    body3_markers = {marker.name: marker for marker in body3_obj.structural_markers()}
+    assert _mm(app, body1_markers["A"].x.expression) == pytest.approx(0.0)
+    assert _mm(app, body1_markers["A"].y.expression) == pytest.approx(0.0)
+    assert _mm(app, body1_markers["B"].x.expression) == pytest.approx(110.0)
+    assert _mm(app, body1_markers["B"].y.expression) == pytest.approx(15.0)
+    assert _mm(app, body2_markers["P"].x.expression) == pytest.approx(110.0)
+    assert _mm(app, body2_markers["P"].y.expression) == pytest.approx(15.0)
+    assert _mm(app, body2_markers["Q"].x.expression) == pytest.approx(120.0)
+    assert _mm(app, body2_markers["Q"].y.expression) == pytest.approx(10.0)
+    assert _mm(app, body3_markers["R"].x.expression) == pytest.approx(120.0)
+    assert _mm(app, body3_markers["R"].y.expression) == pytest.approx(10.0)
+    assert _mm(app, body3_markers["S"].x.expression) == pytest.approx(140.0)
+    assert _mm(app, body3_markers["S"].y.expression) == pytest.approx(10.0)
+
+
+def test_move_marker_translates_connected_slider_origin() -> None:
+    app = make_app()
+    body_id = app.create_body(
+        "Rod",
+        [MarkerInput("0 mm", "0 mm", "A"), MarkerInput("40 mm", "0 mm", "P")],
+    )
+    slider_id = app.create_slider_from_points("Guide", "40 mm", "0 mm", "120 mm", "0 mm")
+    marker_p = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "P")
+    app.connect_marker_to_slider(marker_p, slider_id, name="Slider_P")
+
+    app.move_marker(marker_p, "50 mm", "20 mm")
+
+    slider = app._find_entity(slider_id)
+    assert _mm(app, slider.origin_x.expression) == pytest.approx(90.0)
+    assert _mm(app, slider.origin_y.expression) == pytest.approx(20.0)
+
+
+def test_moving_slider_origin_translates_connected_marker() -> None:
+    app = make_app()
+    body_id = app.create_body("Rod", [MarkerInput("40 mm", "0 mm", "P")])
+    slider_id = app.create_slider_from_points("Guide", "40 mm", "0 mm", "120 mm", "0 mm")
+    marker_p = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "P")
+    app.connect_marker_to_slider(marker_p, slider_id, name="Slider_P")
+
+    app.update_property(slider_id, "origin_x", PropertyValueInput("expression", "90 mm"))
+    app.update_property(slider_id, "origin_y", PropertyValueInput("expression", "10 mm"))
+
+    marker = app._find_entity(marker_p)
+    report = app.validate_model()
+    assert _mm(app, marker.x.expression) == pytest.approx(50.0)
+    assert _mm(app, marker.y.expression) == pytest.approx(10.0)
+    assert not any(message.code == "slider_joint_gap" for message in report.messages)
+
+
+def test_rotating_slider_keeps_connected_marker_on_guide() -> None:
+    app = make_app()
+    body_id = app.create_body("Rod", [MarkerInput("10 mm", "0 mm", "P")])
+    slider_id = app.create_slider("Guide", SliderInput("0 mm", "0 mm", "0 deg", "-20 mm", "20 mm"))
+    marker_p = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "P")
+    app.connect_marker_to_slider(marker_p, slider_id, name="Slider_P")
+
+    app.update_property(slider_id, "angle", PropertyValueInput("expression", "90 deg"))
+
+    marker = app._find_entity(marker_p)
+    report = app.validate_model()
+    assert _mm(app, marker.x.expression) == pytest.approx(0.0)
+    assert _mm(app, marker.y.expression) == pytest.approx(10.0)
+    assert not any(message.code == "slider_joint_gap" for message in report.messages)
+
+
+def test_update_property_on_jointed_marker_translates_direct_counterpart() -> None:
+    app = make_app()
+    body1 = app.create_body("Mass1", [MarkerInput("0 mm", "0 mm", "P1")])
+    body2 = app.create_body("Mass2", [MarkerInput("0 mm", "0 mm", "P2")])
+    marker1 = next(marker.id for marker in app._find_body(body1).markers if marker.name == "P1")
+    marker2 = next(marker.id for marker in app._find_body(body2).markers if marker.name == "P2")
+    app.create_joint(
+        "Joint12",
+        "revolute",
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body1, marker_id=marker1),
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body2, marker_id=marker2),
+    )
+
+    app.update_property(marker1, "x", PropertyValueInput("expression", "25 mm"))
+    app.update_property(marker1, "y", PropertyValueInput("expression", "5 mm"))
+
+    moved_marker1 = app._find_entity(marker1)
+    moved_marker2 = app._find_entity(marker2)
+    assert _mm(app, moved_marker1.x.expression) == pytest.approx(25.0)
+    assert _mm(app, moved_marker1.y.expression) == pytest.approx(5.0)
+    assert _mm(app, moved_marker2.x.expression) == pytest.approx(25.0)
+    assert _mm(app, moved_marker2.y.expression) == pytest.approx(5.0)
+
+
 def test_units_validation_rejects_angle_in_length_slot() -> None:
     app = make_app()
     body_id = app.create_bar("Crank", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("L1", "0 mm", "B"))
@@ -124,6 +250,16 @@ def test_parameter_unit_must_match_expression_dimension() -> None:
     app = make_app()
     with pytest.raises(ValueError):
         app.create_parameter("AngleAsLength", "30 deg", "mm")
+
+
+def test_expressions_accept_compact_units_and_decimal_comma() -> None:
+    app = make_app()
+
+    compact_angle = app.expression_service.evaluate_expression("360deg * 1s / 1s", app.project.parameters)
+    decimal_length = app.expression_service.evaluate_expression("12,5mm", app.project.parameters)
+
+    assert app.unit_service.convert(compact_angle, "deg") == pytest.approx(360.0)
+    assert app.unit_service.convert(decimal_length, "mm") == pytest.approx(12.5)
 
 
 def test_failed_parameter_update_does_not_mutate_project() -> None:
@@ -180,3 +316,178 @@ def test_multiple_drivers_on_same_joint_are_rejected() -> None:
     app.create_driver("Drive1", DriverType.ROTATION.value, joint_id, "10 deg * t / 1 s", "deg")
     with pytest.raises(ValueError):
         app.create_driver("Drive2", DriverType.ROTATION.value, joint_id, "20 deg * t / 1 s", "deg")
+
+
+def test_validate_model_reports_joint_geometry_gaps() -> None:
+    app = make_app()
+    body1 = app.create_body("Mass1", [MarkerInput("0 mm", "0 mm", "P1")])
+    body2 = app.create_body("Mass2", [MarkerInput("10 mm", "0 mm", "P2")])
+    marker1 = next(marker.id for marker in app._find_body(body1).markers if marker.name == "P1")
+    marker2 = next(marker.id for marker in app._find_body(body2).markers if marker.name == "P2")
+    app.create_joint(
+        "BrokenJoint",
+        "revolute",
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body1, marker_id=marker1),
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body2, marker_id=marker2),
+    )
+
+    report = app.validate_model()
+
+    assert any(message.code == "joint_gap" and "BrokenJoint" in message.message for message in report.messages)
+
+
+def test_validate_model_reports_slider_joint_geometry_gap() -> None:
+    app = make_app()
+    body_id = app.create_body("Mass1", [MarkerInput("0 mm", "10 mm", "P")])
+    slider_id = app.create_slider_from_points("Guide", "0 mm", "0 mm", "100 mm", "0 mm")
+    marker_id = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "P")
+    app.connect_marker_to_slider(marker_id, slider_id, name="BrokenSliderJoint")
+
+    report = app.validate_model()
+
+    assert any(
+        message.code == "slider_joint_gap" and "BrokenSliderJoint" in message.message
+        for message in report.messages
+    )
+
+
+def test_validate_model_reports_unreachable_slider_crank_motion() -> None:
+    app = ApplicationService()
+    app.new_project("Unreachable Slider Crank")
+    crank = app.create_bar(
+        "Crank",
+        MarkerInput("0 mm", "0 mm", "A"),
+        MarkerInput("10 mm", "0 mm", "B"),
+    )
+    rod = app.create_bar(
+        "Rod",
+        MarkerInput("10 mm", "0 mm", "B"),
+        MarkerInput("15 mm", "0 mm", "P"),
+    )
+    slider = app.create_slider("Guide", SliderInput("15 mm", "0 mm", "0 deg", "-20 mm", "20 mm"))
+
+    def mid(body_id: str, marker_name: str) -> str:
+        return next(
+            marker.id for marker in app._find_body(body_id).markers if marker.name == marker_name
+        )
+
+    ground_a = app.connect_marker_to_ground(mid(crank, "A"), name="Ground_A")
+    app.create_joint(
+        "Joint_B",
+        "revolute",
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=crank, marker_id=mid(crank, "B")),
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=rod, marker_id=mid(rod, "B")),
+    )
+    app.connect_marker_to_slider(mid(rod, "P"), slider, name="Slider_P")
+    app.create_driver("CrankDrive", DriverType.ROTATION.value, ground_a, "90 deg * t / 1 s", "deg")
+
+    report = app.validate_model(duration=1.0, steps=20)
+
+    assert any(message.code == "kinematic_reach" for message in report.messages)
+
+
+def test_run_simulation_attempts_solver_after_unreachable_preflight() -> None:
+    app = ApplicationService()
+    app.new_project("Unreachable Slider Crank")
+    crank = app.create_bar(
+        "Crank",
+        MarkerInput("0 mm", "0 mm", "A"),
+        MarkerInput("10 mm", "0 mm", "B"),
+    )
+    rod = app.create_bar(
+        "Rod",
+        MarkerInput("10 mm", "0 mm", "B"),
+        MarkerInput("15 mm", "0 mm", "P"),
+    )
+    slider = app.create_slider("Guide", SliderInput("15 mm", "0 mm", "0 deg", "-20 mm", "20 mm"))
+
+    def mid(body_id: str, marker_name: str) -> str:
+        return next(
+            marker.id for marker in app._find_body(body_id).markers if marker.name == marker_name
+        )
+
+    ground_a = app.connect_marker_to_ground(mid(crank, "A"), name="Ground_A")
+    app.create_joint(
+        "Joint_B",
+        "revolute",
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=crank, marker_id=mid(crank, "B")),
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=rod, marker_id=mid(rod, "B")),
+    )
+    app.connect_marker_to_slider(mid(rod, "P"), slider, name="Slider_P")
+    app.create_driver("CrankDrive", DriverType.ROTATION.value, ground_a, "90 deg * t / 1 s", "deg")
+
+    original_adapter = app.simulation_runner.adapter
+
+    class PartialAdapter:
+        name = "partial"
+        assembler = original_adapter.assembler
+        called = False
+
+        def is_available(self) -> bool:
+            return True
+
+        def run(self, project, duration: float = 1.0, steps: int = 100):
+            self.called = True
+            return SimulationResult(
+                success=False,
+                backend=self.name,
+                time=[0.0, 0.1],
+                frames=[{"body_001.x": 0.0}, {"body_001.x": 1.0}],
+                error="partial failure",
+            )
+
+    partial_adapter = PartialAdapter()
+    app.simulation_runner.adapter = partial_adapter
+
+    result = app.run_kinematic_simulation(duration=1.0, steps=20)
+
+    assert partial_adapter.called is True
+    assert result.success is False
+    assert result.frames
+    assert result.error == "partial failure"
+    assert any("Preflight detected unreachable kinematics" in message for message in result.messages)
+
+
+def test_validate_model_reports_unreachable_four_bar_loop() -> None:
+    app = ApplicationService()
+    app.new_project("Unreachable Four Bar")
+    crank = app.create_bar(
+        "Crank",
+        MarkerInput("0 mm", "0 mm", "A"),
+        MarkerInput("80 mm", "0 mm", "B"),
+    )
+    coupler = app.create_bar(
+        "Coupler",
+        MarkerInput("80 mm", "0 mm", "B"),
+        MarkerInput("90 mm", "0 mm", "C"),
+    )
+    rocker = app.create_bar(
+        "Rocker",
+        MarkerInput("100 mm", "0 mm", "D"),
+        MarkerInput("90 mm", "0 mm", "C"),
+    )
+
+    def mid(body_id: str, marker_name: str) -> str:
+        return next(
+            marker.id for marker in app._find_body(body_id).markers if marker.name == marker_name
+        )
+
+    ground_a = app.connect_marker_to_ground(mid(crank, "A"), name="Ground_A")
+    app.create_joint(
+        "Joint_B",
+        "revolute",
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=crank, marker_id=mid(crank, "B")),
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=coupler, marker_id=mid(coupler, "B")),
+    )
+    app.create_joint(
+        "Joint_C",
+        "revolute",
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=coupler, marker_id=mid(coupler, "C")),
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=rocker, marker_id=mid(rocker, "C")),
+    )
+    app.connect_marker_to_ground(mid(rocker, "D"), name="Ground_D")
+    app.create_driver("CrankDrive", DriverType.ROTATION.value, ground_a, "180deg * t / 1s", "deg")
+
+    report = app.validate_model(duration=1.0, steps=20)
+
+    assert any(message.code == "kinematic_loop_reach" for message in report.messages)

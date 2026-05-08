@@ -35,3 +35,10 @@ class JointEndpointInput:
 class PropertyValueInput:
     kind: str
     value: str | bool | None
+
+
+@dataclass(slots=True)
+class SensorInput:
+    name: str
+    sensor_type: str
+    marker_ids: list[str]

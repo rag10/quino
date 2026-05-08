@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import qtawesome as qta
+from quino.gui.icons import get_icon
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from quino.application.examples import build_four_bar_example, build_slider_crank_example
@@ -53,8 +53,10 @@ class MainWindow(QtWidgets.QMainWindow):
         center_panel = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.canvas = MechanismCanvas(self.app_service)
         self.canvas.entitySelected.connect(self._select_entity_by_id)
+        self.canvas.selectionCleared.connect(self._clear_selection)
         self.canvas.modelChanged.connect(self._on_canvas_model_changed)
         self.canvas.modeChanged.connect(self._on_canvas_mode_changed)
+        self.canvas.set_edit_guard(self._prepare_for_model_edit)
         self.action_fit_view.triggered.connect(self.canvas.fit_view)
         center_panel.addWidget(self.canvas)
 
@@ -130,9 +132,9 @@ class MainWindow(QtWidgets.QMainWindow):
         parameters_layout = QtWidgets.QVBoxLayout(parameters_widget)
         parameters_layout.setContentsMargins(0, 0, 0, 0)
         parameters_toolbar = QtWidgets.QHBoxLayout()
-        self.add_parameter_button = QtWidgets.QPushButton(qta.icon("mdi.plus", color="#3d3d3d"), "Add")
+        self.add_parameter_button = QtWidgets.QPushButton(get_icon("add", "#3d3d3d"), "Add")
         self.add_parameter_button.clicked.connect(self._add_parameter)
-        self.delete_parameter_button = QtWidgets.QPushButton(qta.icon("mdi.minus", color="#8b2500"), "Delete")
+        self.delete_parameter_button = QtWidgets.QPushButton(get_icon("remove", "#8b2500"), "Delete")
         self.delete_parameter_button.clicked.connect(self._delete_selected_parameter)
         parameters_toolbar.addWidget(self.add_parameter_button)
         parameters_toolbar.addWidget(self.delete_parameter_button)
@@ -169,77 +171,97 @@ class MainWindow(QtWidgets.QMainWindow):
         color_success = "#1a6b4a"
         color_danger = "#8b2500"
 
-        self.action_new = QtGui.QAction(qta.icon("mdi.file-plus", color=color_base), "New", self)
+        self.action_new = QtGui.QAction(get_icon("file-new", color_base), "New", self)
         self.action_new.triggered.connect(self._new_project)
         self.action_new.setToolTip("Create a new project")
 
-        self.action_open = QtGui.QAction(qta.icon("mdi.folder-open", color=color_base), "Open", self)
+        self.action_open = QtGui.QAction(get_icon("folder-open", color_base), "Open", self)
         self.action_open.triggered.connect(self._open_project)
         self.action_open.setToolTip("Open a project file")
 
-        self.action_save = QtGui.QAction(qta.icon("mdi.content-save", color=color_base), "Save", self)
+        self.action_save = QtGui.QAction(get_icon("content-save", color_base), "Save", self)
         self.action_save.triggered.connect(self._save_project)
         self.action_save.setToolTip("Save project")
 
-        self.action_undo = QtGui.QAction(qta.icon("mdi.undo", color=color_base), "Undo", self)
+        self.action_undo = QtGui.QAction(get_icon("undo", color_base), "Undo", self)
         self.action_undo.setShortcut(QtGui.QKeySequence.StandardKey.Undo)
         self.action_undo.triggered.connect(self._undo)
         self.action_undo.setToolTip("Undo last action (Ctrl+Z)")
 
-        self.action_redo = QtGui.QAction(qta.icon("mdi.redo", color=color_base), "Redo", self)
+        self.action_redo = QtGui.QAction(get_icon("redo", color_base), "Redo", self)
         self.action_redo.setShortcut(QtGui.QKeySequence.StandardKey.Redo)
         self.action_redo.triggered.connect(self._redo)
         self.action_redo.setToolTip("Redo last undone action (Ctrl+Y)")
 
-        self.action_validate = QtGui.QAction(qta.icon("mdi.check-circle-outline", color=color_base), "Validate", self)
+        self.action_validate = QtGui.QAction(get_icon("check-circle", color_base), "Validate", self)
         self.action_validate.triggered.connect(self.validate_model)
         self.action_validate.setToolTip("Validate model")
 
-        self.action_run = QtGui.QAction(qta.icon("mdi.play-circle", color=color_success), "Run", self)
+        self.action_run = QtGui.QAction(get_icon("play", color_success), "Run", self)
         self.action_run.triggered.connect(self.run_simulation)
         self.action_run.setToolTip("Run kinematic simulation")
 
-        self.action_play_pause = QtGui.QAction(qta.icon("mdi.play-pause", color=color_success), "Play", self)
+        self.action_play_pause = QtGui.QAction(get_icon("pause", color_success), "Play", self)
         self.action_play_pause.triggered.connect(self.toggle_playback)
         self.action_play_pause.setToolTip("Play/pause animation")
 
-        self.action_stop = QtGui.QAction(qta.icon("mdi.stop-circle", color=color_danger), "Stop", self)
+        self.action_stop = QtGui.QAction(get_icon("stop", color_danger), "Stop", self)
         self.action_stop.triggered.connect(self.stop_playback)
         self.action_stop.setToolTip("Stop animation")
 
-        self.action_four_bar = QtGui.QAction(qta.icon("mdi.cog", color=color_base), "Load Four Bar", self)
+        self.action_four_bar = QtGui.QAction(get_icon("four-bar", color_base), "Load Four Bar", self)
         self.action_four_bar.triggered.connect(self.load_four_bar_example)
         self.action_four_bar.setToolTip("Load a four-bar linkage example")
 
-        self.action_slider_crank = QtGui.QAction(qta.icon("mdi.cog-outline", color=color_base), "Load Slider Crank", self)
+        self.action_slider_crank = QtGui.QAction(get_icon("slider-crank", color_base), "Load Slider Crank", self)
         self.action_slider_crank.triggered.connect(self.load_slider_crank_example)
         self.action_slider_crank.setToolTip("Load a slider-crank mechanism example")
 
-        self.action_fit_view = QtGui.QAction(qta.icon("mdi.fit-to-page", color=color_base), "Fit View", self)
+        self.action_fit_view = QtGui.QAction(get_icon("fit-view", color_base), "Fit View", self)
         self.action_fit_view.setToolTip("Fit mechanism to view")
 
-        self.action_add_rotation_driver = QtGui.QAction(qta.icon("mdi.rotate-right", color=color_base), "Rotation Driver", self)
+        self.action_add_rotation_driver = QtGui.QAction(get_icon("rotate-driver", color_base), "Rotation Driver", self)
         self.action_add_rotation_driver.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_ROTATION_DRIVER))
         self.action_add_rotation_driver.setToolTip("Add a rotation driver to a joint (select a joint on canvas)")
 
-        self.action_add_translation_driver = QtGui.QAction(qta.icon("mdi.arrow-right-bold", color=color_base), "Translation Driver", self)
+        self.action_add_translation_driver = QtGui.QAction(get_icon("translate-driver", color_base), "Translation Driver", self)
         self.action_add_translation_driver.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_TRANSLATION_DRIVER))
         self.action_add_translation_driver.setToolTip("Add a translation driver to a slider (select a slider joint on canvas)")
 
-        self.action_delete = QtGui.QAction(qta.icon("mdi.delete", color=color_danger), "Delete", self)
+        self.action_point_sensor = QtGui.QAction(get_icon("marker-plus", color_base), "Point Sensor", self)
+        self.action_point_sensor.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_POINT_SENSOR))
+        self.action_point_sensor.setToolTip("Create a point sensor (select a marker on canvas)")
+
+        self.action_distance_sensor = QtGui.QAction(get_icon("marker-plus", color_base), "Distance Sensor", self)
+        self.action_distance_sensor.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_DISTANCE_SENSOR))
+        self.action_distance_sensor.setToolTip("Create a distance sensor (select 2 markers on canvas)")
+
+        self.action_angle_h_sensor = QtGui.QAction(get_icon("marker-plus", color_base), "Angle (H) Sensor", self)
+        self.action_angle_h_sensor.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR))
+        self.action_angle_h_sensor.setToolTip("Create an angle (horizontal) sensor (select 2 markers on canvas)")
+
+        self.action_angle_v_sensor = QtGui.QAction(get_icon("marker-plus", color_base), "Angle (V) Sensor", self)
+        self.action_angle_v_sensor.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR))
+        self.action_angle_v_sensor.setToolTip("Create an angle (vertical) sensor (select 2 markers on canvas)")
+
+        self.action_angle_vector_sensor = QtGui.QAction(get_icon("marker-plus", color_base), "Angle (Vector) Sensor", self)
+        self.action_angle_vector_sensor.triggered.connect(lambda: self._set_canvas_mode(CanvasMode.CREATE_ANGLE_VECTOR_SENSOR))
+        self.action_angle_vector_sensor.setToolTip("Create an angle (vector) sensor (select 4 markers on canvas)")
+
+        self.action_delete = QtGui.QAction(get_icon("delete", color_danger), "Delete", self)
         self.action_delete.setShortcut(QtGui.QKeySequence.StandardKey.Delete)
         self.action_delete.triggered.connect(self.delete_selected_entity)
         self.action_delete.setToolTip("Delete selected entity (Del)")
 
-        self.action_select_tool = self._tool_action("Select", CanvasMode.SELECT, qta.icon("mdi.cursor-default", color=color_base), "Select entities")
-        self.action_bar_tool = self._tool_action("Bar", CanvasMode.CREATE_BAR, qta.icon("mdi.vector-line", color=color_base), "Create a bar (2-marker body)")
-        self.action_body_tool = self._tool_action("Body", CanvasMode.CREATE_BODY, qta.icon("mdi.vector-polygon", color=color_base), "Create a body")
-        self.action_add_marker_tool = self._tool_action("Add Marker", CanvasMode.ADD_MARKER, qta.icon("mdi.map-marker-plus", color=color_base), "Add a marker to the selected body")
-        self.action_joint_tool = self._tool_action("Revolute Joint", CanvasMode.CREATE_REVOLUTE, qta.icon("mdi.circle-double", color=color_base), "Create a revolute joint")
-        self.action_rigid_joint_tool = self._tool_action("Rigid Joint", CanvasMode.CREATE_RIGID, qta.icon("mdi.vector-square", color=color_base), "Create a rigid joint")
-        self.action_slider_tool = self._tool_action("Slider", CanvasMode.CREATE_SLIDER, qta.icon("mdi.arrow-collapse-horizontal", color=color_base), "Create a slider")
-        self.action_ground_tool = self._tool_action("Ground Joint", CanvasMode.CONNECT_GROUND, qta.icon("mdi.anchor", color=color_base), "Connect a marker to ground")
-        self.action_slider_connect_tool = self._tool_action("Marker To Slider", CanvasMode.CONNECT_SLIDER, qta.icon("mdi.connection", color=color_base), "Connect a marker to a slider")
+        self.action_select_tool = self._tool_action("Select", CanvasMode.SELECT, get_icon("select", color_base), "Select entities")
+        self.action_bar_tool = self._tool_action("Bar", CanvasMode.CREATE_BAR, get_icon("bar", color_base), "Create a bar (2-marker body)")
+        self.action_body_tool = self._tool_action("Body", CanvasMode.CREATE_BODY, get_icon("body", color_base), "Create a body")
+        self.action_add_marker_tool = self._tool_action("Add Marker", CanvasMode.ADD_MARKER, get_icon("marker-plus", color_base), "Add a marker to the selected body")
+        self.action_joint_tool = self._tool_action("Revolute Joint", CanvasMode.CREATE_REVOLUTE, get_icon("revolute", color_base), "Create a revolute joint")
+        self.action_rigid_joint_tool = self._tool_action("Rigid Joint", CanvasMode.CREATE_RIGID, get_icon("rigid", color_base), "Create a rigid joint")
+        self.action_slider_tool = self._tool_action("Slider", CanvasMode.CREATE_SLIDER, get_icon("slider", color_base), "Create a slider")
+        self.action_ground_tool = self._tool_action("Ground Joint", CanvasMode.CONNECT_GROUND, get_icon("ground", color_base), "Connect a marker to ground")
+        self.action_slider_connect_tool = self._tool_action("Marker To Slider", CanvasMode.CONNECT_SLIDER, get_icon("slider-connect", color_base), "Connect a marker to a slider")
 
         self.tool_group = QtGui.QActionGroup(self)
         self.tool_group.setExclusive(True)
@@ -253,6 +275,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_slider_tool,
             self.action_ground_tool,
             self.action_slider_connect_tool,
+            self.action_point_sensor,
+            self.action_distance_sensor,
+            self.action_angle_h_sensor,
+            self.action_angle_v_sensor,
+            self.action_angle_vector_sensor,
         ):
             self.tool_group.addAction(action)
         self.action_select_tool.setChecked(True)
@@ -325,6 +352,13 @@ class MainWindow(QtWidgets.QMainWindow):
         toolbar.addAction(self.action_add_translation_driver)
         toolbar.addSeparator()
 
+        toolbar.addAction(self.action_point_sensor)
+        toolbar.addAction(self.action_distance_sensor)
+        toolbar.addAction(self.action_angle_h_sensor)
+        toolbar.addAction(self.action_angle_v_sensor)
+        toolbar.addAction(self.action_angle_vector_sensor)
+        toolbar.addSeparator()
+
         toolbar.addAction(self.action_validate)
         toolbar.addAction(self.action_run)
         toolbar.addAction(self.action_play_pause)
@@ -346,8 +380,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def load_four_bar_example(self) -> None:
         result = build_four_bar_example(self.app_service)
         self._selected_entity_id = result.body_ids[0]
-        self._last_simulation_result = None
-        self.action_play_pause.setText("Play")
+        self._clear_simulation_state()
         self._append_message("Loaded four-bar example")
         self.canvas.fit_view()
         self.refresh_all()
@@ -355,8 +388,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def load_slider_crank_example(self) -> None:
         result = build_slider_crank_example(self.app_service)
         self._selected_entity_id = result.body_ids[0]
-        self._last_simulation_result = None
-        self.action_play_pause.setText("Play")
+        self._clear_simulation_state()
         self._append_message("Loaded slider-crank example")
         self.canvas.fit_view()
         self.refresh_all()
@@ -384,8 +416,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._current_frame_index = 0
         self.validation_view.setPlainText(
             "\n".join(
-                ["Simulation warnings:"]
+                ["Simulation diagnostics:"]
                 + [f"  {warning}" for warning in result.warnings]
+                + [f"  {message}" for message in result.messages]
                 + ([f"  ERROR: {result.error}"] if result.error else [])
             ).strip()
         )
@@ -394,25 +427,22 @@ class MainWindow(QtWidgets.QMainWindow):
             self._append_message(f"  warning: {warning}")
         for message in result.messages:
             self._append_message(f"  {message}")
-        if result.error:
-            self._append_message(f"  ERROR: {result.error}")
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Simulation Error",
-                f"Simulation failed:\n\n{result.error}",
-                QtWidgets.QMessageBox.StandardButton.Ok,
-            )
-        elif result.warnings:
-            warning_text = "\n".join(result.warnings)
-            QtWidgets.QMessageBox.warning(
-                self,
-                "Simulation Warnings",
-                f"Simulation completed with warnings:\n\n{warning_text}",
-                QtWidgets.QMessageBox.StandardButton.Ok,
-            )
         self._update_timeline_controls()
         self._apply_current_frame()
         self.refresh_all()
+        if result.error:
+            self._append_message(f"  ERROR: {result.error}")
+            detail = ""
+            icon = QtWidgets.QMessageBox.Icon.Critical
+            if result.frames:
+                detail = f"\n\nPartial trajectory available: {len(result.frames)} frame(s)."
+                icon = QtWidgets.QMessageBox.Icon.Warning
+            message_box = QtWidgets.QMessageBox(self)
+            message_box.setIcon(icon)
+            message_box.setWindowTitle("Simulation Error")
+            message_box.setText(f"Simulation failed:\n\n{result.error}{detail}")
+            message_box.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Ok)
+            message_box.exec()
 
     def toggle_playback(self) -> None:
         if self._last_simulation_result is None or not self._last_simulation_result.frames:
@@ -439,6 +469,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._append_message("Editing is only available at t=0")
             return
         if not self._selected_entity_id:
+            return
+        if not self._prepare_for_model_edit():
             return
         try:
             self.app_service.delete_entity(self._selected_entity_id)
@@ -493,16 +525,51 @@ class MainWindow(QtWidgets.QMainWindow):
         current_time = result.time[current] if current < len(result.time) else float(current)
         self.timeline_label.setText(f"{current + 1} / {len(result.frames)}  t={current_time:.3f}s")
 
+    def _has_simulation_frames(self) -> bool:
+        return self._last_simulation_result is not None and bool(self._last_simulation_result.frames)
+
+    def _clear_simulation_state(self, message: str | None = None) -> None:
+        self._playback_timer.stop()
+        self.action_play_pause.setText("Play")
+        self._last_simulation_result = None
+        self._last_simulation_state = None
+        self._current_frame_index = 0
+        self.canvas.set_state_overlay(None)
+        self._update_timeline_controls()
+        self._update_interaction_state()
+        if message:
+            self._append_message(message)
+
+    def _prepare_for_model_edit(self) -> bool:
+        if not self._has_simulation_frames():
+            return True
+        self._playback_timer.stop()
+        self.action_play_pause.setText("Play")
+        answer = QtWidgets.QMessageBox.warning(
+            self,
+            "Discard Simulation?",
+            (
+                "The model has an active simulation result.\n\n"
+                "If you modify the model, the current simulation will be removed."
+            ),
+            QtWidgets.QMessageBox.StandardButton.Ok | QtWidgets.QMessageBox.StandardButton.Cancel,
+            QtWidgets.QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QtWidgets.QMessageBox.StandardButton.Ok:
+            self._update_interaction_state()
+            return False
+        self._clear_simulation_state("Simulation discarded because the model was edited")
+        return True
+
     def _new_project(self) -> None:
         name, accepted = QtWidgets.QInputDialog.getText(self, "New Project", "Project name:", text="Untitled")
         if not accepted or not name:
             return
         self.app_service.new_project(name)
         self._selected_entity_id = None
-        self._last_simulation_result = None
+        self._clear_simulation_state()
         self.messages.clear()
         self.validation_view.clear()
-        self.action_play_pause.setText("Play")
         self.canvas.fit_view()
         self.refresh_all()
 
@@ -517,10 +584,9 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self.app_service.load_project(path)
         self._selected_entity_id = None
-        self._last_simulation_result = None
+        self._clear_simulation_state()
         self.messages.clear()
         self.validation_view.clear()
-        self.action_play_pause.setText("Play")
         self._append_message(f"Opened project: {path}")
         self.canvas._view_scale = None
         self.refresh_all()
@@ -547,7 +613,8 @@ class MainWindow(QtWidgets.QMainWindow):
         sliders_root = QtWidgets.QTreeWidgetItem(["Sliders", str(len(project.model.sliders))])
         joints_root = QtWidgets.QTreeWidgetItem(["Joints", str(len(project.model.joints))])
         drivers_root = QtWidgets.QTreeWidgetItem(["Drivers", str(len(project.model.drivers))])
-        self.tree.addTopLevelItems([bodies_root, sliders_root, joints_root, drivers_root])
+        sensors_root = QtWidgets.QTreeWidgetItem(["Sensors", str(len(project.model.sensors))])
+        self.tree.addTopLevelItems([bodies_root, sliders_root, joints_root, drivers_root, sensors_root])
 
         for body in project.model.bodies:
             body_item = self._entity_item(body.name, body.type.value, body.id)
@@ -560,6 +627,8 @@ class MainWindow(QtWidgets.QMainWindow):
             joints_root.addChild(self._entity_item(joint.name, joint.type.value, joint.id))
         for driver in project.model.drivers:
             drivers_root.addChild(self._entity_item(driver.name, driver.type.value, driver.id))
+        for sensor in project.model.sensors:
+            sensors_root.addChild(self._entity_item(sensor.name, sensor.type.value, sensor.id))
 
         self.tree.expandAll()
         if self._selected_entity_id:
@@ -637,6 +706,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._populate_inspector()
         self.canvas.set_selection(entity_id)
 
+    def _clear_selection(self) -> None:
+        self._selected_entity_id = None
+        self.tree.clearSelection()
+        self.tree.setCurrentItem(None)
+        self._populate_inspector()
+        self.canvas.set_selection(None)
+
     def _on_canvas_model_changed(self, message: str) -> None:
         self._append_message(message)
         self.refresh_all()
@@ -654,6 +730,11 @@ class MainWindow(QtWidgets.QMainWindow):
             CanvasMode.CONNECT_SLIDER: self.action_slider_connect_tool,
             CanvasMode.CREATE_ROTATION_DRIVER: self.action_add_rotation_driver,
             CanvasMode.CREATE_TRANSLATION_DRIVER: self.action_add_translation_driver,
+            CanvasMode.CREATE_POINT_SENSOR: self.action_point_sensor,
+            CanvasMode.CREATE_DISTANCE_SENSOR: self.action_distance_sensor,
+            CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR: self.action_angle_h_sensor,
+            CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR: self.action_angle_v_sensor,
+            CanvasMode.CREATE_ANGLE_VECTOR_SENSOR: self.action_angle_vector_sensor,
         }.get(mode)
         if action_for_mode:
             if action_for_mode in self.tool_group.actions():
@@ -688,16 +769,30 @@ class MainWindow(QtWidgets.QMainWindow):
             for row_index, (label, path, value, kind, evaluated) in enumerate(rows):
                 label_item = QtWidgets.QTableWidgetItem(label)
                 label_item.setFlags(label_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
-                value_item = QtWidgets.QTableWidgetItem(value)
-                value_item.setData(QtCore.Qt.ItemDataRole.UserRole, (path, kind))
-                if not self._editing_allowed() or kind == "readonly":
-                    value_item.setFlags(value_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
                 evaluated_item = QtWidgets.QTableWidgetItem(evaluated)
                 evaluated_item.setFlags(evaluated_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
                 if evaluated.startswith("ERROR:"):
                     evaluated_item.setForeground(QtGui.QColor("#c0392b"))
                 self.inspector.setItem(row_index, 0, label_item)
-                self.inspector.setItem(row_index, 1, value_item)
+                if kind == "boolean":
+                    value_item = QtWidgets.QTableWidgetItem(value)
+                    value_item.setFlags(value_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
+                    value_item.setData(QtCore.Qt.ItemDataRole.UserRole, (path, kind))
+                    self.inspector.setItem(row_index, 1, value_item)
+                    combo = QtWidgets.QComboBox(self.inspector)
+                    combo.addItems(["false", "true"])
+                    combo.setCurrentText(value)
+                    combo.setEnabled(self._editing_allowed())
+                    combo.currentTextChanged.connect(
+                        lambda text, current_path=path: self._on_inspector_boolean_changed(current_path, text)
+                    )
+                    self.inspector.setCellWidget(row_index, 1, combo)
+                else:
+                    value_item = QtWidgets.QTableWidgetItem(value)
+                    value_item.setData(QtCore.Qt.ItemDataRole.UserRole, (path, kind))
+                    if not self._editing_allowed() or kind == "readonly":
+                        value_item.setFlags(value_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
+                    self.inspector.setItem(row_index, 1, value_item)
                 self.inspector.setItem(row_index, 2, evaluated_item)
         finally:
             self._suspend_property_updates = False
@@ -797,6 +892,9 @@ class MainWindow(QtWidgets.QMainWindow):
         parameter_id = self.parameters_table.item(item.row(), 0).data(QtCore.Qt.ItemDataRole.UserRole)
         if parameter_id is None:
             return
+        if not self._prepare_for_model_edit():
+            self.refresh_all()
+            return
         name = self.parameters_table.item(item.row(), 0).text().strip()
         expression = self.parameters_table.item(item.row(), 1).text().strip()
         unit = self.parameters_table.item(item.row(), 2).text().strip()
@@ -808,7 +906,18 @@ class MainWindow(QtWidgets.QMainWindow):
             self._append_message(f"Parameter update failed: {exc}")
         self.refresh_all()
 
+    def _on_inspector_boolean_changed(self, path: str, text: str) -> None:
+        if self._suspend_property_updates or not self._selected_entity_id or not self._editing_allowed():
+            return
+        try:
+            self._apply_property_update(self._selected_entity_id, path, text, "boolean")
+        except Exception as exc:  # pragma: no cover - UI feedback
+            self._append_message(f"Property update failed: {exc}")
+        self.refresh_all()
+
     def _apply_property_update(self, entity_id: str, path: str, raw_value: str, kind: str) -> None:
+        if not self._prepare_for_model_edit():
+            return
         normalized = raw_value.strip()
         if kind == "boolean":
             value = PropertyValueInput("boolean", normalized.lower() in {"true", "1", "yes", "on"})
@@ -821,6 +930,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _add_parameter(self) -> None:
         if not self._editing_allowed():
             self._append_message("Editing is only available at t=0")
+            return
+        if not self._prepare_for_model_edit():
             return
         existing = [parameter.name for parameter in self.app_service.project.parameters]
         index = 1
@@ -835,6 +946,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _delete_selected_parameter(self) -> None:
         if not self._editing_allowed():
             self._append_message("Editing is only available at t=0")
+            return
+        if not self._prepare_for_model_edit():
             return
         row = self.parameters_table.currentRow()
         if row < 0:
@@ -855,6 +968,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._editing_allowed():
             self._append_message("Editing is only available at t=0")
             return
+        if not self._prepare_for_model_edit():
+            return
         if self.app_service.undo():
             self._append_message("Undo")
             self.refresh_all()
@@ -863,6 +978,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._editing_allowed():
             self._append_message("Editing is only available at t=0")
             return
+        if not self._prepare_for_model_edit():
+            return
         if self.app_service.redo():
             self._append_message("Redo")
             self.refresh_all()
@@ -870,6 +987,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _create_driver_for_selected(self, driver_type: str) -> None:
         if not self._editing_allowed():
             self._append_message("Editing is only available at t=0")
+            return
+        if not self._prepare_for_model_edit():
             return
         if not self._selected_entity_id:
             self._append_message("Select a joint before creating a driver")
@@ -933,6 +1052,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _update_interaction_state(self) -> None:
         editing_allowed = self._editing_allowed()
+        has_simulation = self._has_simulation_frames()
         self.canvas.set_editing_enabled(editing_allowed)
         if not editing_allowed and self.canvas.mode() != CanvasMode.SELECT:
             self.action_select_tool.setChecked(True)
@@ -955,6 +1075,9 @@ class MainWindow(QtWidgets.QMainWindow):
             action.setEnabled(editing_allowed)
         self.add_parameter_button.setEnabled(editing_allowed)
         self.delete_parameter_button.setEnabled(editing_allowed)
+        self.action_play_pause.setEnabled(has_simulation)
+        self.action_stop.setEnabled(has_simulation)
+        self.timeline_slider.setEnabled(has_simulation)
         if editing_allowed:
             edit_triggers = (
                 QtWidgets.QAbstractItemView.EditTrigger.DoubleClicked

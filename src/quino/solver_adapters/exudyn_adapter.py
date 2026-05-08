@@ -4,8 +4,9 @@ import importlib
 import math
 from pathlib import Path
 import tempfile
+import traceback
 
-from quino.domain.model import Project, SimulationResult
+from quino.domain.model import Project, SensorOutput, SimulationResult
 from quino.domain.types import Dimension, DriverType, JointEndpointKind, JointType
 from quino.services.expressions import ExpressionService
 from quino.simulation.assembler import (
@@ -29,7 +30,19 @@ class ExudynAdapter(SolverAdapter):
         return importlib.util.find_spec("exudyn") is not None
 
     def run(self, project: Project, duration: float = 1.0, steps: int = 100) -> SimulationResult:
-        assembled = self.assembler.assemble(project)
+        try:
+            assembled = self.assembler.assemble(project)
+        except Exception as exc:
+            return SimulationResult(
+                success=False,
+                backend=self.name,
+                messages=[
+                    "Solver phase: assemble internal mechanism",
+                    *self._project_diagnostics(project),
+                    self._format_exception(exc),
+                ],
+                error=f"Assembly failed: {exc}",
+            )
         if not self.is_available():
             return SimulationResult(
                 success=False,
@@ -42,6 +55,8 @@ class ExudynAdapter(SolverAdapter):
             exu = importlib.import_module("exudyn")
             return self._run_with_exudyn(project, assembled, exu, solve_mode="dynamic", duration=duration, steps=steps)
         except Exception as exc:  # pragma: no cover - depends on external package/runtime
+            dynamic_error = exc
+            dynamic_traceback = self._format_exception(exc)
             if assembled.drivers:
                 try:
                     exu = importlib.import_module("exudyn")
@@ -55,14 +70,31 @@ class ExudynAdapter(SolverAdapter):
                     )
                     fallback.warnings.append(f"Dynamic solve fallback used: {exc}")
                     fallback.messages.append("Static fallback used after dynamic solve failure")
+                    fallback.messages.append(dynamic_traceback)
                     return fallback
-                except Exception:
-                    pass
+                except Exception as fallback_exc:
+                    return SimulationResult(
+                        success=False,
+                        backend=self.name,
+                        warnings=list(assembled.warnings),
+                        messages=[
+                            "Solver phase: Exudyn dynamic solve",
+                            *self._project_diagnostics(project),
+                            dynamic_traceback,
+                            "Solver phase: Exudyn static fallback",
+                            self._format_exception(fallback_exc),
+                        ],
+                        error=f"Dynamic solve failed: {dynamic_error}; static fallback failed: {fallback_exc}",
+                    )
             return SimulationResult(
                 success=False,
                 backend=self.name,
                 warnings=list(assembled.warnings),
-                messages=["Exudyn execution failed"],
+                messages=[
+                    "Solver phase: Exudyn execution",
+                    *self._project_diagnostics(project),
+                    dynamic_traceback,
+                ],
                 error=str(exc),
             )
 
@@ -105,7 +137,37 @@ class ExudynAdapter(SolverAdapter):
                     simulation_settings.solutionSettings.solutionWritePeriod = duration / max(steps, 1)
                     if hasattr(simulation_settings.solutionSettings, "binarySolutionFile"):
                         simulation_settings.solutionSettings.binarySolutionFile = False
-                    mbs.SolveDynamic(simulationSettings=simulation_settings)
+                    try:
+                        mbs.SolveDynamic(simulationSettings=simulation_settings)
+                    except Exception as exc:
+                        time, frames = self._load_solution_frames(
+                            exu,
+                            mbs,
+                            solution_path,
+                            assembled,
+                            body_order,
+                            node_numbers,
+                            allow_final_fallback=False,
+                            project=project,
+                        )
+                        if frames:
+                            warnings.append(
+                                "Dynamic solve failed; returning partial trajectory up to last converged frame"
+                            )
+                            messages.append(
+                                "Exudyn dynamic solve terminated before end; partial frames are available"
+                            )
+                            messages.append(self._format_exception(exc))
+                            return SimulationResult(
+                                success=False,
+                                backend=self.name,
+                                messages=messages,
+                                warnings=warnings,
+                                time=time,
+                                frames=frames,
+                                error=f"Dynamic solve failed after partial trajectory: {exc}",
+                            )
+                        raise
                     time, frames = self._load_solution_frames(
                         exu,
                         mbs,
@@ -113,6 +175,7 @@ class ExudynAdapter(SolverAdapter):
                         assembled,
                         body_order,
                         node_numbers,
+                        project=project,
                     )
                 messages.append("Exudyn dynamic solve completed")
             elif solve_mode == "static":
@@ -467,13 +530,19 @@ class ExudynAdapter(SolverAdapter):
         assembled: AssembledMechanism,
         body_order: list[str],
         node_numbers: dict[str, int],
+        allow_final_fallback: bool = True,
+        project: Project | None = None,
     ):
         if not solution_path.exists():
-            return [0.0], [self._collect_final_state(mbs, exu, assembled, node_numbers)]
+            if allow_final_fallback:
+                return [0.0], [self._collect_final_state(mbs, exu, assembled, node_numbers)]
+            return [], []
         try:
             utilities = importlib.import_module("exudyn.utilities")
         except ImportError:
-            return [0.0], [self._collect_final_state(mbs, exu, assembled, node_numbers)]
+            if allow_final_fallback:
+                return [0.0], [self._collect_final_state(mbs, exu, assembled, node_numbers)]
+            return [], []
         solution = utilities.LoadSolutionFile(str(solution_path), verbose=False)
         data = solution["data"]
         if getattr(data, "ndim", 1) == 1:
@@ -495,5 +564,227 @@ class ExudynAdapter(SolverAdapter):
             if frame:
                 frames.append(frame)
         if not frames:
-            return [0.0], [self._collect_final_state(mbs, exu, assembled, node_numbers)]
+            if allow_final_fallback:
+                return [0.0], [self._collect_final_state(mbs, exu, assembled, node_numbers)]
+            return [], []
+        if project:
+            self._record_sensor_data(project, assembled, body_order, time, frames)
         return time, frames
+
+    def _record_sensor_data(
+        self,
+        project: Project,
+        assembled: AssembledMechanism,
+        body_order: list[str],
+        time: list[float],
+        frames: list[dict[str, float]],
+    ) -> None:
+        for sensor in project.model.sensors:
+            output = SensorOutput(sensor_id=sensor.id, time=list(time))
+            if sensor.type.value == "point":
+                self._record_point_sensor(output, sensor, assembled, frames)
+            elif sensor.type.value == "distance":
+                self._record_distance_sensor(output, sensor, assembled, frames)
+            elif sensor.type.value in {"angle_horizontal", "angle_vertical"}:
+                self._record_angle_sensor(output, sensor, assembled, frames)
+            elif sensor.type.value == "angle_vector":
+                self._record_angle_vector_sensor(output, sensor, assembled, frames)
+            if output.columns and output.data:
+                project.__dict__["_sensor_outputs"] = getattr(project, "_sensor_outputs", {})
+                project._sensor_outputs[sensor.id] = output
+
+    def _record_point_sensor(
+        self, output: SensorOutput, sensor, assembled: AssembledMechanism, frames: list[dict[str, float]]
+    ) -> None:
+        if len(sensor.marker_ids) != 1:
+            return
+        marker_id = sensor.marker_ids[0]
+        body_id = self._find_body_id_for_marker(assembled, marker_id)
+        if not body_id:
+            return
+        output.columns = ["x [mm]", "y [mm]", "vx [mm/s]", "vy [mm/s]", "v [mm/s]", "ax [mm/s²]", "ay [mm/s²]", "a [mm/s²]"]
+        marker = next((m for b in assembled.bodies.values() for m in b.markers if m.id == marker_id), None)
+        if not marker:
+            return
+        for i, frame in enumerate(frames):
+            x = frame.get(f"{body_id}.x", 0.0)
+            y = frame.get(f"{body_id}.y", 0.0)
+            vx = 0.0
+            vy = 0.0
+            if i > 0 and len(output.time) > 1:
+                dt = output.time[i] - output.time[i - 1]
+                prev_frame = frames[i - 1]
+                prev_x = prev_frame.get(f"{body_id}.x", 0.0)
+                prev_y = prev_frame.get(f"{body_id}.y", 0.0)
+                vx = (x - prev_x) / dt if dt > 0 else 0.0
+                vy = (y - prev_y) / dt if dt > 0 else 0.0
+            v = math.sqrt(vx**2 + vy**2)
+            ax = 0.0
+            ay = 0.0
+            if i > 0 and len(output.time) > 1:
+                dt = output.time[i] - output.time[i - 1]
+                prev_vx = 0.0
+                prev_vy = 0.0
+                if i > 1:
+                    prev_frame = frames[i - 1]
+                    prev_prev_frame = frames[i - 2]
+                    prev_x = prev_frame.get(f"{body_id}.x", 0.0)
+                    prev_y = prev_frame.get(f"{body_id}.y", 0.0)
+                    prev_prev_x = prev_prev_frame.get(f"{body_id}.x", 0.0)
+                    prev_prev_y = prev_prev_frame.get(f"{body_id}.y", 0.0)
+                    dt_prev = output.time[i - 1] - output.time[i - 2] if i > 1 else dt
+                    prev_vx = (prev_x - prev_prev_x) / dt_prev if dt_prev > 0 else 0.0
+                    prev_vy = (prev_y - prev_prev_y) / dt_prev if dt_prev > 0 else 0.0
+                    ax = (vx - prev_vx) / dt if dt > 0 else 0.0
+                    ay = (vy - prev_vy) / dt if dt > 0 else 0.0
+            a = math.sqrt(ax**2 + ay**2)
+            output.data.append([x, y, vx, vy, v, ax, ay, a])
+
+    def _record_distance_sensor(
+        self, output: SensorOutput, sensor, assembled: AssembledMechanism, frames: list[dict[str, float]]
+    ) -> None:
+        if len(sensor.marker_ids) != 2:
+            return
+        marker_id_a, marker_id_b = sensor.marker_ids
+        body_id_a = self._find_body_id_for_marker(assembled, marker_id_a)
+        body_id_b = self._find_body_id_for_marker(assembled, marker_id_b)
+        if not body_id_a or not body_id_b:
+            return
+        output.columns = ["distance [mm]", "velocity [mm/s]", "acceleration [mm/s²]"]
+        prev_distance = None
+        for i, frame in enumerate(frames):
+            xa = frame.get(f"{body_id_a}.x", 0.0)
+            ya = frame.get(f"{body_id_a}.y", 0.0)
+            xb = frame.get(f"{body_id_b}.x", 0.0)
+            yb = frame.get(f"{body_id_b}.y", 0.0)
+            distance = math.sqrt((xb - xa) ** 2 + (yb - ya) ** 2)
+            velocity = 0.0
+            if i > 0 and len(output.time) > 1 and prev_distance is not None:
+                dt = output.time[i] - output.time[i - 1]
+                velocity = (distance - prev_distance) / dt if dt > 0 else 0.0
+            acceleration = 0.0
+            output.data.append([distance, velocity, acceleration])
+            prev_distance = distance
+
+    def _record_angle_sensor(
+        self, output: SensorOutput, sensor, assembled: AssembledMechanism, frames: list[dict[str, float]]
+    ) -> None:
+        if len(sensor.marker_ids) != 2:
+            return
+        reference_axis = "horizontal" if "horizontal" in sensor.type.value else "vertical"
+        marker_id_a, marker_id_b = sensor.marker_ids
+        body_id_a = self._find_body_id_for_marker(assembled, marker_id_a)
+        body_id_b = self._find_body_id_for_marker(assembled, marker_id_b)
+        if not body_id_a or not body_id_b:
+            return
+        output.columns = ["angle [deg]", "angular_velocity [deg/s]", "angular_acceleration [deg/s²]"]
+        prev_angle = None
+        for i, frame in enumerate(frames):
+            xa = frame.get(f"{body_id_a}.x", 0.0)
+            ya = frame.get(f"{body_id_a}.y", 0.0)
+            xb = frame.get(f"{body_id_b}.x", 0.0)
+            yb = frame.get(f"{body_id_b}.y", 0.0)
+            dx = xb - xa
+            dy = yb - ya
+            if reference_axis == "horizontal":
+                angle_rad = math.atan2(dy, dx)
+            else:
+                angle_rad = math.atan2(dx, dy)
+            angle_deg = math.degrees(angle_rad)
+            angular_velocity = 0.0
+            if i > 0 and len(output.time) > 1 and prev_angle is not None:
+                dt = output.time[i] - output.time[i - 1]
+                angle_diff = angle_deg - prev_angle
+                if angle_diff > 180:
+                    angle_diff -= 360
+                elif angle_diff < -180:
+                    angle_diff += 360
+                angular_velocity = angle_diff / dt if dt > 0 else 0.0
+            angular_acceleration = 0.0
+            output.data.append([angle_deg, angular_velocity, angular_acceleration])
+            prev_angle = angle_deg
+
+    def _record_angle_vector_sensor(
+        self, output: SensorOutput, sensor, assembled: AssembledMechanism, frames: list[dict[str, float]]
+    ) -> None:
+        if len(sensor.marker_ids) != 4:
+            return
+        m_a_id, m_b_id, m_c_id, m_d_id = sensor.marker_ids
+        body_a = self._find_body_id_for_marker(assembled, m_a_id)
+        body_b = self._find_body_id_for_marker(assembled, m_b_id)
+        body_c = self._find_body_id_for_marker(assembled, m_c_id)
+        body_d = self._find_body_id_for_marker(assembled, m_d_id)
+        if not all([body_a, body_b, body_c, body_d]):
+            return
+        output.columns = ["angle [deg]", "angular_velocity [deg/s]", "angular_acceleration [deg/s²]"]
+        prev_angle = None
+        for i, frame in enumerate(frames):
+            xa = frame.get(f"{body_a}.x", 0.0)
+            ya = frame.get(f"{body_a}.y", 0.0)
+            xb = frame.get(f"{body_b}.x", 0.0)
+            yb = frame.get(f"{body_b}.y", 0.0)
+            xc = frame.get(f"{body_c}.x", 0.0)
+            yc = frame.get(f"{body_c}.y", 0.0)
+            xd = frame.get(f"{body_d}.x", 0.0)
+            yd = frame.get(f"{body_d}.y", 0.0)
+            vec1_x = xb - xa
+            vec1_y = yb - ya
+            vec2_x = xd - xc
+            vec2_y = yd - yc
+            angle1 = math.atan2(vec1_y, vec1_x)
+            angle2 = math.atan2(vec2_y, vec2_x)
+            angle_diff_rad = angle2 - angle1
+            if angle_diff_rad > math.pi:
+                angle_diff_rad -= 2 * math.pi
+            elif angle_diff_rad < -math.pi:
+                angle_diff_rad += 2 * math.pi
+            angle_deg = math.degrees(angle_diff_rad)
+            angular_velocity = 0.0
+            if i > 0 and len(output.time) > 1 and prev_angle is not None:
+                dt = output.time[i] - output.time[i - 1]
+                angle_diff = angle_deg - prev_angle
+                if angle_diff > 180:
+                    angle_diff -= 360
+                elif angle_diff < -180:
+                    angle_diff += 360
+                angular_velocity = angle_diff / dt if dt > 0 else 0.0
+            angular_acceleration = 0.0
+            output.data.append([angle_deg, angular_velocity, angular_acceleration])
+            prev_angle = angle_deg
+
+    def _find_body_id_for_marker(self, assembled: AssembledMechanism, marker_id: str) -> str | None:
+        for body_id, body in assembled.bodies.items():
+            if any(m.id == marker_id for m in body.markers):
+                return body_id
+        return None
+
+    def _project_diagnostics(self, project: Project) -> list[str]:
+        lines = [
+            (
+                "Model summary: "
+                f"bodies={len(project.model.bodies)}, "
+                f"markers={sum(len(body.markers) for body in project.model.bodies)}, "
+                f"sliders={len(project.model.sliders)}, "
+                f"joints={len(project.model.joints)}, "
+                f"drivers={len(project.model.drivers)}"
+            )
+        ]
+        for body in project.model.bodies:
+            lines.append(
+                f"Body {body.name}: type={body.type.value}, structural_markers={len(body.structural_markers())}"
+            )
+        for joint in project.model.joints:
+            lines.append(
+                f"Joint {joint.name}: type={joint.type.value}, "
+                f"a={joint.endpoint_a.kind.value}:{joint.endpoint_a.marker_id or joint.endpoint_a.slider_id or 'ground'}, "
+                f"b={joint.endpoint_b.kind.value}:{joint.endpoint_b.marker_id or joint.endpoint_b.slider_id or 'ground'}"
+            )
+        for driver in project.model.drivers:
+            lines.append(
+                f"Driver {driver.name}: type={driver.type.value}, target_joint={driver.target_joint_id}, law={driver.law.expression}"
+            )
+        return lines
+
+    def _format_exception(self, exc: Exception) -> str:
+        traceback_text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__, limit=12)).strip()
+        return f"{type(exc).__name__}: {exc}\n{traceback_text}"

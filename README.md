@@ -34,7 +34,7 @@ Build a platform-grade engineering application that:
 - **Parameters Panel**: Global parameter management
 - **Timeline**: Simulation playback and frame control
 - **Validation**: Real-time model checking
-- **Professional UI**: Menu system, organized toolbar, icons (Material Design via qtawesome)
+- **Professional UI**: Menu system, organized toolbar, custom SVG icons
 
 ## Installation
 
@@ -61,7 +61,6 @@ quino-gui
 
 **GUI** (optional):
 - PySide6 ≥ 6.6
-- qtawesome ≥ 1.0
 
 **Solver** (optional):
 - exudyn
