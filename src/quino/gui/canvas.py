@@ -89,6 +89,8 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._pan_last_screen: QtCore.QPointF | None = None
         self._pending_joint_creation: dict[str, str | int | None] | None = None
         self._edit_guard: Callable[[], bool] | None = None
+        self._trajectories: list[list[tuple[float, float]]] = []
+        self._show_trajectories: bool = True
         self.setMinimumSize(420, 320)
         self.setMouseTracking(True)
         self.setAutoFillBackground(True)
@@ -124,6 +126,14 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def set_state_overlay(self, state: dict[str, float] | None) -> None:
         self._state_overlay = state
+        self.update()
+
+    def set_trajectories(self, trajectories: list[list[tuple[float, float]]]) -> None:
+        self._trajectories = trajectories
+        self.update()
+
+    def set_show_trajectories(self, show: bool) -> None:
+        self._show_trajectories = show
         self.update()
 
     def set_editing_enabled(self, enabled: bool) -> None:
@@ -197,6 +207,8 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._draw_joints(painter, project, markers, sliders, transform)
         self._draw_drivers(painter, project, markers, sliders, transform)
         self._draw_markers(painter, markers, transform)
+        if self._show_trajectories and self._trajectories:
+            self._draw_trajectories(painter, transform)
         self._draw_creation_overlay(painter, transform)
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # pragma: no cover - UI behavior
@@ -666,6 +678,32 @@ class MechanismCanvas(QtWidgets.QWidget):
         proj_x = x1 + t * dx
         proj_y = y1 + t * dy
         return math.hypot(px - proj_x, py - proj_y)
+
+    _TRAJECTORY_COLORS = [
+        QtGui.QColor("#e63946"),
+        QtGui.QColor("#2196f3"),
+        QtGui.QColor("#4caf50"),
+        QtGui.QColor("#ff9800"),
+        QtGui.QColor("#9c27b0"),
+        QtGui.QColor("#00bcd4"),
+        QtGui.QColor("#ff5722"),
+        QtGui.QColor("#8bc34a"),
+    ]
+
+    def _draw_trajectories(self, painter: QtGui.QPainter, transform) -> None:
+        painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        for idx, points in enumerate(self._trajectories):
+            if len(points) < 2:
+                continue
+            color = self._TRAJECTORY_COLORS[idx % len(self._TRAJECTORY_COLORS)]
+            pen = QtGui.QPen(color, 1.5)
+            pen.setStyle(QtCore.Qt.PenStyle.SolidLine)
+            painter.setPen(pen)
+            path = QtGui.QPainterPath()
+            path.moveTo(self._to_screen(*points[0], transform))
+            for pt in points[1:]:
+                path.lineTo(self._to_screen(*pt, transform))
+            painter.drawPath(path)
 
     def _draw_empty_state(self, painter: QtGui.QPainter) -> None:
         painter.setPen(QtGui.QPen(QtGui.QColor("#7a7366")))

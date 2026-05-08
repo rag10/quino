@@ -255,6 +255,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_new_plot.triggered.connect(self.create_plot_window)
         self.action_new_plot.setToolTip("Create a new plot from sensor data")
 
+        self.action_show_trajectories = QtGui.QAction(get_icon("fit-view", color_base), "Trajectories", self)
+        self.action_show_trajectories.setCheckable(True)
+        self.action_show_trajectories.setChecked(True)
+        self.action_show_trajectories.setEnabled(False)
+        self.action_show_trajectories.triggered.connect(self._on_toggle_trajectories)
+        self.action_show_trajectories.setToolTip("Show/hide sensor position trajectories on canvas")
+
         self.action_delete = QtGui.QAction(get_icon("delete", color_danger), "Delete", self)
         self.action_delete.setShortcut(QtGui.QKeySequence.StandardKey.Delete)
         self.action_delete.triggered.connect(self.delete_selected_entity)
@@ -373,6 +380,7 @@ class MainWindow(QtWidgets.QMainWindow):
         toolbar.addSeparator()
 
         toolbar.addAction(self.action_new_plot)
+        toolbar.addAction(self.action_show_trajectories)
 
     def refresh_all(self) -> None:
         project = self.app_service.project
@@ -439,6 +447,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._append_message(f"  {message}")
         self._update_timeline_controls()
         self._apply_current_frame()
+        self._update_trajectories()
         self.refresh_all()
         if result.error:
             self._append_message(f"  ERROR: {result.error}")
@@ -591,10 +600,36 @@ class MainWindow(QtWidgets.QMainWindow):
         self._last_simulation_state = None
         self._current_frame_index = 0
         self.canvas.set_state_overlay(None)
+        self.canvas.set_trajectories([])
+        self.action_show_trajectories.setEnabled(False)
         self._update_timeline_controls()
         self._update_interaction_state()
         if message:
             self._append_message(message)
+
+    def _on_toggle_trajectories(self) -> None:
+        self.canvas.set_show_trajectories(self.action_show_trajectories.isChecked())
+
+    def _update_trajectories(self) -> None:
+        project = self.app_service.project
+        if project is None:
+            return
+        trajectories = []
+        for sensor in project.model.sensors:
+            if sensor.type.value != "point":
+                continue
+            output = project.sensor_outputs.get(sensor.id)
+            if output is None or not output.data:
+                continue
+            # Columns: time, x, y, vx, vy, v, ax, ay, a  →  x=col1, y=col2
+            pts = [(row[0], row[1]) for row in output.data]
+            if len(pts) >= 2:
+                trajectories.append(pts)
+        self.canvas.set_trajectories(trajectories)
+        self.action_show_trajectories.setEnabled(bool(trajectories))
+        if trajectories:
+            self.action_show_trajectories.setChecked(True)
+            self.canvas.set_show_trajectories(True)
 
     def _prepare_for_model_edit(self) -> bool:
         if not self._has_simulation_frames():
