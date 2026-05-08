@@ -396,6 +396,20 @@ class MainWindow(QtWidgets.QMainWindow):
             self._append_message(f"  {message}")
         if result.error:
             self._append_message(f"  ERROR: {result.error}")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Simulation Error",
+                f"Simulation failed:\n\n{result.error}",
+                QtWidgets.QMessageBox.StandardButton.Ok,
+            )
+        elif result.warnings:
+            warning_text = "\n".join(result.warnings)
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Simulation Warnings",
+                f"Simulation completed with warnings:\n\n{warning_text}",
+                QtWidgets.QMessageBox.StandardButton.Ok,
+            )
         self._update_timeline_controls()
         self._apply_current_frame()
         self.refresh_all()
@@ -638,9 +652,15 @@ class MainWindow(QtWidgets.QMainWindow):
             CanvasMode.CREATE_SLIDER: self.action_slider_tool,
             CanvasMode.CONNECT_GROUND: self.action_ground_tool,
             CanvasMode.CONNECT_SLIDER: self.action_slider_connect_tool,
+            CanvasMode.CREATE_ROTATION_DRIVER: self.action_add_rotation_driver,
+            CanvasMode.CREATE_TRANSLATION_DRIVER: self.action_add_translation_driver,
         }.get(mode)
-        if action_for_mode and action_for_mode in self.tool_group.actions():
-            action_for_mode.setChecked(True)
+        if action_for_mode:
+            if action_for_mode in self.tool_group.actions():
+                action_for_mode.setChecked(True)
+            else:
+                # Para botones que no están en tool_group (como drivers)
+                action_for_mode.setChecked(True)
         self._update_status_message()
 
     def _set_canvas_mode(self, mode: str) -> None:

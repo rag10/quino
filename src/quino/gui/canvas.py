@@ -79,6 +79,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._view_center_y = 0.0
         self._panning = False
         self._pan_last_screen: QtCore.QPointF | None = None
+        self._pending_joint_creation: dict[str, str | None] | None = None
         self.setMinimumSize(420, 320)
         self.setMouseTracking(True)
         self.setAutoFillBackground(True)
@@ -98,6 +99,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._drag_preview = None
         self._dragging_slider = None
         self._dragging_slider_preview = None
+        self._pending_joint_creation = None
         self.modeChanged.emit(mode)
         self.update()
 
@@ -252,6 +254,9 @@ class MechanismCanvas(QtWidgets.QWidget):
             return
 
         if self._mode == CanvasMode.CREATE_BAR:
+            if clicked_marker is not None and self._creation_points:
+                self._handle_marker_click_during_creation(clicked_marker)
+                return
             self._creation_points.append(world)
             if len(self._creation_points) == 2:
                 self._create_bar_from_points()
@@ -259,6 +264,9 @@ class MechanismCanvas(QtWidgets.QWidget):
             return
 
         if self._mode == CanvasMode.CREATE_BODY:
+            if clicked_marker is not None:
+                self._handle_marker_click_during_creation(clicked_marker)
+                return
             self._append_creation_point(world)
             self.update()
             return
@@ -1012,6 +1020,44 @@ class MechanismCanvas(QtWidgets.QWidget):
                 return
         self._creation_points.append(world)
 
+    def _handle_marker_click_during_creation(self, clicked_marker: CanvasMarker) -> None:
+        if not self._creation_points:
+            return
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Create Joint")
+        layout = QtWidgets.QFormLayout(dialog)
+        message = QtWidgets.QLabel(
+            f"A marker '{clicked_marker.name}' exists at this location.\n"
+            "Do you want to create a joint between the new marker and this one?"
+        )
+        layout.addRow(message)
+        type_combo = QtWidgets.QComboBox()
+        type_combo.addItems(["revolute", "rigid"])
+        layout.addRow("Joint type:", type_combo)
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Yes
+            | QtWidgets.QDialogButtonBox.StandardButton.No
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+
+        result = dialog.exec()
+        if result == int(QtWidgets.QDialog.DialogCode.Rejected):
+            self._creation_points.clear()
+            self.set_mode(CanvasMode.SELECT)
+            self.update()
+            return
+        self._creation_points.append((clicked_marker.x, clicked_marker.y))
+        if result == int(QtWidgets.QDialog.DialogCode.Accepted):
+            joint_type = type_combo.currentText()
+            self._pending_joint_creation = {
+                "clicked_marker_id": clicked_marker.entity_id,
+                "joint_type": joint_type,
+            }
+        self.update()
+
     def _create_bar_from_points(self) -> None:
         if not self._require_editing():
             return
@@ -1027,6 +1073,8 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._creation_points.clear()
         self.entitySelected.emit(body_id)
         self.modelChanged.emit(f"Created {name}")
+        if self._pending_joint_creation:
+            self._create_pending_joint(body_id)
         self.set_mode(CanvasMode.SELECT)
 
     def _finalize_body_creation(self) -> None:
@@ -1043,6 +1091,8 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._creation_points.clear()
         self.entitySelected.emit(body_id)
         self.modelChanged.emit(f"Created {name}")
+        if self._pending_joint_creation:
+            self._create_pending_joint(body_id)
         self.set_mode(CanvasMode.SELECT)
 
     def _create_slider_from_points(self) -> None:
@@ -1063,6 +1113,51 @@ class MechanismCanvas(QtWidgets.QWidget):
         self.entitySelected.emit(slider_id)
         self.modelChanged.emit(f"Created {name}")
         self.set_mode(CanvasMode.SELECT)
+
+    def _create_pending_joint(self, new_body_id: str) -> None:
+        if not self._pending_joint_creation:
+            return
+        clicked_marker_id = self._pending_joint_creation.get("clicked_marker_id")
+        joint_type = self._pending_joint_creation.get("joint_type")
+        if not clicked_marker_id or not joint_type:
+            self._pending_joint_creation = None
+            return
+        clicked_marker = next(
+            (m for all_m, _ in self._screen_markers if all_m.entity_id == clicked_marker_id), None
+        )
+        if not clicked_marker:
+            self._pending_joint_creation = None
+            return
+        new_body = next(
+            (b for b in self.app_service.project.model.bodies if b.id == new_body_id), None
+        )
+        if not new_body:
+            self._pending_joint_creation = None
+            return
+        if self._mode == CanvasMode.CREATE_BAR and len(new_body.markers) >= 2:
+            new_marker_idx = 1
+        elif self._mode == CanvasMode.CREATE_BODY and new_body.markers:
+            new_marker_idx = len(new_body.markers) - 1
+        else:
+            self._pending_joint_creation = None
+            return
+        new_marker_id = new_body.markers[new_marker_idx].id
+        joint_name = self._next_name("Joint", [joint.name for joint in self.app_service.project.model.joints])
+        if joint_type == "rigid":
+            self.app_service.create_rigid_joint(
+                joint_name,
+                JointEndpointInput(JointEndpointKind.MARKER, body_id=clicked_marker.body_id, marker_id=clicked_marker_id),
+                JointEndpointInput(JointEndpointKind.MARKER, body_id=new_body_id, marker_id=new_marker_id),
+            )
+        else:
+            self.app_service.create_joint(
+                joint_name,
+                "revolute",
+                JointEndpointInput(JointEndpointKind.MARKER, body_id=clicked_marker.body_id, marker_id=clicked_marker_id),
+                JointEndpointInput(JointEndpointKind.MARKER, body_id=new_body_id, marker_id=new_marker_id),
+            )
+        self.modelChanged.emit(f"Created {joint_name}")
+        self._pending_joint_creation = None
 
     def _handle_joint_click(self, marker: CanvasMarker) -> None:
         if not self._require_editing():
