@@ -1051,3 +1051,20 @@ def test_distance_on_circle_rejected_without_entity_ref() -> None:
     app.create_sketch_circle(center_id, "50 mm")
     with pytest.raises(ValueError):
         app.create_sketch_constraint("distance", [center_id])
+
+
+def test_arc_endpoint_points_are_visible_midpoint_hidden() -> None:
+    """Arc endpoints (A=start, C=end) must be visible; midpoint B on arc is hidden."""
+    app = make_app()
+    app.create_sketch()
+    p1 = app.create_sketch_point("0 mm", "0 mm")
+    p2 = app.create_sketch_point("50 mm", "0 mm")
+    p3 = app.create_sketch_point("50 mm", "50 mm")
+    arc_id = app.create_sketch_arc(p1, p2, p3)
+    arc = app._find_sketch_entity(arc_id)
+    pt_a = app._find_sketch_point(arc.point_a_id)
+    pt_b = app._find_sketch_point(arc.point_b_id)
+    pt_c = app._find_sketch_point(arc.point_c_id)
+    assert pt_a.visible is True, "Arc start point (A) must be visible"
+    assert pt_c.visible is True, "Arc end point (C) must be visible"
+    assert pt_b.visible is False, "Arc midpoint (B) on arc must be hidden"

@@ -168,7 +168,7 @@ class ApplicationService:
         self._snapshot()
         project.sketch = None
 
-    def create_sketch_point(self, x: str, y: str, name: str | None = None) -> str:
+    def create_sketch_point(self, x: str, y: str, name: str | None = None, visible: bool = True) -> str:
         project = self._require_project()
         sketch = self._require_sketch(create_if_missing=True)
         point = SketchPoint(
@@ -177,6 +177,7 @@ class ApplicationService:
             type=SketchEntityType.POINT,
             x=self._scalar(x, "mm", Dimension.LENGTH),
             y=self._scalar(y, "mm", Dimension.LENGTH),
+            visible=visible,
         )
         self._validate_sketch_entity_name(point.name)
         self.expression_service.evaluate_property(point.x, project.parameters)
@@ -268,6 +269,10 @@ class ApplicationService:
         self._validate_sketch_entity_name(entity.name)
         self._snapshot()
         sketch.entities.append(entity)
+        # Hide the midpoint on arc (B) — it's an internal control, not a user handle
+        mid_pt = self._find_sketch_point(point_b_id)
+        if mid_pt is not None:
+            mid_pt.visible = False
         return entity.id
 
     def create_sketch_arc_by_center(
