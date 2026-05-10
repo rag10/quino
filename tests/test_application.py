@@ -946,3 +946,74 @@ def test_sketch_edit_does_not_discard_simulation() -> None:
     app.project.sensor_outputs["dummy"] = type("obj", (), {"data": [(0.0,)]})()
     app.solve_sketch()
     assert "dummy" in app.project.sensor_outputs
+
+
+def test_drag_constrained_point_respects_free_dof() -> None:
+    app = make_app()
+    p1 = app.create_sketch_point("0 mm", "0 mm")
+    p2 = app.create_sketch_point("0 mm", "50 mm")
+    app.create_sketch_line_segment(p1, p2)
+    app.create_sketch_constraint("fix", [p1])
+    app.create_sketch_constraint("vertical", [p1, p2])
+
+    app.move_sketch_point(p2, "30 mm", "80 mm")
+
+    assert app.project.sketch.solve_error is None, app.project.sketch.solve_error
+    pts = {e.id: e for e in app.project.sketch.entities if hasattr(e, "x")}
+    x2 = app.expression_service.evaluate_property(pts[p2].x, app.project.parameters).value
+    y2 = app.expression_service.evaluate_property(pts[p2].y, app.project.parameters).value
+    assert abs(x2) < 1e-4, f"VERTICAL must keep x=0, got {x2}"
+    assert abs(y2 - 80.0) < 1e-4, f"Free y must be 80, got {y2}"
+
+
+def test_drag_distance_constrained_point_stays_on_circle() -> None:
+    app = make_app()
+    p1 = app.create_sketch_point("0 mm", "0 mm")
+    p2 = app.create_sketch_point("50 mm", "0 mm")
+    app.create_sketch_line_segment(p1, p2)
+    app.create_sketch_constraint("fix", [p1])
+    app.create_sketch_constraint("distance", [p1, p2])
+
+    app.move_sketch_point(p2, "70 mm", "30 mm")
+
+    assert app.project.sketch.solve_error is None, app.project.sketch.solve_error
+    pts = {e.id: e for e in app.project.sketch.entities if hasattr(e, "x")}
+    x2 = app.expression_service.evaluate_property(pts[p2].x, app.project.parameters).value
+    y2 = app.expression_service.evaluate_property(pts[p2].y, app.project.parameters).value
+    dist = math.hypot(x2, y2)
+    assert abs(dist - 50.0) < 0.1, f"Must stay on circle r=50, got dist={dist:.3f}"
+
+
+def test_inspector_edit_constrained_point_respects_free_dof() -> None:
+    from quino.domain.inputs import PropertyValueInput
+    app = make_app()
+    p1 = app.create_sketch_point("0 mm", "0 mm")
+    p2 = app.create_sketch_point("0 mm", "50 mm")
+    app.create_sketch_constraint("fix", [p1])
+    app.create_sketch_constraint("vertical", [p1, p2])
+
+    app.update_sketch_entity(p2, "x", PropertyValueInput(kind="expression", value="30 mm"))
+
+    assert app.project.sketch.solve_error is None, app.project.sketch.solve_error
+    pts = {e.id: e for e in app.project.sketch.entities if hasattr(e, "x")}
+    x2 = app.expression_service.evaluate_property(pts[p2].x, app.project.parameters).value
+    assert abs(x2) < 1e-4, f"VERTICAL must keep x=0 after inspector edit, got {x2}"
+
+
+def test_changing_distance_value_invalidates_solve_cache() -> None:
+    from quino.domain.inputs import PropertyValueInput
+    app = make_app()
+    p1 = app.create_sketch_point("0 mm", "0 mm")
+    p2 = app.create_sketch_point("50 mm", "0 mm")
+    app.create_sketch_constraint("fix", [p1])
+    c_id = app.create_sketch_constraint("distance", [p1, p2])
+
+    pts = {e.id: e for e in app.project.sketch.entities if hasattr(e, "x")}
+    x2 = app.expression_service.evaluate_property(pts[p2].x, app.project.parameters).value
+    assert abs(x2 - 50.0) < 1e-4
+
+    app.update_sketch_constraint(c_id, "value", PropertyValueInput(kind="expression", value="80 mm"))
+
+    pts = {e.id: e for e in app.project.sketch.entities if hasattr(e, "x")}
+    x2 = app.expression_service.evaluate_property(pts[p2].x, app.project.parameters).value
+    assert abs(x2 - 80.0) < 1e-4, f"After updating distance to 80mm, got x2={x2}"

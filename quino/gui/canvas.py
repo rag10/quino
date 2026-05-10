@@ -21,6 +21,7 @@ from quino.domain.model import (
 )
 from quino.domain.sketch_constraints import CONSTRAINT_SPECS, ConstraintSpec
 from quino.domain.types import DriverType, JointEndpointKind, JointType, MarkerType, SketchConstraintType, SketchEntityType
+from quino.services.sketch_dof import SketchDofAnalyzer
 from quino.simulation.assembler import AssembledMechanism
 
 
@@ -165,6 +166,8 @@ class MechanismCanvas(QtWidgets.QWidget):
     selectionCleared = QtCore.Signal()
     modelChanged = QtCore.Signal(str)
     modeChanged = QtCore.Signal(str)
+    dofInfoChanged = QtCore.Signal(str)
+    displaySettingsChanged = QtCore.Signal()
 
     def __init__(self, app_service: ApplicationService, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -208,6 +211,11 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._trajectories: list[list[tuple[float, float]]] = []
         self._show_trajectories: bool = True
         self._snap_preview_world: tuple[float, float] | None = None
+        self._snap_to_point: bool = False
+        self._show_origin: bool = True
+        self._show_axes: bool = True
+        self._show_grid: bool = True
+        self._background_color: str = "#f5f1e8"
         self.setMinimumSize(420, 320)
         self.setMouseTracking(True)
         self.setAutoFillBackground(True)
@@ -215,6 +223,38 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def mode(self) -> str:
         return self._mode
+
+    def show_origin(self) -> bool:
+        return self._show_origin
+
+    def show_axes(self) -> bool:
+        return self._show_axes
+
+    def show_grid(self) -> bool:
+        return self._show_grid
+
+    def background_color(self) -> str:
+        return self._background_color
+
+    def set_show_origin(self, show: bool) -> None:
+        self._show_origin = show
+        self.displaySettingsChanged.emit()
+        self.update()
+
+    def set_show_axes(self, show: bool) -> None:
+        self._show_axes = show
+        self.displaySettingsChanged.emit()
+        self.update()
+
+    def set_show_grid(self, show: bool) -> None:
+        self._show_grid = show
+        self.displaySettingsChanged.emit()
+        self.update()
+
+    def set_background_color(self, color: str) -> None:
+        self._background_color = color
+        self.displaySettingsChanged.emit()
+        self.update()
 
     def set_interaction_mode(self, mode: str) -> None:
         self._interaction_mode = mode
@@ -251,6 +291,15 @@ class MechanismCanvas(QtWidgets.QWidget):
         if any(c.id == entity_id for c in project.sketch.constraints):
             return True
         return False
+
+    def _is_point_fixed(self, point_id: str) -> bool:
+        project = self.app_service.project
+        if project is None or project.sketch is None:
+            return False
+        return any(
+            c.type == SketchConstraintType.FIX and point_id in c.references
+            for c in project.sketch.constraints
+        )
 
     def _reset_tool_state(self) -> None:
         self._creation_points.clear()
@@ -403,6 +452,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._dragging_slider = None
             self._dragging_slider_preview = None
             self._snap_preview_world = None
+            self._snap_to_point = False
         self.update()
 
     def set_edit_guard(self, guard: Callable[[], bool] | None) -> None:
@@ -598,12 +648,15 @@ class MechanismCanvas(QtWidgets.QWidget):
         del event
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
-        painter.fillRect(self.rect(), QtGui.QColor("#f5f1e8"))
+        painter.fillRect(self.rect(), QtGui.QColor(self._background_color))
 
         project = self.app_service.project
         transform = self._current_transform()
         if project is None:
-            self._draw_grid(painter, transform)
+            if self._show_grid:
+                self._draw_grid(painter, transform)
+            if self._show_origin or self._show_axes:
+                self._draw_origin_and_axes(painter, transform)
             self._draw_empty_state(painter)
             self._draw_creation_overlay(painter, transform)
             return
@@ -616,7 +669,10 @@ class MechanismCanvas(QtWidgets.QWidget):
         sketch_invalid = project.sketch is not None and project.sketch.solve_error is not None
         model_dimmed = self._interaction_mode == "sketch"
 
-        self._draw_grid(painter, transform)
+        if self._show_grid:
+            self._draw_grid(painter, transform)
+        if self._show_origin or self._show_axes:
+            self._draw_origin_and_axes(painter, transform)
 
         if model_dimmed:
             # In sketch mode: draw dimmed model layer first, then crisp sketch on top
@@ -691,7 +747,11 @@ class MechanismCanvas(QtWidgets.QWidget):
             if clicked_sketch_point is not None and self._interaction_mode in ("sketch", "all"):
                 self._selected_entity_id = clicked_sketch_point.entity_id
                 self.entitySelected.emit(clicked_sketch_point.entity_id)
-                if self._editing_enabled:
+                point_is_locked = self._is_point_fixed(clicked_sketch_point.entity_id) or (
+                    self._dof_result is not None
+                    and self._dof_result.point_dof.get(clicked_sketch_point.entity_id, 2) == 0
+                )
+                if self._editing_enabled and not point_is_locked:
                     self._dragging_sketch_point = clicked_sketch_point
                     self._dragging_sketch_point_preview = (
                         clicked_sketch_point.entity_id,
@@ -954,6 +1014,17 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._snap_preview_world = self._snap_world(self._hover_world, include_model=False)
         else:
             self._snap_preview_world = None
+            self._snap_to_point = False
+        # Update DOF info for status bar when in sketch mode
+        if self._interaction_mode == "sketch":
+            project = self.app_service.project
+            if project is not None and project.sketch is not None:
+                dof_result = SketchDofAnalyzer().analyze(project.sketch)
+                self.dofInfoChanged.emit(f"Free DOF: {dof_result.total_free_dof}")
+            else:
+                self.dofInfoChanged.emit("")
+        else:
+            self.dofInfoChanged.emit("")
         self.update()
         super().mouseMoveEvent(event)
 
@@ -1658,6 +1729,30 @@ class MechanismCanvas(QtWidgets.QWidget):
             painter.drawLine(QtCore.QPointF(0.0, screen_y), QtCore.QPointF(float(self.width()), screen_y))
             y -= spacing_world
 
+    def _draw_origin_and_axes(self, painter: QtGui.QPainter, transform) -> None:
+        origin = self._to_screen(0.0, 0.0, transform)
+        w = float(self.width())
+        h = float(self.height())
+        if self._show_axes:
+            # X axis (red)
+            painter.setPen(QtGui.QPen(QtGui.QColor("#e74c3c"), 1.2))
+            painter.drawLine(QtCore.QPointF(0.0, origin.y()), QtCore.QPointF(w, origin.y()))
+            # Y axis (green)
+            painter.setPen(QtGui.QPen(QtGui.QColor("#27ae60"), 1.2))
+            painter.drawLine(QtCore.QPointF(origin.x(), 0.0), QtCore.QPointF(origin.x(), h))
+            # Arrowheads at positive ends
+            arrow = 8.0
+            painter.setPen(QtGui.QPen(QtGui.QColor("#e74c3c"), 1.2))
+            painter.drawLine(QtCore.QPointF(w - arrow, origin.y() - arrow / 2), QtCore.QPointF(w, origin.y()))
+            painter.drawLine(QtCore.QPointF(w - arrow, origin.y() + arrow / 2), QtCore.QPointF(w, origin.y()))
+            painter.setPen(QtGui.QPen(QtGui.QColor("#27ae60"), 1.2))
+            painter.drawLine(QtCore.QPointF(origin.x() - arrow / 2, arrow), QtCore.QPointF(origin.x(), 0.0))
+            painter.drawLine(QtCore.QPointF(origin.x() + arrow / 2, arrow), QtCore.QPointF(origin.x(), 0.0))
+        if self._show_origin:
+            painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
+            painter.setBrush(QtGui.QBrush(QtGui.QColor("#555555")))
+            painter.drawEllipse(origin, 3.5, 3.5)
+
     def _draw_sketch(
         self,
         painter: QtGui.QPainter,
@@ -1685,11 +1780,34 @@ class MechanismCanvas(QtWidgets.QWidget):
             color_pt_const     = "#b59b75"
             color_pt_hover     = "#5e6a75"
 
+        # DOF-based colouring (only when sketch is valid)
+        dof_result = None
+        if not invalid:
+            project = self.app_service.project
+            if project is not None and project.sketch is not None:
+                dof_result = SketchDofAnalyzer().analyze(project.sketch)
+
+        def _entity_color(entity_id: str, construction: bool) -> QtGui.QColor:
+            if dof_result is not None and entity_id in dof_result.fully_constrained_entity_ids:
+                return QtGui.QColor("#4caf50")
+            return QtGui.QColor(color_normal if not construction else color_construction)
+
+        def _point_color(point_id: str, construction: bool) -> QtGui.QColor:
+            if construction:
+                return QtGui.QColor(color_pt_const)
+            if dof_result is not None:
+                dof = dof_result.point_dof.get(point_id, 2)
+                if dof == 0:
+                    return QtGui.QColor("#4caf50")
+                if dof == 1:
+                    return QtGui.QColor("#ffc107")
+            return QtGui.QColor(color_pt_normal)
+
         point_map = {point.entity_id: point for point in points}
         for entity in entities:
             if not entity.visible:
                 continue
-            pen_color = QtGui.QColor(color_normal if not entity.construction else color_construction)
+            pen_color = _entity_color(entity.entity_id, entity.construction)
             if self._selected_entity_id == entity.entity_id:
                 pen_color = QtGui.QColor("#c75b12")
             elif self._hovered_sketch_entity_id == entity.entity_id:
@@ -1768,7 +1886,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             screen_point = self._to_screen(point.x, point.y, transform)
             self._screen_sketch_points.append((point, screen_point))
             radius = 3.5
-            fill = QtGui.QColor(color_pt_normal if not point.construction else color_pt_const)
+            fill = _point_color(point.entity_id, point.construction)
             if self._selected_entity_id == point.entity_id:
                 painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
                 painter.setBrush(QtGui.QBrush(QtGui.QColor(199, 91, 18, 36)))
@@ -1812,7 +1930,10 @@ class MechanismCanvas(QtWidgets.QWidget):
                 p1 = point_map.get(constraint.references[0])
                 p2 = point_map.get(constraint.references[1])
                 if p1 is not None and p2 is not None:
-                    painter.drawLine(self._to_screen(p1.x, p1.y, transform), self._to_screen(p2.x, p2.y, transform))
+                    s1 = self._to_screen(p1.x, p1.y, transform)
+                    s2 = self._to_screen(p2.x, p2.y, transform)
+                    painter.drawLine(s1, s2)
+                    self._draw_distance_annotation(painter, s1, s2, constraint, color, transform)
             elif constraint.type is SketchConstraintType.FIX and constraint.references:
                 point = point_map.get(constraint.references[0])
                 if point is not None:
@@ -1836,7 +1957,6 @@ class MechanismCanvas(QtWidgets.QWidget):
                     )
                     painter.drawLine(mid1, mid2)
             elif constraint.type is SketchConstraintType.ANGLE and len(constraint.references) == 3:
-                # Draw a small arc at the vertex between the two arms
                 vertex = point_map.get(constraint.references[0])
                 arm1 = point_map.get(constraint.references[1])
                 arm2 = point_map.get(constraint.references[2])
@@ -1862,6 +1982,9 @@ class MechanismCanvas(QtWidgets.QWidget):
                         while span > 180: span -= 360
                         while span < -180: span += 360
                         painter.drawArc(rect, int(start_deg * 16), int(span * 16))
+                        self._draw_angle_annotation(
+                            painter, vscreen, start_deg, end_deg, radius_px, constraint, color
+                        )
             # Draw new constraint visual indicators
             if constraint.type is SketchConstraintType.COLLINEAR and len(constraint.references) >= 2:
                 refs3 = [point_map.get(pid) for pid in constraint.references[:3]]
@@ -1902,37 +2025,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                     mid = QtCore.QPointF(0.5 * (p1s.x() + p2s.x()), 0.5 * (p1s.y() + p2s.y()))
                     painter.drawRect(QtCore.QRectF(mid.x() - 3, mid.y() - 3, 6, 6))
 
-            label = {
-                SketchConstraintType.FIX: "FIX",
-                SketchConstraintType.HORIZONTAL: "H",
-                SketchConstraintType.VERTICAL: "V",
-                SketchConstraintType.DISTANCE: "D",
-                SketchConstraintType.COINCIDENT: "C",
-                SketchConstraintType.PARALLEL: "∥",
-                SketchConstraintType.PERPENDICULAR: "⊥",
-                SketchConstraintType.EQUAL_LENGTH: "=",
-                SketchConstraintType.ANGLE: "∠",
-                SketchConstraintType.MIDPOINT: "M",
-                SketchConstraintType.COLLINEAR: "col",
-                SketchConstraintType.SYMMETRIC: "sym",
-                SketchConstraintType.ON_CIRCLE: "○",
-                SketchConstraintType.TANGENT: "tan",
-            }.get(constraint.type, "?")
-
-            # For ANGLE show the value
-            display = label
-            if constraint.type is SketchConstraintType.ANGLE and constraint.value is not None:
-                try:
-                    project = self.app_service.project
-                    val_rad = self.app_service.expression_service.evaluate_property(
-                        constraint.value, project.parameters
-                    ).value
-                    import math as _math
-                    display = f"∠{_math.degrees(val_rad):.1f}°"
-                except Exception:
-                    pass
-
-            self._draw_sketch_label(painter, anchor, f"{display} {constraint.name}", color)
+            self._draw_constraint_icon(painter, anchor, constraint.type, color)
             self._screen_sketch_constraints.append((constraint.id, anchor))
 
     def _draw_bodies(
@@ -2188,9 +2281,19 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._hovered_sketch_point_id = hovered_point.entity_id if hovered_point is not None else None
             if hovered_point is not None:
                 self._hovered_sketch_entity_id = None
+                _hovered_is_locked = self._is_point_fixed(hovered_point.entity_id) or (
+                    self._dof_result is not None
+                    and self._dof_result.point_dof.get(hovered_point.entity_id, 2) == 0
+                )
+                if self._mode == CanvasMode.SELECT and self._editing_enabled and _hovered_is_locked:
+                    self.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.ForbiddenCursor))
+                elif self._mode == CanvasMode.SELECT:
+                    self.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.ArrowCursor))
                 return
             hovered_entity = self._sketch_entity_at(screen_pos)
             self._hovered_sketch_entity_id = hovered_entity.entity_id if hovered_entity is not None else None
+            if self._mode == CanvasMode.SELECT:
+                self.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.ArrowCursor))
         else:
             self._hovered_sketch_point_id = None
             self._hovered_sketch_entity_id = None
@@ -2208,6 +2311,179 @@ class MechanismCanvas(QtWidgets.QWidget):
                 CanvasMode.CREATE_SKETCH_INFINITE_LINE,
             }
         )
+
+    def _draw_constraint_icon(
+        self,
+        painter: QtGui.QPainter,
+        anchor: QtCore.QPointF,
+        constraint_type: SketchConstraintType,
+        color: QtGui.QColor,
+    ) -> None:
+        size = 14.0
+        r = QtCore.QRectF(anchor.x() - size / 2, anchor.y() - size / 2, size, size)
+        pen = QtGui.QPen(color, 1.2)
+        painter.setPen(pen)
+        painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+
+        def _line(x1, y1, x2, y2):
+            painter.drawLine(
+                QtCore.QPointF(r.x() + x1, r.y() + y1),
+                QtCore.QPointF(r.x() + x2, r.y() + y2),
+            )
+
+        if constraint_type is SketchConstraintType.FIX:
+            # Small solid square
+            painter.setBrush(QtGui.QBrush(color))
+            painter.drawRect(QtCore.QRectF(r.x() + 4, r.y() + 4, 6, 6))
+        elif constraint_type is SketchConstraintType.HORIZONTAL:
+            _line(2, 7, 12, 7)
+            _line(8, 4, 12, 7)
+            _line(8, 10, 12, 7)
+        elif constraint_type is SketchConstraintType.VERTICAL:
+            _line(7, 2, 7, 12)
+            _line(4, 6, 7, 2)
+            _line(10, 6, 7, 2)
+        elif constraint_type is SketchConstraintType.DISTANCE:
+            _line(3, 5, 11, 5)
+            _line(3, 9, 11, 9)
+            _line(2, 3, 2, 7)
+            _line(12, 7, 12, 11)
+        elif constraint_type is SketchConstraintType.COINCIDENT:
+            painter.drawEllipse(QtCore.QRectF(r.x() + 2, r.y() + 4, 6, 6))
+            painter.drawEllipse(QtCore.QRectF(r.x() + 6, r.y() + 4, 6, 6))
+        elif constraint_type is SketchConstraintType.PARALLEL:
+            _line(3, 4, 11, 4)
+            _line(3, 10, 11, 10)
+        elif constraint_type is SketchConstraintType.PERPENDICULAR:
+            _line(3, 3, 3, 11)
+            _line(3, 9, 11, 9)
+        elif constraint_type is SketchConstraintType.EQUAL_LENGTH:
+            _line(2, 5, 12, 5)
+            painter.drawText(QtCore.QPointF(r.x() + 4, r.y() + 11), "=")
+        elif constraint_type is SketchConstraintType.ANGLE:
+            # Small arc with two arms
+            painter.drawArc(QtCore.QRectF(r.x() + 2, r.y() + 2, 10, 10), 0, -90 * 16)
+            _line(7, 7, 12, 7)
+            _line(7, 7, 7, 12)
+        elif constraint_type is SketchConstraintType.MIDPOINT:
+            _line(2, 7, 12, 7)
+            painter.setBrush(QtGui.QBrush(color))
+            painter.drawEllipse(QtCore.QPointF(r.x() + 7, r.y() + 7), 2, 2)
+        elif constraint_type is SketchConstraintType.COLLINEAR:
+            _line(2, 7, 12, 7)
+            painter.setBrush(QtGui.QBrush(color))
+            painter.drawEllipse(QtCore.QPointF(r.x() + 4, r.y() + 7), 1.5, 1.5)
+            painter.drawEllipse(QtCore.QPointF(r.x() + 7, r.y() + 7), 1.5, 1.5)
+            painter.drawEllipse(QtCore.QPointF(r.x() + 10, r.y() + 7), 1.5, 1.5)
+        elif constraint_type is SketchConstraintType.SYMMETRIC:
+            _line(7, 2, 7, 12)
+            _line(3, 5, 7, 2)
+            _line(3, 9, 7, 12)
+        elif constraint_type is SketchConstraintType.ON_CIRCLE:
+            painter.drawEllipse(QtCore.QRectF(r.x() + 2, r.y() + 2, 10, 10))
+            painter.setBrush(QtGui.QBrush(color))
+            painter.drawEllipse(QtCore.QPointF(r.x() + 7, r.y() + 7), 1.5, 1.5)
+        elif constraint_type is SketchConstraintType.TANGENT:
+            painter.drawEllipse(QtCore.QRectF(r.x() + 2, r.y() + 4, 8, 8))
+            _line(8, 2, 12, 6)
+
+    def _draw_distance_annotation(
+        self,
+        painter: QtGui.QPainter,
+        s1: QtCore.QPointF,
+        s2: QtCore.QPointF,
+        constraint: SketchConstraint,
+        color: QtGui.QColor,
+        transform,
+    ) -> None:
+        dx = s2.x() - s1.x()
+        dy = s2.y() - s1.y()
+        length = math.hypot(dx, dy)
+        if length < 1e-9:
+            return
+        ux = dx / length
+        uy = dy / length
+        offset = 18.0
+        # Extension-line end points on the dimension line
+        d1 = QtCore.QPointF(s1.x() - uy * offset, s1.y() + ux * offset)
+        d2 = QtCore.QPointF(s2.x() - uy * offset, s2.y() + ux * offset)
+        painter.setPen(QtGui.QPen(color, 0.8, QtCore.Qt.PenStyle.DashLine))
+        painter.drawLine(s1, d1)
+        painter.drawLine(s2, d2)
+        painter.setPen(QtGui.QPen(color, 1.0))
+        painter.drawLine(d1, d2)
+        # Arrow heads
+        self._draw_arrow(painter, d1, ux, uy, color)
+        self._draw_arrow(painter, d2, -ux, -uy, color)
+        # Text
+        text = "?"
+        if constraint.value is not None:
+            try:
+                project = self.app_service.project
+                result = self.app_service.expression_service.evaluate_property(
+                    constraint.value, project.parameters
+                )
+                text = f"{result.value:.4g} {result.unit}"
+            except Exception:
+                pass
+        mid = QtCore.QPointF(0.5 * (d1.x() + d2.x()), 0.5 * (d1.y() + d2.y()))
+        painter.setPen(QtGui.QPen(color))
+        painter.drawText(mid + QtCore.QPointF(4, -4), text)
+
+    def _draw_angle_annotation(
+        self,
+        painter: QtGui.QPainter,
+        vscreen: QtCore.QPointF,
+        start_deg: float,
+        end_deg: float,
+        radius_px: float,
+        constraint: SketchConstraint,
+        color: QtGui.QColor,
+    ) -> None:
+        # Arrow heads at arc ends
+        start_rad = math.radians(-start_deg)
+        end_rad = math.radians(-end_deg)
+        a1 = QtCore.QPointF(vscreen.x() + radius_px * math.cos(start_rad), vscreen.y() + radius_px * math.sin(start_rad))
+        a2 = QtCore.QPointF(vscreen.x() + radius_px * math.cos(end_rad), vscreen.y() + radius_px * math.sin(end_rad))
+        tangent1 = (-math.sin(start_rad), math.cos(start_rad))
+        tangent2 = (-math.sin(end_rad), math.cos(end_rad))
+        self._draw_arrow(painter, a1, tangent1[0], tangent1[1], color)
+        self._draw_arrow(painter, a2, tangent2[0], tangent2[1], color)
+        # Text
+        text = "?°"
+        if constraint.value is not None:
+            try:
+                project = self.app_service.project
+                val_rad = self.app_service.expression_service.evaluate_property(
+                    constraint.value, project.parameters
+                ).value
+                text = f"{math.degrees(val_rad):.1f}°"
+            except Exception:
+                pass
+        bisect_deg = (start_deg + end_deg) / 2
+        bisect_rad = math.radians(-bisect_deg)
+        label_radius = radius_px + 10
+        label_pos = QtCore.QPointF(
+            vscreen.x() + label_radius * math.cos(bisect_rad),
+            vscreen.y() + label_radius * math.sin(bisect_rad),
+        )
+        painter.setPen(QtGui.QPen(color))
+        painter.drawText(label_pos, text)
+
+    def _draw_arrow(
+        self,
+        painter: QtGui.QPainter,
+        tip: QtCore.QPointF,
+        ux: float,
+        uy: float,
+        color: QtGui.QColor,
+    ) -> None:
+        size = 4.0
+        ax = -uy * size
+        ay = ux * size
+        painter.setPen(QtGui.QPen(color, 1.0))
+        painter.drawLine(tip, QtCore.QPointF(tip.x() + ux * size + ax, tip.y() + uy * size + ay))
+        painter.drawLine(tip, QtCore.QPointF(tip.x() + ux * size - ax, tip.y() + uy * size - ay))
 
     def _draw_sketch_label(
         self,
@@ -2485,11 +2761,12 @@ class MechanismCanvas(QtWidgets.QWidget):
             for marker in self._collect_markers(project, assembled):
                 distance = math.hypot(world[0] - marker.x, world[1] - marker.y)
                 candidates.append((distance, marker.x, marker.y))
-        if not candidates:
-            return world
-        best = min(candidates, key=lambda item: item[0])
-        if best[0] <= threshold:
-            return best[1], best[2]
+        self._snap_to_point = False
+        if candidates:
+            best = min(candidates, key=lambda item: item[0])
+            if best[0] <= threshold:
+                self._snap_to_point = True
+                return best[1], best[2]
         return world
 
     def _snap_to_sketch_entity(
@@ -2619,11 +2896,16 @@ class MechanismCanvas(QtWidgets.QWidget):
             painter.drawEllipse(preview_point, 3.5, 3.5)
         if self._snap_preview_world is not None:
             snap_point = self._to_screen(self._snap_preview_world[0], self._snap_preview_world[1], transform)
-            painter.setPen(QtGui.QPen(QtGui.QColor("#c75b12"), 1.4))
-            painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
-            painter.drawEllipse(snap_point, 6.5, 6.5)
-            painter.drawLine(snap_point + QtCore.QPointF(-8.0, 0.0), snap_point + QtCore.QPointF(8.0, 0.0))
-            painter.drawLine(snap_point + QtCore.QPointF(0.0, -8.0), snap_point + QtCore.QPointF(0.0, 8.0))
+            if self._snap_to_point:
+                painter.setPen(QtGui.QPen(QtGui.QColor("#4caf50"), 1.8))
+                painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(snap_point, 8.0, 8.0)
+            else:
+                painter.setPen(QtGui.QPen(QtGui.QColor("#c75b12"), 1.4))
+                painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(snap_point, 6.5, 6.5)
+                painter.drawLine(snap_point + QtCore.QPointF(-8.0, 0.0), snap_point + QtCore.QPointF(8.0, 0.0))
+                painter.drawLine(snap_point + QtCore.QPointF(0.0, -8.0), snap_point + QtCore.QPointF(0.0, 8.0))
 
     def _draw_sketch_creation_preview(
         self,

@@ -195,7 +195,7 @@ class ApplicationService:
         self._snapshot()
         point.x = x_scalar
         point.y = y_scalar
-        self._apply_sketch_constraints({point_id})
+        self._apply_sketch_constraints(set())
 
     def create_sketch_line_segment(
         self,
@@ -454,7 +454,7 @@ class ApplicationService:
             self.expression_service.evaluate_property(scalar, project.parameters)
             self._snapshot()
             setattr(entity, property_path, scalar)
-            self._apply_sketch_constraints({entity.id})
+            self._apply_sketch_constraints(set())
             return
         if isinstance(entity, SketchCircle):
             if property_path == "center_point_id":
@@ -1490,7 +1490,8 @@ class ApplicationService:
         for entity in sketch.entities:
             data += f"{entity.id}:{entity.type.value};"
         for constraint in sketch.constraints:
-            data += f"{constraint.id}:{constraint.type.value}:{','.join(constraint.references)}:{','.join(constraint.entity_references)};"
+            val_expr = constraint.value.expression if constraint.value is not None else ""
+            data += f"{constraint.id}:{constraint.type.value}:{','.join(constraint.references)}:{','.join(constraint.entity_references)}:{val_expr};"
         return hashlib.md5(data.encode()).hexdigest()
 
     def _apply_sketch_constraints(
