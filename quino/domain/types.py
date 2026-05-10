@@ -58,6 +58,7 @@ class SketchEntityType(StrEnum):
     CIRCLE = "circle"
     ARC = "arc"
     INFINITE_LINE = "infinite_line"
+    SPLINE = "spline"
 
 
 class SketchConstraintType(StrEnum):
@@ -75,3 +76,10 @@ class SketchConstraintType(StrEnum):
     SYMMETRIC = "symmetric"
     ON_CIRCLE = "on_circle"
     TANGENT = "tangent"
+
+
+class SketchState(StrEnum):
+    UNDER_CONSTRAINED = "under_constrained"
+    FULLY_CONSTRAINED = "fully_constrained"
+    OVER_CONSTRAINED = "over_constrained"
+    INCONSISTENT = "inconsistent"

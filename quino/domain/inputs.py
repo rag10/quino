@@ -74,6 +74,12 @@ class SketchInfiniteLineInput:
 
 
 @dataclass(slots=True)
+class SketchSplineInput:
+    control_point_ids: list[str]
+    name: str | None = None
+
+
+@dataclass(slots=True)
 class SketchConstraintInput:
     constraint_type: str
     references: list[str]

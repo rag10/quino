@@ -40,6 +40,22 @@ class ScalarProperty:
 
 
 @dataclass(slots=True)
+class Expression:
+    """Lightweight parametric expression used by sketch entities."""
+
+    text: str
+    unit: str = "mm"
+
+
+@dataclass(slots=True)
+class Variable:
+    """Sketch-level variable for parametric formulas."""
+
+    name: str
+    expression: str
+
+
+@dataclass(slots=True)
 class Parameter:
     id: str
     name: str
@@ -148,10 +164,11 @@ class SketchPoint:
     id: str
     name: str
     type: SketchEntityType
-    x: ScalarProperty
-    y: ScalarProperty
+    x: Expression
+    y: Expression
     visible: bool = True
     construction: bool = False
+    selectable: bool = True
     style: Style = field(default_factory=Style)
     metadata: Metadata = field(default_factory=Metadata)
 
@@ -165,6 +182,7 @@ class SketchLineSegment:
     end_point_id: str
     visible: bool = True
     construction: bool = False
+    selectable: bool = True
     style: Style = field(default_factory=Style)
     metadata: Metadata = field(default_factory=Metadata)
 
@@ -175,9 +193,10 @@ class SketchCircle:
     name: str
     type: SketchEntityType
     center_point_id: str
-    radius: ScalarProperty
+    radius: Expression
     visible: bool = True
     construction: bool = False
+    selectable: bool = True
     style: Style = field(default_factory=Style)
     metadata: Metadata = field(default_factory=Metadata)
 
@@ -187,11 +206,12 @@ class SketchArc:
     id: str
     name: str
     type: SketchEntityType
-    point_a_id: str
-    point_b_id: str
-    point_c_id: str
+    center_point_id: str
+    start_point_id: str
+    end_point_id: str
     visible: bool = True
     construction: bool = False
+    selectable: bool = True
     style: Style = field(default_factory=Style)
     metadata: Metadata = field(default_factory=Metadata)
 
@@ -205,6 +225,20 @@ class SketchInfiniteLine:
     point_b_id: str
     visible: bool = True
     construction: bool = False
+    selectable: bool = True
+    style: Style = field(default_factory=Style)
+    metadata: Metadata = field(default_factory=Metadata)
+
+
+@dataclass(slots=True)
+class SketchSpline:
+    id: str
+    name: str
+    type: SketchEntityType
+    control_point_ids: list[str]
+    visible: bool = True
+    construction: bool = False
+    selectable: bool = True
     style: Style = field(default_factory=Style)
     metadata: Metadata = field(default_factory=Metadata)
 
@@ -217,6 +251,8 @@ class SketchConstraint:
     references: list[str]
     value: ScalarProperty | None = None
     entity_references: list[str] = field(default_factory=list)
+    enabled: bool = True
+    driving: bool = True
     metadata: Metadata = field(default_factory=Metadata)
 
 
@@ -226,15 +262,23 @@ class Sketch:
     name: str
     visible: bool = True
     style: Style = field(default_factory=Style)
-    entities: list[
-        SketchPoint | SketchLineSegment | SketchCircle | SketchArc | SketchInfiniteLine
-    ] = field(default_factory=list)
-    constraints: list[SketchConstraint] = field(default_factory=list)
+    entities: dict[
+        str, SketchPoint | SketchLineSegment | SketchCircle | SketchArc | SketchInfiniteLine | SketchSpline
+    ] = field(default_factory=dict)
+    constraints: dict[str, SketchConstraint] = field(default_factory=dict)
+    variables: dict[str, Variable] = field(default_factory=dict)
     metadata: Metadata = field(default_factory=Metadata)
     solve_error: str | None = None
 
     def points(self) -> list[SketchPoint]:
-        return [entity for entity in self.entities if isinstance(entity, SketchPoint)]
+        return [entity for entity in self.entities.values() if isinstance(entity, SketchPoint)]
+
+
+@dataclass(slots=True)
+class SketchAnalysis:
+    dof_count: int
+    unconstrained_entities: list[str] = field(default_factory=list)
+    conflicting_constraints: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
