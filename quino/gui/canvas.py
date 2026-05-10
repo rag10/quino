@@ -1950,18 +1950,14 @@ class MechanismCanvas(QtWidgets.QWidget):
                 SketchConstraintType.PERPENDICULAR,
                 SketchConstraintType.EQUAL_LENGTH,
             } and len(constraint.references) == 4:
-                # Draw dashed line between midpoints of the two line segments
                 refs4 = [point_map.get(pid) for pid in constraint.references]
                 if all(p is not None for p in refs4):
-                    mid1 = self._to_screen(
-                        0.5 * (refs4[0].x + refs4[1].x),
-                        0.5 * (refs4[0].y + refs4[1].y), transform,
+                    self._draw_segment_constraint_symbol(
+                        painter, refs4[0], refs4[1], constraint.type, pen_color, transform
                     )
-                    mid2 = self._to_screen(
-                        0.5 * (refs4[2].x + refs4[3].x),
-                        0.5 * (refs4[2].y + refs4[3].y), transform,
+                    self._draw_segment_constraint_symbol(
+                        painter, refs4[2], refs4[3], constraint.type, pen_color, transform
                     )
-                    painter.drawLine(mid1, mid2)
             elif constraint.type is SketchConstraintType.ANGLE and len(constraint.references) == 3:
                 vertex = point_map.get(constraint.references[0])
                 arm1 = point_map.get(constraint.references[1])
@@ -2511,6 +2507,53 @@ class MechanismCanvas(QtWidgets.QWidget):
         painter.drawRoundedRect(bubble, 4.0, 4.0)
         painter.setPen(QtGui.QPen(color))
         painter.drawText(anchor, text)
+
+    def _draw_segment_constraint_symbol(
+        self,
+        painter: "QtGui.QPainter",
+        pt_a: "CanvasSketchPoint",
+        pt_b: "CanvasSketchPoint",
+        constraint_type: "SketchConstraintType",
+        color: "QtGui.QColor",
+        transform: tuple,
+    ) -> None:
+        sa = self._to_screen(pt_a.x, pt_a.y, transform)
+        sb = self._to_screen(pt_b.x, pt_b.y, transform)
+        dx = sb.x() - sa.x()
+        dy = sb.y() - sa.y()
+        length = math.hypot(dx, dy)
+        if length < 1e-9:
+            return
+        ux, uy = dx / length, dy / length
+        nx, ny = -uy, ux
+        mid = QtCore.QPointF(0.5 * (sa.x() + sb.x()), 0.5 * (sa.y() + sb.y()))
+        painter.setPen(QtGui.QPen(color, 1.2))
+        painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        size = 7.0
+
+        if constraint_type is SketchConstraintType.PARALLEL:
+            for offset in (-3.5, 3.5):
+                base = QtCore.QPointF(mid.x() + ux * offset, mid.y() + uy * offset)
+                tip = QtCore.QPointF(base.x() + ux * size * 0.5, base.y() + uy * size * 0.5)
+                p1 = QtCore.QPointF(tip.x() - nx * size * 0.4, tip.y() - ny * size * 0.4)
+                p2 = QtCore.QPointF(tip.x() + nx * size * 0.4, tip.y() + ny * size * 0.4)
+                painter.drawLine(p1, tip)
+                painter.drawLine(p2, tip)
+        elif constraint_type is SketchConstraintType.PERPENDICULAR:
+            sq = 5.0
+            p0 = mid
+            p1 = QtCore.QPointF(p0.x() + nx * sq, p0.y() + ny * sq)
+            p2 = QtCore.QPointF(p1.x() + ux * sq, p1.y() + uy * sq)
+            p3 = QtCore.QPointF(p0.x() + ux * sq, p0.y() + uy * sq)
+            painter.drawLine(p0, p1)
+            painter.drawLine(p1, p2)
+            painter.drawLine(p2, p3)
+        elif constraint_type is SketchConstraintType.EQUAL_LENGTH:
+            for offset in (-3.0, 3.0):
+                base = QtCore.QPointF(mid.x() + ux * offset, mid.y() + uy * offset)
+                t1 = QtCore.QPointF(base.x() - nx * size * 0.4, base.y() - ny * size * 0.4)
+                t2 = QtCore.QPointF(base.x() + nx * size * 0.4, base.y() + ny * size * 0.4)
+                painter.drawLine(t1, t2)
 
     def _sketch_entity_label_anchor(
         self,
