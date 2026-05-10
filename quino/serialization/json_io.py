@@ -6,6 +6,7 @@ from pathlib import Path
 from quino.domain.model import (
     Body,
     Driver,
+    Expression,
     Joint,
     JointEndpoint,
     Marker,
@@ -16,14 +17,17 @@ from quino.domain.model import (
     ScalarProperty,
     Sensor,
     Sketch,
-    SketchConstraint,
+    SketchAnalysis,
     SketchArc,
     SketchCircle,
+    SketchConstraint,
     SketchInfiniteLine,
     SketchLineSegment,
     SketchPoint,
+    SketchSpline,
     Slider,
     Style,
+    Variable,
     ViewState,
 )
 from quino.domain.types import (
@@ -131,6 +135,19 @@ class JsonMapper:
             unit=data["unit"],
             expected_dimension=Dimension(data["expected_dimension"]),
         )
+
+    def _expression_to_dict(self, value: Expression | None) -> dict | None:
+        if value is None:
+            return None
+        return {"text": value.text, "unit": value.unit}
+
+    def _expression_from_dict(self, data: dict | None) -> Expression | None:
+        if data is None:
+            return None
+        # Fallback: support legacy ScalarProperty serialization format
+        if "text" in data:
+            return Expression(text=data["text"], unit=data.get("unit", "mm"))
+        return Expression(text=data.get("expression", ""), unit=data.get("unit", "mm"))
 
     def _style_to_dict(self, style: Style) -> dict:
         return {
@@ -309,23 +326,59 @@ class JsonMapper:
             "name": sketch.name,
             "visible": sketch.visible,
             "style": self._style_to_dict(sketch.style),
-            "entities": [self._sketch_entity_to_dict(entity) for entity in sketch.entities],
-            "constraints": [self._sketch_constraint_to_dict(constraint) for constraint in sketch.constraints],
+            "entities": {
+                eid: self._sketch_entity_to_dict(entity)
+                for eid, entity in sketch.entities.items()
+            },
+            "constraints": {
+                cid: self._sketch_constraint_to_dict(constraint)
+                for cid, constraint in sketch.constraints.items()
+            },
+            "variables": {
+                vid: self._variable_to_dict(variable)
+                for vid, variable in sketch.variables.items()
+            },
             "metadata": sketch.metadata.values,
         }
 
     def _sketch_from_dict(self, data: dict | None) -> Sketch | None:
         if data is None:
             return None
+        entities_data = data.get("entities", {})
+        constraints_data = data.get("constraints", {})
+        variables_data = data.get("variables", {})
+        # Fallback: support legacy list format for entities / constraints
+        if isinstance(entities_data, list):
+            entities_data = {item["id"]: item for item in entities_data}
+        if isinstance(constraints_data, list):
+            constraints_data = {item["id"]: item for item in constraints_data}
+        if isinstance(variables_data, list):
+            variables_data = {item["name"]: item for item in variables_data}
         return Sketch(
             id=data["id"],
             name=data["name"],
             visible=data.get("visible", True),
             style=self._style_from_dict(data.get("style")),
-            entities=[self._sketch_entity_from_dict(item) for item in data.get("entities", [])],
-            constraints=[self._sketch_constraint_from_dict(item) for item in data.get("constraints", [])],
+            entities={
+                eid: self._sketch_entity_from_dict(item)
+                for eid, item in entities_data.items()
+            },
+            constraints={
+                cid: self._sketch_constraint_from_dict(item)
+                for cid, item in constraints_data.items()
+            },
+            variables={
+                vid: self._variable_from_dict(item)
+                for vid, item in variables_data.items()
+            },
             metadata=Metadata(data.get("metadata", {})),
         )
+
+    def _variable_to_dict(self, variable: Variable) -> dict:
+        return {"name": variable.name, "expression": variable.expression}
+
+    def _variable_from_dict(self, data: dict) -> Variable:
+        return Variable(name=data["name"], expression=data["expression"])
 
     def _sketch_constraint_to_dict(self, constraint: SketchConstraint) -> dict:
         return {
@@ -335,6 +388,8 @@ class JsonMapper:
             "references": list(constraint.references),
             "value": self._scalar_to_dict(constraint.value) if constraint.value is not None else None,
             "entity_references": list(constraint.entity_references),
+            "enabled": constraint.enabled,
+            "driving": constraint.driving,
             "metadata": constraint.metadata.values,
         }
 
@@ -346,6 +401,8 @@ class JsonMapper:
             references=list(data.get("references", [])),
             value=self._scalar_from_dict(data["value"]) if data.get("value") is not None else None,
             entity_references=list(data.get("entity_references", [])),
+            enabled=data.get("enabled", True),
+            driving=data.get("driving", True),
             metadata=Metadata(data.get("metadata", {})),
         )
 
@@ -359,31 +416,34 @@ class JsonMapper:
             "type": entity.type.value,
             "visible": entity.visible,
             "construction": entity.construction,
+            "selectable": entity.selectable,
             "style": self._style_to_dict(entity.style),
             "metadata": entity.metadata.values,
         }
         if isinstance(entity, SketchPoint):
-            base["x"] = self._scalar_to_dict(entity.x)
-            base["y"] = self._scalar_to_dict(entity.y)
+            base["x"] = self._expression_to_dict(entity.x)
+            base["y"] = self._expression_to_dict(entity.y)
         elif isinstance(entity, SketchLineSegment):
             base["start_point_id"] = entity.start_point_id
             base["end_point_id"] = entity.end_point_id
         elif isinstance(entity, SketchCircle):
             base["center_point_id"] = entity.center_point_id
-            base["radius"] = self._scalar_to_dict(entity.radius)
+            base["radius"] = self._expression_to_dict(entity.radius)
         elif isinstance(entity, SketchArc):
-            base["point_a_id"] = entity.point_a_id
-            base["point_b_id"] = entity.point_b_id
-            base["point_c_id"] = entity.point_c_id
+            base["center_point_id"] = entity.center_point_id
+            base["start_point_id"] = entity.start_point_id
+            base["end_point_id"] = entity.end_point_id
         elif isinstance(entity, SketchInfiniteLine):
             base["point_a_id"] = entity.point_a_id
             base["point_b_id"] = entity.point_b_id
+        elif isinstance(entity, SketchSpline):
+            base["control_point_ids"] = entity.control_point_ids
         return base
 
     def _sketch_entity_from_dict(
         self,
         data: dict,
-    ) -> SketchPoint | SketchLineSegment | SketchCircle | SketchArc | SketchInfiniteLine:
+    ) -> SketchPoint | SketchLineSegment | SketchCircle | SketchArc | SketchInfiniteLine | SketchSpline:
         entity_type = SketchEntityType(data["type"])
         common = {
             "id": data["id"],
@@ -391,13 +451,14 @@ class JsonMapper:
             "type": entity_type,
             "visible": data.get("visible", True),
             "construction": data.get("construction", False),
+            "selectable": data.get("selectable", True),
             "style": self._style_from_dict(data.get("style")),
             "metadata": Metadata(data.get("metadata", {})),
         }
         if entity_type is SketchEntityType.POINT:
             return SketchPoint(
-                x=self._scalar_from_dict(data["x"]),
-                y=self._scalar_from_dict(data["y"]),
+                x=self._expression_from_dict(data["x"]),
+                y=self._expression_from_dict(data["y"]),
                 **common,
             )
         if entity_type is SketchEntityType.LINE_SEGMENT:
@@ -409,14 +470,27 @@ class JsonMapper:
         if entity_type is SketchEntityType.CIRCLE:
             return SketchCircle(
                 center_point_id=data["center_point_id"],
-                radius=self._scalar_from_dict(data["radius"]),
+                radius=self._expression_from_dict(data["radius"]),
                 **common,
             )
         if entity_type is SketchEntityType.ARC:
+            # Fallback: support legacy 3-point arc serialization
+            if "point_a_id" in data:
+                return SketchArc(
+                    center_point_id=data["point_a_id"],
+                    start_point_id=data["point_b_id"],
+                    end_point_id=data["point_c_id"],
+                    **common,
+                )
             return SketchArc(
-                point_a_id=data["point_a_id"],
-                point_b_id=data["point_b_id"],
-                point_c_id=data["point_c_id"],
+                center_point_id=data["center_point_id"],
+                start_point_id=data["start_point_id"],
+                end_point_id=data["end_point_id"],
+                **common,
+            )
+        if entity_type is SketchEntityType.SPLINE:
+            return SketchSpline(
+                control_point_ids=data.get("control_point_ids", []),
                 **common,
             )
         return SketchInfiniteLine(

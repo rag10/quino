@@ -64,6 +64,7 @@ __all__ = [
     "ExampleBuildResult",
     "ExampleEntry",
     "ExampleRegistry",
+    "Expression",
     "DriverType",
     "Joint",
     "JointEndpoint",

@@ -10,6 +10,7 @@ from quino.domain.sketch_constraints import CONSTRAINT_SPECS
 from quino.domain.model import (
     Body,
     Driver,
+    Expression,
     Joint,
     JointEndpoint,
     Marker,
@@ -28,6 +29,7 @@ from quino.domain.model import (
     SketchInfiniteLine,
     SketchLineSegment,
     SketchPoint,
+    SketchSpline,
     Slider,
     Style,
     ValidationMessage,
@@ -175,27 +177,27 @@ class ApplicationService:
             id=self.id_service.new("skpt"),
             name=name or self._next_sketch_name("Point"),
             type=SketchEntityType.POINT,
-            x=self._scalar(x, "mm", Dimension.LENGTH),
-            y=self._scalar(y, "mm", Dimension.LENGTH),
+            x=Expression(x),
+            y=Expression(y),
             visible=visible,
         )
         self._validate_sketch_entity_name(point.name)
-        self.expression_service.evaluate_property(point.x, project.parameters)
-        self.expression_service.evaluate_property(point.y, project.parameters)
+        self._evaluate_sketch_expression(point.x, project.parameters)
+        self._evaluate_sketch_expression(point.y, project.parameters)
         self._snapshot()
-        sketch.entities.append(point)
+        sketch.entities[point.id] = point
         return point.id
 
     def move_sketch_point(self, point_id: str, x: str, y: str) -> None:
         project = self._require_project()
         point = self._find_sketch_point(point_id)
-        x_scalar = self._scalar(x, "mm", Dimension.LENGTH)
-        y_scalar = self._scalar(y, "mm", Dimension.LENGTH)
-        self.expression_service.evaluate_property(x_scalar, project.parameters)
-        self.expression_service.evaluate_property(y_scalar, project.parameters)
+        x_expr = Expression(x)
+        y_expr = Expression(y)
+        self._evaluate_sketch_expression(x_expr, project.parameters)
+        self._evaluate_sketch_expression(y_expr, project.parameters)
         self._snapshot()
-        point.x = x_scalar
-        point.y = y_scalar
+        point.x = x_expr
+        point.y = y_expr
         self._apply_sketch_constraints(set())
 
     def create_sketch_line_segment(
@@ -218,7 +220,7 @@ class ApplicationService:
         )
         self._validate_sketch_entity_name(entity.name)
         self._snapshot()
-        sketch.entities.append(entity)
+        sketch.entities[entity.id] = entity
         return entity.id
 
     def create_sketch_circle(
@@ -235,15 +237,15 @@ class ApplicationService:
             name=name or self._next_sketch_name("Circle"),
             type=SketchEntityType.CIRCLE,
             center_point_id=center_point_id,
-            radius=self._scalar(radius, "mm", Dimension.LENGTH),
+            radius=Expression(radius),
         )
         self._validate_sketch_entity_name(entity.name)
-        radius_eval = self.expression_service.evaluate_property(entity.radius, project.parameters)
-        if radius_eval.value <= 0:
+        radius_eval = self._evaluate_sketch_expression(entity.radius, project.parameters)
+        if radius_eval <= 0:
             raise ValueError("Circle radius must be positive")
         sketch = self._require_sketch(create_if_missing=True)
         self._snapshot()
-        sketch.entities.append(entity)
+        sketch.entities[entity.id] = entity
         if edge_point_id is not None:
             edge_pt = self._find_sketch_point(edge_point_id)
             if edge_pt is not None:
@@ -267,17 +269,13 @@ class ApplicationService:
             id=self.id_service.new("skarc"),
             name=name or self._next_sketch_name("Arc"),
             type=SketchEntityType.ARC,
-            point_a_id=point_a_id,
-            point_b_id=point_b_id,
-            point_c_id=point_c_id,
+            center_point_id=point_a_id,
+            start_point_id=point_b_id,
+            end_point_id=point_c_id,
         )
         self._validate_sketch_entity_name(entity.name)
         self._snapshot()
-        sketch.entities.append(entity)
-        # Hide the midpoint on arc (B) — it's an internal control, not a user handle
-        mid_pt = self._find_sketch_point(point_b_id)
-        if mid_pt is not None:
-            mid_pt.visible = False
+        sketch.entities[entity.id] = entity
         return entity.id
 
     def create_sketch_arc_by_center(
@@ -297,12 +295,12 @@ class ApplicationService:
                 id=self.id_service.new("skarc"),
                 name=name or self._next_sketch_name("Arc"),
                 type=SketchEntityType.ARC,
-                point_a_id=center_id,
-                point_b_id=start_id,
-                point_c_id=end_id,
+                center_point_id=center_id,
+                start_point_id=start_id,
+                end_point_id=end_id,
             )
             self._validate_sketch_entity_name(entity.name)
-            sketch.entities.append(entity)
+            sketch.entities[entity.id] = entity
             self._apply_sketch_constraints(set())
         return entity.id
 
@@ -326,8 +324,120 @@ class ApplicationService:
         )
         self._validate_sketch_entity_name(entity.name)
         self._snapshot()
-        sketch.entities.append(entity)
+        sketch.entities[entity.id] = entity
         return entity.id
+
+    def create_sketch_rectangle(
+        self,
+        corner_a: tuple[float, float],
+        corner_b: tuple[float, float],
+        name: str | None = None,
+    ) -> list[str]:
+        """Create an axis-aligned rectangle as points, line segments and H/V constraints."""
+        if abs(corner_a[0] - corner_b[0]) <= 1e-9 or abs(corner_a[1] - corner_b[1]) <= 1e-9:
+            raise ValueError("Rectangle requires non-zero width and height")
+        self._require_sketch(create_if_missing=True)
+        prefix = name or self._next_sketch_name("Rectangle")
+        with self._operation():
+            p1 = self.create_sketch_point(self._mm_expression(corner_a[0]), self._mm_expression(corner_a[1]), f"{prefix} P1")
+            p2 = self.create_sketch_point(self._mm_expression(corner_b[0]), self._mm_expression(corner_a[1]), f"{prefix} P2")
+            p3 = self.create_sketch_point(self._mm_expression(corner_b[0]), self._mm_expression(corner_b[1]), f"{prefix} P3")
+            p4 = self.create_sketch_point(self._mm_expression(corner_a[0]), self._mm_expression(corner_b[1]), f"{prefix} P4")
+            l1 = self.create_sketch_line_segment(p1, p2, f"{prefix} Bottom")
+            l2 = self.create_sketch_line_segment(p2, p3, f"{prefix} Right")
+            l3 = self.create_sketch_line_segment(p3, p4, f"{prefix} Top")
+            l4 = self.create_sketch_line_segment(p4, p1, f"{prefix} Left")
+            self.create_sketch_constraint(SketchConstraintType.HORIZONTAL.value, [p1, p2], name=f"{prefix} H1")
+            self.create_sketch_constraint(SketchConstraintType.VERTICAL.value, [p2, p3], name=f"{prefix} V1")
+            self.create_sketch_constraint(SketchConstraintType.HORIZONTAL.value, [p3, p4], name=f"{prefix} H2")
+            self.create_sketch_constraint(SketchConstraintType.VERTICAL.value, [p4, p1], name=f"{prefix} V2")
+        return [p1, p2, p3, p4, l1, l2, l3, l4]
+
+    def move_sketch_point_with_solver(self, point_id: str, x: str, y: str) -> None:
+        """Move a sketch point while treating the drag target as locked for the solver."""
+        project = self._require_project()
+        point = self._find_sketch_point(point_id)
+        x_expr = Expression(x)
+        y_expr = Expression(y)
+        self._evaluate_sketch_expression(x_expr, project.parameters)
+        self._evaluate_sketch_expression(y_expr, project.parameters)
+        with self._operation():
+            point.x = x_expr
+            point.y = y_expr
+            self._apply_sketch_constraints({point_id})
+
+    def toggle_sketch_construction(self, entity_ids: list[str] | set[str]) -> bool:
+        sketch = self._require_sketch()
+        target_ids = [entity_id for entity_id in entity_ids if entity_id in sketch.entities]
+        if not target_ids:
+            raise ValueError("Select at least one sketch entity")
+        next_value = not all(sketch.entities[entity_id].construction for entity_id in target_ids)
+        with self._operation():
+            for entity_id in target_ids:
+                sketch.entities[entity_id].construction = next_value
+        return next_value
+
+    def edit_distance_constraint_value(
+        self,
+        constraint_id: str,
+        value: str,
+        *,
+        label_position: tuple[float, float] | None = None,
+    ) -> None:
+        constraint = self._find_sketch_constraint(constraint_id)
+        if constraint.type is not SketchConstraintType.DISTANCE:
+            raise ValueError("Only distance constraints can be edited with this helper")
+        with self._operation():
+            scalar = self._scalar(value, "mm", Dimension.LENGTH)
+            eval_result = self.expression_service.evaluate_property(scalar, self._require_project().parameters)
+            if eval_result.value <= 0:
+                raise ValueError("Distance constraint must be positive")
+            constraint.value = scalar
+            if label_position is not None:
+                constraint.metadata.values["label_position"] = [label_position[0], label_position[1]]
+            self._apply_sketch_constraints({constraint.references[0]} if constraint.references else set())
+
+    def apply_sketch_constraint_from_entities(
+        self,
+        constraint_type: str,
+        entity_ids: list[str],
+        value: str | None = None,
+    ) -> str:
+        """Create a sketch constraint using selected points/curves when their types are compatible."""
+        ctype = SketchConstraintType(constraint_type)
+        refs: list[str] = []
+        entity_refs: list[str] = []
+        for entity_id in entity_ids:
+            entity = self._find_sketch_entity(entity_id)
+            if isinstance(entity, SketchPoint):
+                refs.append(entity.id)
+            elif isinstance(entity, (SketchLineSegment, SketchInfiniteLine)):
+                refs.extend(self._line_point_ids(entity))
+            elif isinstance(entity, (SketchCircle, SketchArc)):
+                if ctype is SketchConstraintType.COINCIDENT:
+                    refs.append(entity.center_point_id)
+                else:
+                    entity_refs.append(entity.id)
+        if ctype in {
+            SketchConstraintType.HORIZONTAL,
+            SketchConstraintType.VERTICAL,
+            SketchConstraintType.DISTANCE,
+            SketchConstraintType.COINCIDENT,
+            SketchConstraintType.MIDPOINT,
+            SketchConstraintType.COLLINEAR,
+            SketchConstraintType.SYMMETRIC,
+        }:
+            return self.create_sketch_constraint(ctype.value, refs, value=value)
+        if ctype in {
+            SketchConstraintType.PARALLEL,
+            SketchConstraintType.PERPENDICULAR,
+            SketchConstraintType.EQUAL_LENGTH,
+            SketchConstraintType.ANGLE,
+        }:
+            return self.create_sketch_constraint(ctype.value, refs, value=value)
+        if ctype in {SketchConstraintType.ON_CIRCLE, SketchConstraintType.TANGENT}:
+            return self.create_sketch_constraint(ctype.value, refs, value=value, entity_references=entity_refs)
+        raise ValueError(f"Unsupported sketch constraint type: {constraint_type}")
 
     def create_sketch_constraint(
         self,
@@ -349,9 +459,9 @@ class ApplicationService:
             if is_radius_form:
                 entity = self._find_sketch_entity(normalized_entity_refs[0])
                 if value is None:
-                    current_radius = self.expression_service.evaluate_property(
+                    current_radius = self._evaluate_sketch_expression(
                         entity.radius, project.parameters
-                    ).value
+                    )
                     default_value = f"{current_radius:.6g} mm"
                 else:
                     default_value = value
@@ -392,7 +502,7 @@ class ApplicationService:
         )
         self._validate_sketch_constraint_name(constraint.name)
         self._snapshot()
-        sketch.constraints.append(constraint)
+        sketch.constraints[constraint.id] = constraint
         locked_refs = {normalized_refs[0]} if normalized_refs else set()
         self._apply_sketch_constraints(locked_refs)
         return constraint.id
@@ -432,7 +542,8 @@ class ApplicationService:
         sketch = self._require_sketch()
         self._find_sketch_constraint(constraint_id)
         self._snapshot()
-        sketch.constraints = [constraint for constraint in sketch.constraints if constraint.id != constraint_id]
+        if constraint_id in sketch.constraints:
+            del sketch.constraints[constraint_id]
         self._apply_sketch_constraints(set())
 
     def solve_sketch(self) -> ValidationReport:
@@ -473,10 +584,10 @@ class ApplicationService:
         if isinstance(entity, SketchPoint) and property_path in {"x", "y"}:
             if value.kind != "expression" or not isinstance(value.value, str):
                 raise ValueError("Sketch point coordinates require an expression value")
-            scalar = self._scalar(value.value, "mm", Dimension.LENGTH)
-            self.expression_service.evaluate_property(scalar, project.parameters)
+            expr = Expression(value.value)
+            self._evaluate_sketch_expression(expr, project.parameters)
             self._snapshot()
-            setattr(entity, property_path, scalar)
+            setattr(entity, property_path, expr)
             self._apply_sketch_constraints(set())
             return
         if isinstance(entity, SketchCircle):
@@ -490,12 +601,12 @@ class ApplicationService:
             if property_path == "radius":
                 if value.kind != "expression" or not isinstance(value.value, str):
                     raise ValueError("Circle radius requires an expression value")
-                scalar = self._scalar(value.value, "mm", Dimension.LENGTH)
-                radius_eval = self.expression_service.evaluate_property(scalar, project.parameters)
-                if radius_eval.value <= 0:
+                expr = Expression(value.value)
+                radius_eval = self._evaluate_sketch_expression(expr, project.parameters)
+                if radius_eval <= 0:
                     raise ValueError("Circle radius must be positive")
                 self._snapshot()
-                entity.radius = scalar
+                entity.radius = expr
                 return
         if isinstance(entity, SketchLineSegment) and property_path in {"start_point_id", "end_point_id"}:
             self._update_sketch_point_reference(entity, property_path, value)
@@ -503,7 +614,7 @@ class ApplicationService:
         if isinstance(entity, SketchInfiniteLine) and property_path in {"point_a_id", "point_b_id"}:
             self._update_sketch_point_reference(entity, property_path, value)
             return
-        if isinstance(entity, SketchArc) and property_path in {"point_a_id", "point_b_id", "point_c_id"}:
+        if isinstance(entity, SketchArc) and property_path in {"center_point_id", "start_point_id", "end_point_id"}:
             self._update_sketch_point_reference(entity, property_path, value)
             return
         raise ValueError(f"Unsupported sketch property path: {property_path}")
@@ -515,7 +626,7 @@ class ApplicationService:
         if isinstance(entity, SketchPoint):
             dependent_ids = {
                 item.id
-                for item in sketch.entities
+                for item in sketch.entities.values()
                 if (
                     isinstance(item, SketchLineSegment)
                     and entity_id in {item.start_point_id, item.end_point_id}
@@ -526,29 +637,26 @@ class ApplicationService:
                 )
                 or (
                     isinstance(item, SketchArc)
-                    and entity_id in {item.point_a_id, item.point_b_id, item.point_c_id}
+                    and entity_id in {item.center_point_id, item.start_point_id, item.end_point_id}
                 )
                 or (
                     isinstance(item, SketchInfiniteLine)
                     and entity_id in {item.point_a_id, item.point_b_id}
                 )
             }
-            sketch.constraints = [
-                constraint
-                for constraint in sketch.constraints
-                if entity_id not in constraint.references
-            ]
-            sketch.entities = [
-                item for item in sketch.entities if item.id != entity_id and item.id not in dependent_ids
-            ]
+            for cid in list(sketch.constraints.keys()):
+                if entity_id in sketch.constraints[cid].references:
+                    del sketch.constraints[cid]
+            for eid in list(sketch.entities.keys()):
+                if eid == entity_id or eid in dependent_ids:
+                    del sketch.entities[eid]
             self._apply_sketch_constraints(set())
             return
-        sketch.constraints = [
-            constraint
-            for constraint in sketch.constraints
-            if entity_id not in constraint.entity_references
-        ]
-        sketch.entities = [item for item in sketch.entities if item.id != entity_id]
+        for cid in list(sketch.constraints.keys()):
+            if entity_id in sketch.constraints[cid].entity_references:
+                del sketch.constraints[cid]
+        if entity_id in sketch.entities:
+            del sketch.entities[entity_id]
         self._apply_sketch_constraints(set())
 
     def create_body(self, name: str, markers: list[MarkerInput], body_type: str = "body") -> str:
@@ -960,10 +1068,10 @@ class ApplicationService:
 
     def delete_entity(self, entity_id: str) -> None:
         project = self._require_project()
-        if project.sketch is not None and any(entity.id == entity_id for entity in project.sketch.entities):
+        if project.sketch is not None and entity_id in project.sketch.entities:
             self.delete_sketch_entity(entity_id)
             return
-        if project.sketch is not None and any(constraint.id == entity_id for constraint in project.sketch.constraints):
+        if project.sketch is not None and entity_id in project.sketch.constraints:
             self.delete_sketch_constraint(entity_id)
             return
         if any(body.id == entity_id for body in project.model.bodies):
@@ -1208,9 +1316,9 @@ class ApplicationService:
         index: dict[str, object] = {}
         if project.sketch is not None:
             index[project.sketch.id] = project.sketch
-            for entity in project.sketch.entities:
+            for entity in project.sketch.entities.values():
                 index[entity.id] = entity
-            for constraint in project.sketch.constraints:
+            for constraint in project.sketch.constraints.values():
                 index[constraint.id] = constraint
         for collection in (
             project.model.bodies,
@@ -1362,15 +1470,19 @@ class ApplicationService:
             )
         return project.sketch
 
+    def _evaluate_sketch_expression(self, expression: Expression, parameters: list[Parameter]) -> float:
+        quantity = self.expression_service.evaluate_expression(expression.text, parameters)
+        return self.unit_service.convert(quantity, expression.unit)
+
     def _find_sketch_entity(
         self,
         entity_id: str,
-    ) -> SketchPoint | SketchLineSegment | SketchCircle | SketchArc | SketchInfiniteLine:
+    ) -> SketchPoint | SketchLineSegment | SketchCircle | SketchArc | SketchInfiniteLine | SketchSpline:
         sketch = self._require_sketch()
-        for entity in sketch.entities:
-            if entity.id == entity_id:
-                return entity
-        raise ValueError(f"Unknown sketch entity: {entity_id}")
+        entity = sketch.entities.get(entity_id)
+        if entity is None:
+            raise ValueError(f"Unknown sketch entity: {entity_id}")
+        return entity
 
     def _find_sketch_point(self, point_id: str) -> SketchPoint:
         point = self._find_sketch_entity(point_id)
@@ -1380,29 +1492,34 @@ class ApplicationService:
 
     def _find_sketch_constraint(self, constraint_id: str) -> SketchConstraint:
         sketch = self._require_sketch()
-        for constraint in sketch.constraints:
-            if constraint.id == constraint_id:
-                return constraint
-        raise ValueError(f"Unknown sketch constraint: {constraint_id}")
+        constraint = sketch.constraints.get(constraint_id)
+        if constraint is None:
+            raise ValueError(f"Unknown sketch constraint: {constraint_id}")
+        return constraint
+
+    def _line_point_ids(self, entity: SketchLineSegment | SketchInfiniteLine) -> list[str]:
+        if isinstance(entity, SketchLineSegment):
+            return [entity.start_point_id, entity.end_point_id]
+        return [entity.point_a_id, entity.point_b_id]
 
     def _ensure_sketch_point_exists(self, point_id: str) -> None:
         self._find_sketch_point(point_id)
 
     def _validate_sketch_entity_name(self, new_name: str, entity_id: str | None = None) -> None:
         sketch = self._require_sketch(create_if_missing=True)
-        for entity in sketch.entities:
+        for entity in sketch.entities.values():
             if entity.name == new_name and entity.id != entity_id:
                 raise ValueError(f"Sketch name already exists: {new_name}")
 
     def _validate_sketch_constraint_name(self, new_name: str, constraint_id: str | None = None) -> None:
         sketch = self._require_sketch(create_if_missing=True)
-        for constraint in sketch.constraints:
+        for constraint in sketch.constraints.values():
             if constraint.name == new_name and constraint.id != constraint_id:
                 raise ValueError(f"Sketch constraint name already exists: {new_name}")
 
     def _next_sketch_name(self, prefix: str) -> str:
         sketch = self._require_sketch(create_if_missing=True)
-        existing = {entity.name for entity in sketch.entities}
+        existing = {entity.name for entity in sketch.entities.values()}
         index = 1
         candidate = f"{prefix}{index}"
         while candidate in existing:
@@ -1412,7 +1529,7 @@ class ApplicationService:
 
     def _next_sketch_constraint_name(self, prefix: str) -> str:
         sketch = self._require_sketch(create_if_missing=True)
-        existing = {constraint.name for constraint in sketch.constraints}
+        existing = {constraint.name for constraint in sketch.constraints.values()}
         index = 1
         candidate = f"{prefix}{index}"
         while candidate in existing:
@@ -1450,8 +1567,8 @@ class ApplicationService:
         if constraint_type is SketchConstraintType.DISTANCE:
             if len(references) == 1 and len(entity_references or []) == 1:
                 entity = self._find_sketch_entity((entity_references or [])[0])
-                if not isinstance(entity, SketchCircle):
-                    raise ValueError("Distance radius constraint requires a circle entity reference")
+                if not isinstance(entity, (SketchCircle, SketchArc)):
+                    raise ValueError("Distance radius constraint requires a circle or arc entity reference")
                 return  # valid radius form — skip generic checks below
         spec = CONSTRAINT_SPECS.get(constraint_type)
         expected_pts = spec.points if spec is not None else 2
@@ -1466,10 +1583,10 @@ class ApplicationService:
         if entity_references:
             for entity_id in entity_references:
                 entity = self._find_sketch_entity(entity_id)
-                if constraint_type is SketchConstraintType.ON_CIRCLE and not isinstance(entity, SketchCircle):
-                    raise ValueError("On-circle constraint requires a circle entity reference")
-                if constraint_type is SketchConstraintType.TANGENT and not isinstance(entity, SketchCircle):
-                    raise ValueError("Tangent constraint requires a circle entity reference")
+                if constraint_type is SketchConstraintType.ON_CIRCLE and not isinstance(entity, (SketchCircle, SketchArc)):
+                    raise ValueError("On-circle constraint requires a circle or arc entity reference")
+                if constraint_type is SketchConstraintType.TANGENT and not isinstance(entity, (SketchCircle, SketchArc)):
+                    raise ValueError("Tangent constraint requires a circle or arc entity reference")
 
     def _current_sketch_angle_expression(
         self, vertex_id: str, arm1_id: str, arm2_id: str
@@ -1479,12 +1596,12 @@ class ApplicationService:
         pv = self._find_sketch_point(vertex_id)
         p1 = self._find_sketch_point(arm1_id)
         p2 = self._find_sketch_point(arm2_id)
-        vx = self.expression_service.evaluate_property(pv.x, project.parameters).value
-        vy = self.expression_service.evaluate_property(pv.y, project.parameters).value
-        ax = self.expression_service.evaluate_property(p1.x, project.parameters).value
-        ay = self.expression_service.evaluate_property(p1.y, project.parameters).value
-        bx = self.expression_service.evaluate_property(p2.x, project.parameters).value
-        by = self.expression_service.evaluate_property(p2.y, project.parameters).value
+        vx = self._evaluate_sketch_expression(pv.x, project.parameters)
+        vy = self._evaluate_sketch_expression(pv.y, project.parameters)
+        ax = self._evaluate_sketch_expression(p1.x, project.parameters)
+        ay = self._evaluate_sketch_expression(p1.y, project.parameters)
+        bx = self._evaluate_sketch_expression(p2.x, project.parameters)
+        by = self._evaluate_sketch_expression(p2.y, project.parameters)
         d1x, d1y = ax - vx, ay - vy
         d2x, d2y = bx - vx, by - vy
         cross = d1x * d2y - d1y * d2x
@@ -1506,20 +1623,22 @@ class ApplicationService:
         project = self._require_project()
         point_a = self._find_sketch_point(point_a_id)
         point_b = self._find_sketch_point(point_b_id)
-        ax = self.expression_service.evaluate_property(point_a.x, project.parameters).value
-        ay = self.expression_service.evaluate_property(point_a.y, project.parameters).value
-        bx = self.expression_service.evaluate_property(point_b.x, project.parameters).value
-        by = self.expression_service.evaluate_property(point_b.y, project.parameters).value
+        ax = self._evaluate_sketch_expression(point_a.x, project.parameters)
+        ay = self._evaluate_sketch_expression(point_a.y, project.parameters)
+        bx = self._evaluate_sketch_expression(point_b.x, project.parameters)
+        by = self._evaluate_sketch_expression(point_b.y, project.parameters)
         return self._mm_expression(math.hypot(bx - ax, by - ay))
 
     def _sketch_signature(self, sketch: Sketch) -> str:
         import hashlib
         data = ""
         for point in sketch.points():
-            data += f"{point.id}:{point.x.expression}:{point.y.expression};"
-        for entity in sketch.entities:
+            data += f"{point.id}:{point.x.text}:{point.y.text};"
+        for entity in sketch.entities.values():
             data += f"{entity.id}:{entity.type.value};"
-        for constraint in sketch.constraints:
+            if isinstance(entity, SketchCircle):
+                data += f"radius:{entity.radius.text};"
+        for constraint in sketch.constraints.values():
             val_expr = constraint.value.expression if constraint.value is not None else ""
             data += f"{constraint.id}:{constraint.type.value}:{','.join(constraint.references)}:{','.join(constraint.entity_references)}:{val_expr};"
         return hashlib.md5(data.encode()).hexdigest()
@@ -1546,26 +1665,30 @@ class ApplicationService:
             project.sketch.solve_error = None
             for point_id, (x, y) in result.positions.items():
                 point = self._find_sketch_point(point_id)
-                old_x = self.expression_service.evaluate_property(point.x, project.parameters).value
-                old_y = self.expression_service.evaluate_property(point.y, project.parameters).value
+                old_x = self._evaluate_sketch_expression(point.x, project.parameters)
+                old_y = self._evaluate_sketch_expression(point.y, project.parameters)
                 dx = x - old_x
                 dy = y - old_y
                 if abs(dx) > 1e-9:
-                    if self._is_literal_expression(point.x.expression):
-                        point.x = self._scalar(self._mm_expression(x), "mm", Dimension.LENGTH)
+                    if self._is_literal_expression(point.x.text):
+                        point.x = Expression(self._mm_expression(x))
                     else:
-                        base_x = self._strip_offset(point.x.expression)
+                        base_x = self._strip_offset(point.x.text)
                         base_val_x = self.expression_service.evaluate_expression(base_x, project.parameters).value
                         total_dx = x - base_val_x
-                        point.x = self._scalar(self._offset_expression(base_x, total_dx, "mm"), "mm", Dimension.LENGTH)
+                        point.x = Expression(self._offset_expression(base_x, total_dx, "mm"))
                 if abs(dy) > 1e-9:
-                    if self._is_literal_expression(point.y.expression):
-                        point.y = self._scalar(self._mm_expression(y), "mm", Dimension.LENGTH)
+                    if self._is_literal_expression(point.y.text):
+                        point.y = Expression(self._mm_expression(y))
                     else:
-                        base_y = self._strip_offset(point.y.expression)
+                        base_y = self._strip_offset(point.y.text)
                         base_val_y = self.expression_service.evaluate_expression(base_y, project.parameters).value
                         total_dy = y - base_val_y
-                        point.y = self._scalar(self._offset_expression(base_y, total_dy, "mm"), "mm", Dimension.LENGTH)
+                        point.y = Expression(self._offset_expression(base_y, total_dy, "mm"))
+            for circle_id, radius in result.radius_updates.items():
+                entity = project.sketch.entities.get(circle_id)
+                if isinstance(entity, SketchCircle):
+                    entity.radius = Expression(self._mm_expression(radius))
         else:
             project.sketch.solve_error = result.message or "Solver did not converge"
         return result
@@ -1588,9 +1711,9 @@ class ApplicationService:
             updated_refs = {"point_a_id": entity.point_a_id, "point_b_id": entity.point_b_id}
         else:
             updated_refs = {
-                "point_a_id": entity.point_a_id,
-                "point_b_id": entity.point_b_id,
-                "point_c_id": entity.point_c_id,
+                "center_point_id": entity.center_point_id,
+                "start_point_id": entity.start_point_id,
+                "end_point_id": entity.end_point_id,
             }
         updated_refs[property_path] = value.value
         if len(set(updated_refs.values())) != len(updated_refs):
@@ -1658,9 +1781,9 @@ class ApplicationService:
             self.id_service.observe(parameter.id)
         if project.sketch is not None:
             self.id_service.observe(project.sketch.id)
-            for entity in project.sketch.entities:
+            for entity in project.sketch.entities.values():
                 self.id_service.observe(entity.id)
-            for constraint in project.sketch.constraints:
+            for constraint in project.sketch.constraints.values():
                 self.id_service.observe(constraint.id)
         for body in project.model.bodies:
             self.id_service.observe(body.id)
@@ -2664,11 +2787,11 @@ class ApplicationService:
                     )
                 )
         if project.sketch is not None:
-            for entity in project.sketch.entities:
+            for entity in project.sketch.entities.values():
                 if isinstance(entity, SketchPoint):
                     for prop in (entity.x, entity.y):
                         try:
-                            self.expression_service.evaluate_property(prop, project.parameters)
+                            self._evaluate_sketch_expression(prop, project.parameters)
                         except Exception as exc:
                             report.messages.append(
                                 ValidationMessage(
@@ -2680,8 +2803,8 @@ class ApplicationService:
                             )
                 elif isinstance(entity, SketchCircle):
                     try:
-                        radius = self.expression_service.evaluate_property(entity.radius, project.parameters)
-                        if radius.value <= 0:
+                        radius = self._evaluate_sketch_expression(entity.radius, project.parameters)
+                        if radius <= 0:
                             report.messages.append(
                                 ValidationMessage(
                                     "warning",
@@ -2699,7 +2822,7 @@ class ApplicationService:
                                 entity.id,
                             )
                         )
-            for constraint in project.sketch.constraints:
+            for constraint in project.sketch.constraints.values():
                 if constraint.value is None:
                     continue
                 try:
