@@ -66,6 +66,8 @@ A continuación vamos a crear un plan para implementar la función de sketch. Vv
 Lo primero vamso a hacer un commit y push y crear una nueva rama para poder volver atrás en caso de romper algo.
 
 
+------------------------------
 
+Cuando se esté en modo sketch, no se podrán seleccionar los elementos del modelo, que quedarán en un segundo plano. Cuando se seleccione el modo modelo, será al contrario, los elementos del sketch no se podrán seleccionar. ¿Cómo podríamos implemetnarlo?
 
 

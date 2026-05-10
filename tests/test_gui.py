@@ -40,6 +40,97 @@ def test_main_window_loads_examples_and_runs_validation() -> None:
     qt_app.processEvents()
 
 
+def test_interaction_mode_filters_selection() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    # Create a sketch point and a model marker
+    sketch_point_id = window.app_service.create_sketch_point("10 mm", "10 mm", "SP1")
+    body_id = window.app_service.create_body("Body1", [MarkerInput("0 mm", "0 mm", "M1")])
+    marker_id = next(m.id for m in window.app_service._find_body(body_id).structural_markers())
+    window.refresh_all()
+
+    # In model mode, selecting a sketch point should be ignored
+    window.canvas.set_interaction_mode("model")
+    window.canvas.set_selection(sketch_point_id)
+    qt_app.processEvents()
+    assert window.canvas._selected_entity_id != sketch_point_id
+
+    # In model mode, selecting a marker should work
+    window.canvas.set_selection(marker_id)
+    qt_app.processEvents()
+    assert window.canvas._selected_entity_id == marker_id
+
+    # In sketch mode, selecting a marker should be ignored/cleared
+    window.canvas.set_interaction_mode("sketch")
+    qt_app.processEvents()
+    assert window.canvas._selected_entity_id != marker_id
+
+    # In sketch mode, selecting a sketch point should work
+    window.canvas.set_selection(sketch_point_id)
+    qt_app.processEvents()
+    assert window.canvas._selected_entity_id == sketch_point_id
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_mode_switch_toggles_toolbars() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    # Default mode is Model
+    assert window._app_mode == "model"
+    assert window._mode_model_btn.isChecked()
+    assert not window._mode_sketch_btn.isChecked()
+    assert not window._mode_sim_btn.isChecked()
+    assert window._model_toolbar.isVisible()
+    assert not window._sketch_toolbar.isVisible()
+    assert not window._sim_toolbar.isVisible()
+
+    # Switch to Sketch mode
+    window._set_app_mode("sketch")
+    qt_app.processEvents()
+    assert window._app_mode == "sketch"
+    assert window._mode_sketch_btn.isChecked()
+    assert not window._mode_model_btn.isChecked()
+    assert not window._mode_sim_btn.isChecked()
+    assert window._sketch_toolbar.isVisible()
+    assert not window._model_toolbar.isVisible()
+    assert not window._sim_toolbar.isVisible()
+    assert window.app_service.project.sketch is not None
+    assert window.app_service.project.sketch.visible is True
+
+    # Switch to Sim mode
+    window._set_app_mode("sim")
+    qt_app.processEvents()
+    assert window._app_mode == "sim"
+    assert window._mode_sim_btn.isChecked()
+    assert not window._mode_sketch_btn.isChecked()
+    assert not window._mode_model_btn.isChecked()
+    assert window._sim_toolbar.isVisible()
+    assert not window._sketch_toolbar.isVisible()
+    assert not window._model_toolbar.isVisible()
+
+    # Switch back to Model mode
+    window._set_app_mode("model")
+    qt_app.processEvents()
+    assert window._app_mode == "model"
+    assert window._mode_model_btn.isChecked()
+    assert not window._mode_sketch_btn.isChecked()
+    assert not window._mode_sim_btn.isChecked()
+    assert window._model_toolbar.isVisible()
+    assert not window._sketch_toolbar.isVisible()
+    assert not window._sim_toolbar.isVisible()
+
+    window.close()
+    qt_app.processEvents()
+
+
 def test_playback_controls_are_disabled_without_simulation() -> None:
     qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = MainWindow(ApplicationService())

@@ -168,6 +168,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._screen_joints: list[tuple[str, QtCore.QPointF]] = []
         self._screen_drivers: list[tuple[str, QtCore.QPointF]] = []
         self._mode = CanvasMode.SELECT
+        self._interaction_mode = "all"
         self._editing_enabled = True
         self._creation_points: list[tuple[float, float]] = []
         self._joint_start_marker: CanvasMarker | None = None
@@ -201,6 +202,42 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def mode(self) -> str:
         return self._mode
+
+    def set_interaction_mode(self, mode: str) -> None:
+        self._interaction_mode = mode
+        # Clear any hover/selection that belongs to the now-disabled domain
+        if mode == "sketch":
+            if self._selected_entity_id is not None:
+                # Check if selected entity is a model entity (not sketch)
+                if not self._is_sketch_entity(self._selected_entity_id):
+                    self._selected_entity_id = None
+                    self.selectionCleared.emit()
+            self._dragging_marker = None
+            self._drag_preview = None
+            self._dragging_slider = None
+            self._dragging_slider_preview = None
+        elif mode == "model":
+            if self._selected_entity_id is not None:
+                if self._is_sketch_entity(self._selected_entity_id):
+                    self._selected_entity_id = None
+                    self.selectionCleared.emit()
+            self._dragging_sketch_point = None
+            self._dragging_sketch_point_preview = None
+        self._hovered_sketch_point_id = None
+        self._hovered_sketch_entity_id = None
+        self.update()
+
+    def _is_sketch_entity(self, entity_id: str) -> bool:
+        project = self.app_service.project
+        if project is None or project.sketch is None:
+            return False
+        if any(p.id == entity_id for p in project.sketch.points()):
+            return True
+        if any(e.id == entity_id for e in project.sketch.entities):
+            return True
+        if any(c.id == entity_id for c in project.sketch.constraints):
+            return True
+        return False
 
     def set_mode(self, mode: str) -> None:
         self._mode = mode
@@ -269,6 +306,12 @@ class MechanismCanvas(QtWidgets.QWidget):
                 return
 
     def set_selection(self, entity_id: str | None) -> None:
+        if entity_id is not None and self._interaction_mode != "all":
+            is_sketch = self._is_sketch_entity(entity_id)
+            if self._interaction_mode == "sketch" and not is_sketch:
+                entity_id = None
+            elif self._interaction_mode in ("model", "sim") and is_sketch:
+                entity_id = None
         self._selected_entity_id = entity_id
         self.update()
 
@@ -560,7 +603,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         world = self._to_world(clicked, self._current_transform())
 
         if self._mode == CanvasMode.SELECT:
-            if clicked_sketch_point is not None:
+            if clicked_sketch_point is not None and self._interaction_mode in ("sketch", "all"):
                 self._selected_entity_id = clicked_sketch_point.entity_id
                 self.entitySelected.emit(clicked_sketch_point.entity_id)
                 if self._editing_enabled:
@@ -572,12 +615,12 @@ class MechanismCanvas(QtWidgets.QWidget):
                     )
                 self.update()
                 return
-            if clicked_sketch_entity is not None:
+            if clicked_sketch_entity is not None and self._interaction_mode in ("sketch", "all"):
                 self._selected_entity_id = clicked_sketch_entity.entity_id
                 self.entitySelected.emit(clicked_sketch_entity.entity_id)
                 self.update()
                 return
-            if clicked_marker is not None:
+            if clicked_marker is not None and self._interaction_mode in ("model", "sim", "all"):
                 self._selected_entity_id = clicked_marker.entity_id
                 self.entitySelected.emit(clicked_marker.entity_id)
                 if self._editing_enabled:
@@ -585,7 +628,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                     self._drag_preview = (clicked_marker.entity_id, clicked_marker.x, clicked_marker.y)
                 self.update()
                 return
-            if clicked_slider is not None:
+            if clicked_slider is not None and self._interaction_mode in ("model", "sim", "all"):
                 self._selected_entity_id = clicked_slider.entity_id
                 self.entitySelected.emit(clicked_slider.entity_id)
                 if self._editing_enabled:
@@ -594,17 +637,17 @@ class MechanismCanvas(QtWidgets.QWidget):
                     self._dragging_slider_preview = self._slider_preview_for_handle(handle[0], handle[1], world)
                 self.update()
                 return
-            if clicked_joint is not None:
+            if clicked_joint is not None and self._interaction_mode in ("model", "sim", "all"):
                 self._selected_entity_id = clicked_joint
                 self.entitySelected.emit(clicked_joint)
                 self.update()
                 return
-            if clicked_driver is not None:
+            if clicked_driver is not None and self._interaction_mode in ("model", "sim", "all"):
                 self._selected_entity_id = clicked_driver
                 self.entitySelected.emit(clicked_driver)
                 self.update()
                 return
-            if clicked_body is not None:
+            if clicked_body is not None and self._interaction_mode in ("model", "sim", "all"):
                 self._selected_entity_id = clicked_body
                 self.entitySelected.emit(clicked_body)
                 self.update()
@@ -920,6 +963,8 @@ class MechanismCanvas(QtWidgets.QWidget):
         super().leaveEvent(event)
 
     def contextMenuEvent(self, event: QtGui.QContextMenuEvent) -> None:  # pragma: no cover - exercised indirectly in GUI tests
+        if self._interaction_mode == "sketch":
+            return
         if not self._editing_enabled:
             self.modelChanged.emit("Editing is only available at t=0")
             return
@@ -2057,13 +2102,17 @@ class MechanismCanvas(QtWidgets.QWidget):
         return None
 
     def _update_hover_targets(self, screen_pos: QtCore.QPointF) -> None:
-        hovered_point = self._sketch_point_at(screen_pos)
-        self._hovered_sketch_point_id = hovered_point.entity_id if hovered_point is not None else None
-        if hovered_point is not None:
+        if self._interaction_mode in ("sketch", "all"):
+            hovered_point = self._sketch_point_at(screen_pos)
+            self._hovered_sketch_point_id = hovered_point.entity_id if hovered_point is not None else None
+            if hovered_point is not None:
+                self._hovered_sketch_entity_id = None
+                return
+            hovered_entity = self._sketch_entity_at(screen_pos)
+            self._hovered_sketch_entity_id = hovered_entity.entity_id if hovered_entity is not None else None
+        else:
+            self._hovered_sketch_point_id = None
             self._hovered_sketch_entity_id = None
-            return
-        hovered_entity = self._sketch_entity_at(screen_pos)
-        self._hovered_sketch_entity_id = hovered_entity.entity_id if hovered_entity is not None else None
 
     def _should_draw_sketch_label(self, entity_id: str) -> bool:
         return (

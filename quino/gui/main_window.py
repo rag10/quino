@@ -57,9 +57,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.refresh_all()
 
     def _build_ui(self) -> None:
+        self._app_mode = "model"
         self._build_actions()
         self._build_menu()
-        self._build_toolbar()
+        self._build_common_toolbar()
+        self._build_sketch_toolbar()
+        self._build_model_toolbar()
+        self._build_sim_toolbar()
+        self._mode_model_btn.setChecked(True)
+        self._mode_sketch_btn.setChecked(False)
+        self._mode_sim_btn.setChecked(False)
+        self._sketch_toolbar.setVisible(False)
+        self._model_toolbar.setVisible(True)
+        self._sim_toolbar.setVisible(False)
 
         central = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(central)
@@ -231,6 +241,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tree.setMinimumWidth(200)
         right_panel.setMinimumWidth(320)
         self.setCentralWidget(central)
+        self.canvas.set_interaction_mode("model")
 
         self.statusBar().showMessage(self.app_service.simulation_runner.describe_backend())
 
@@ -433,112 +444,233 @@ class MainWindow(QtWidgets.QMainWindow):
         examples_menu.addAction(self.action_four_bar)
         examples_menu.addAction(self.action_slider_crank)
 
-    def _build_toolbar(self) -> None:
-        toolbar = self.addToolBar("Modeling")
+    def _add_toolbar_block(self, toolbar: QtWidgets.QToolBar, actions_grid: list[list[QtGui.QAction | None]], label: str) -> None:
+        """Add a labeled block widget with a grid of tool buttons."""
+        container = QtWidgets.QWidget()
+        outer = QtWidgets.QVBoxLayout(container)
+        outer.setContentsMargins(2, 2, 2, 0)
+        outer.setSpacing(0)
+
+        grid_widget = QtWidgets.QWidget()
+        grid = QtWidgets.QGridLayout(grid_widget)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(1)
+
+        for row_idx, row in enumerate(actions_grid):
+            for col_idx, action in enumerate(row):
+                if action is None:
+                    grid.addWidget(QtWidgets.QWidget(), row_idx, col_idx)
+                    continue
+                btn = QtWidgets.QToolButton()
+                btn.setDefaultAction(action)
+                btn.setIconSize(QtCore.QSize(22, 22))
+                btn.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+                btn.setFixedSize(44, 44)
+                font = btn.font()
+                font.setPointSize(6)
+                btn.setFont(font)
+                grid.addWidget(btn, row_idx, col_idx)
+
+        outer.addWidget(grid_widget)
+
+        lbl = QtWidgets.QLabel(label)
+        lbl.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
+        font = lbl.font()
+        font.setPointSize(7)
+        lbl.setFont(font)
+        lbl.setStyleSheet("color: #888; padding-bottom: 2px;")
+        outer.addWidget(lbl)
+
+        wa = QtWidgets.QWidgetAction(toolbar)
+        wa.setDefaultWidget(container)
+        toolbar.addAction(wa)
+
+    def _add_toolbar_sep(self, toolbar: QtWidgets.QToolBar) -> None:
+        sep = QtWidgets.QFrame()
+        sep.setFrameShape(QtWidgets.QFrame.Shape.VLine)
+        sep.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
+        sep.setFixedWidth(8)
+        wa = QtWidgets.QWidgetAction(toolbar)
+        wa.setDefaultWidget(sep)
+        toolbar.addAction(wa)
+
+    def _build_mode_selector(self) -> QtWidgets.QWidget:
+        """Create a pill-style mode selector (Sketch / Model / Sim)."""
+        container = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(container)
+        layout.setContentsMargins(6, 2, 6, 2)
+        layout.setSpacing(0)
+
+        self._mode_sketch_btn = QtWidgets.QToolButton()
+        self._mode_sketch_btn.setText("Sketch")
+        self._mode_sketch_btn.setCheckable(True)
+        self._mode_sketch_btn.setFixedSize(70, 32)
+        self._mode_sketch_btn.setStyleSheet(
+            "QToolButton { border: 1px solid #ccc; border-top-left-radius: 14px; border-bottom-left-radius: 14px; background: #f0f0f0; color: #666; font-weight: bold; font-size: 11px; }"
+            "QToolButton:checked { background: #31556f; color: white; border-color: #31556f; }"
+            "QToolButton:hover:!checked { background: #e0e0e0; }"
+        )
+        self._mode_sketch_btn.clicked.connect(lambda: self._set_app_mode("sketch"))
+
+        self._mode_model_btn = QtWidgets.QToolButton()
+        self._mode_model_btn.setText("Model")
+        self._mode_model_btn.setCheckable(True)
+        self._mode_model_btn.setFixedSize(70, 32)
+        self._mode_model_btn.setStyleSheet(
+            "QToolButton { border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; border-left: none; border-right: none; background: #f0f0f0; color: #666; font-weight: bold; font-size: 11px; }"
+            "QToolButton:checked { background: #31556f; color: white; border-color: #31556f; }"
+            "QToolButton:hover:!checked { background: #e0e0e0; }"
+        )
+        self._mode_model_btn.clicked.connect(lambda: self._set_app_mode("model"))
+
+        self._mode_sim_btn = QtWidgets.QToolButton()
+        self._mode_sim_btn.setText("Sim")
+        self._mode_sim_btn.setCheckable(True)
+        self._mode_sim_btn.setFixedSize(70, 32)
+        self._mode_sim_btn.setStyleSheet(
+            "QToolButton { border: 1px solid #ccc; border-top-right-radius: 14px; border-bottom-right-radius: 14px; background: #f0f0f0; color: #666; font-weight: bold; font-size: 11px; }"
+            "QToolButton:checked { background: #31556f; color: white; border-color: #31556f; }"
+            "QToolButton:hover:!checked { background: #e0e0e0; }"
+        )
+        self._mode_sim_btn.clicked.connect(lambda: self._set_app_mode("sim"))
+
+        layout.addWidget(self._mode_sketch_btn)
+        layout.addWidget(self._mode_model_btn)
+        layout.addWidget(self._mode_sim_btn)
+        return container
+
+    def _build_common_toolbar(self) -> None:
+        toolbar = self.addToolBar("Common")
         toolbar.setIconSize(QtCore.QSize(28, 28))
         toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         toolbar.setMovable(False)
 
-        def _block(actions_grid: list[list[QtGui.QAction | None]], label: str) -> None:
-            """Add a labeled block widget with a grid of tool buttons."""
-            container = QtWidgets.QWidget()
-            outer = QtWidgets.QVBoxLayout(container)
-            outer.setContentsMargins(2, 2, 2, 0)
-            outer.setSpacing(0)
-
-            grid_widget = QtWidgets.QWidget()
-            grid = QtWidgets.QGridLayout(grid_widget)
-            grid.setContentsMargins(0, 0, 0, 0)
-            grid.setSpacing(1)
-
-            for row_idx, row in enumerate(actions_grid):
-                for col_idx, action in enumerate(row):
-                    if action is None:
-                        grid.addWidget(QtWidgets.QWidget(), row_idx, col_idx)
-                        continue
-                    btn = QtWidgets.QToolButton()
-                    btn.setDefaultAction(action)
-                    btn.setIconSize(QtCore.QSize(22, 22))
-                    btn.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-                    btn.setFixedSize(44, 44)
-                    font = btn.font()
-                    font.setPointSize(6)
-                    btn.setFont(font)
-                    grid.addWidget(btn, row_idx, col_idx)
-
-            outer.addWidget(grid_widget)
-
-            lbl = QtWidgets.QLabel(label)
-            lbl.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
-            font = lbl.font()
-            font.setPointSize(7)
-            lbl.setFont(font)
-            lbl.setStyleSheet("color: #888; padding-bottom: 2px;")
-            outer.addWidget(lbl)
-
-            wa = QtWidgets.QWidgetAction(toolbar)
-            wa.setDefaultWidget(container)
-            toolbar.addAction(wa)
-
-        def _sep() -> None:
-            sep = QtWidgets.QFrame()
-            sep.setFrameShape(QtWidgets.QFrame.Shape.VLine)
-            sep.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
-            sep.setFixedWidth(8)
-            wa = QtWidgets.QWidgetAction(toolbar)
-            wa.setDefaultWidget(sep)
-            toolbar.addAction(wa)
-
-        _block([
+        self._add_toolbar_block(toolbar, [
             [self.action_new, self.action_open, self.action_save],
             [self.action_undo, self.action_redo, self.action_refresh],
         ], "File / Edit")
-        _sep()
+        self._add_toolbar_sep(toolbar)
 
-        _block([
+        self._add_toolbar_block(toolbar, [
             [self.action_select_tool, self.action_fit_view, self.action_delete],
         ], "View")
-        _sep()
+        self._add_toolbar_sep(toolbar)
 
-        _block([
-            [self.action_bar_tool, self.action_body_tool, self.action_add_marker_tool, self.action_joint_tool, self.action_rigid_joint_tool],
-            [self.action_ground_tool, self.action_slider_tool, self.action_slider_connect_tool, self.action_add_rotation_driver, self.action_add_translation_driver],
-        ], "Geometry / Drivers")
-        _sep()
+        # Mode selector
+        mode_widget = self._build_mode_selector()
+        wa = QtWidgets.QWidgetAction(toolbar)
+        wa.setDefaultWidget(mode_widget)
+        toolbar.addAction(wa)
 
-        _block([
+    def _build_sketch_toolbar(self) -> None:
+        self._sketch_toolbar = self.addToolBar("Sketch")
+        self._sketch_toolbar.setIconSize(QtCore.QSize(28, 28))
+        self._sketch_toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        self._sketch_toolbar.setMovable(False)
+        t = self._sketch_toolbar
+
+        self._add_toolbar_block(t, [
             [self.action_sketch_point_tool, self.action_sketch_line_tool, self.action_sketch_circle_tool, self.action_sketch_arc_tool, self.action_sketch_arc_center_tool],
             [self.action_sketch_infinite_line_tool, self.action_toggle_sketch_visible, self.action_solve_sketch, None, None],
         ], "Sketch Draw")
-        _sep()
+        self._add_toolbar_sep(t)
 
-        _block([
+        self._add_toolbar_block(t, [
             [self.action_sketch_fix_tool, self.action_sketch_horizontal_tool, self.action_sketch_vertical_tool, self.action_sketch_coincident_tool, self.action_sketch_collinear_tool],
             [self.action_sketch_distance_tool, self.action_sketch_angle_tool, self.action_sketch_midpoint_tool, self.action_sketch_symmetric_tool, self.action_sketch_on_circle_tool],
         ], "Sketch Point Constr.")
-        _sep()
+        self._add_toolbar_sep(t)
 
-        _block([
+        self._add_toolbar_block(t, [
             [self.action_sketch_parallel_tool, self.action_sketch_perpendicular_tool, self.action_sketch_equal_length_tool, self.action_sketch_tangent_tool],
             [self.action_sketch_concentric_tool, None, None, None],
         ], "Sketch Line/Curve")
-        _sep()
 
-        _block([
+        self._sketch_toolbar.setVisible(False)
+
+    def _build_model_toolbar(self) -> None:
+        self._model_toolbar = self.addToolBar("Model")
+        self._model_toolbar.setIconSize(QtCore.QSize(28, 28))
+        self._model_toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        self._model_toolbar.setMovable(False)
+        t = self._model_toolbar
+
+        self._add_toolbar_block(t, [
+            [self.action_bar_tool, self.action_body_tool, self.action_add_marker_tool, self.action_joint_tool, self.action_rigid_joint_tool],
+            [self.action_ground_tool, self.action_slider_tool, self.action_slider_connect_tool, self.action_add_rotation_driver, self.action_add_translation_driver],
+        ], "Geometry / Drivers")
+        self._add_toolbar_sep(t)
+
+        self._add_toolbar_block(t, [
             [self.action_point_sensor, self.action_distance_sensor, self.action_angle_h_sensor],
             [self.action_angle_v_sensor, self.action_angle_vector_sensor, None],
         ], "Sensors")
-        _sep()
+        self._add_toolbar_sep(t)
 
-        _block([
+        self._model_toolbar.setVisible(True)
+
+    def _build_sim_toolbar(self) -> None:
+        self._sim_toolbar = self.addToolBar("Simulation")
+        self._sim_toolbar.setIconSize(QtCore.QSize(28, 28))
+        self._sim_toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        self._sim_toolbar.setMovable(False)
+        t = self._sim_toolbar
+
+        self._add_toolbar_block(t, [
             [self.action_validate, self.action_run],
             [self.action_play_pause, self.action_stop],
         ], "Simulation")
-        _sep()
+        self._add_toolbar_sep(t)
 
-        _block([
+        self._add_toolbar_block(t, [
             [self.action_new_plot, self.action_show_trajectories],
         ], "Results")
+
+        self._sim_toolbar.setVisible(False)
+
+    def _set_app_mode(self, mode: str) -> None:
+        if mode == self._app_mode:
+            return
+        self._app_mode = mode
+        self.canvas.set_interaction_mode(mode)
+
+        if mode == "sketch":
+            self._mode_sketch_btn.setChecked(True)
+            self._mode_model_btn.setChecked(False)
+            self._mode_sim_btn.setChecked(False)
+            self._sketch_toolbar.setVisible(True)
+            self._model_toolbar.setVisible(False)
+            self._sim_toolbar.setVisible(False)
+            # Ensure sketch is visible when entering sketch mode
+            if self.app_service.project and self.app_service.project.sketch is not None:
+                if not self.app_service.project.sketch.visible:
+                    self.app_service._snapshot()
+                    self.app_service.project.sketch.visible = True
+                    self.action_toggle_sketch_visible.setChecked(True)
+            else:
+                self.app_service.create_sketch()
+                self.action_toggle_sketch_visible.setChecked(True)
+            self.refresh_all()
+        elif mode == "sim":
+            self._mode_sketch_btn.setChecked(False)
+            self._mode_model_btn.setChecked(False)
+            self._mode_sim_btn.setChecked(True)
+            self._sketch_toolbar.setVisible(False)
+            self._model_toolbar.setVisible(False)
+            self._sim_toolbar.setVisible(True)
+            self.refresh_all()
+        else:
+            self._mode_sketch_btn.setChecked(False)
+            self._mode_model_btn.setChecked(True)
+            self._mode_sim_btn.setChecked(False)
+            self._sketch_toolbar.setVisible(False)
+            self._model_toolbar.setVisible(True)
+            self._sim_toolbar.setVisible(False)
+
+        # Force select mode when switching
+        self.action_select_tool.setChecked(True)
+        self.canvas.set_mode(CanvasMode.SELECT)
+        self._update_status_message()
 
     def refresh_all(self) -> None:
         project = self.app_service.project
