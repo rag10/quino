@@ -11,7 +11,10 @@ _ICON_PATH = Path(__file__).parent / "icons" / "quino_app_icon_transparent_1024.
 def run_gui(app_service: ApplicationService | None = None) -> int:
     from PySide6 import QtGui, QtWidgets
 
+    from quino.gui.crash_reporter import install as install_crash_reporter
     from quino.gui.main_window import MainWindow
+
+    install_crash_reporter()
 
     qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 
