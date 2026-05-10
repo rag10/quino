@@ -35,7 +35,10 @@ def build_four_bar_example(app: ApplicationService) -> ExampleBuildResult:
     )
 
     def mid(body_id: str, marker_name: str) -> str:
-        return next(marker.id for marker in app._find_body(body_id).markers if marker.name == marker_name)
+        body = app.get_body(body_id)
+        if body is None:
+            raise ValueError(f"Body not found: {body_id}")
+        return next(marker.id for marker in body.markers if marker.name == marker_name)
 
     ground_a = app.connect_marker_to_ground(mid(crank, "A"), name="Ground_A")
     joint_b = app.create_joint(
@@ -86,7 +89,10 @@ def build_slider_crank_example(app: ApplicationService) -> ExampleBuildResult:
     )
 
     def mid(body_id: str, marker_name: str) -> str:
-        return next(marker.id for marker in app._find_body(body_id).markers if marker.name == marker_name)
+        body = app.get_body(body_id)
+        if body is None:
+            raise ValueError(f"Body not found: {body_id}")
+        return next(marker.id for marker in body.markers if marker.name == marker_name)
 
     ground_a = app.connect_marker_to_ground(mid(crank, "A"), name="Ground_A")
     joint_b = app.create_joint(

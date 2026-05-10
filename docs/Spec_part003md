@@ -79,5 +79,23 @@ Vamso a revisar lso nombres en los botones para qeu nos desborden. Más cortos, 
 
 ------------------------------------------------
 
+Revisa la implementación de las contraints para adecuarlas mejor a un software profesional tipo autocad. Ahoar mismo por ejemplo, la constraint de coincidencia no permite seleccionar markrs, si no que selecciona segmentos, y lo que hace es llevarlos a un mismo punto. Esto no tien mucho sentido, tiene más sentido poder seleccionar puntos, normalmente de dos lineas distintas. En el caso de distancia, deberíamos ampliar la fucnionalidad a no solo segmentos si no, poder selecionar dos puntos, un segmento y un punto, dos segmentos paralelos, etc.
+En la implemetnación del arco, deben aparecer dos puntos al final del arco (como si fuera un segmento curvado) para poder editarlos. Revisa ambas implementaciones, ya que no funcionan bien. La restricción de distancia debería fucnionar también en circunferecnias para añadir radios. Cuando se crea una circunferencia el segundo punto no tiene mucho sentido. Hay que extender la fucnión de simetría en la linea de lo que estamos hablando. Los DOF deberían calcularse para cada elemento teniendo en cuenta las restricciones no solo de ese elemento si no de los elementos a los que está unido por otras restricciones y mostrarse en verde si 0 DoF para ese elemento no se si se hace así internamente, pero a veces se muestra el sketch en rojo cuando no debería ser así, y de repente arrastras un punto y el solver converge. No pongas una linea discontinua al añadir las restricciones de perpendicularidad o paralelismo, pon el símbolo en ambos segmentos.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+===================================================================
 CoM
 Parámetros

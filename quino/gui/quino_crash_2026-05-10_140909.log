@@ -1,0 +1,15 @@
+Quino crash report — 2026-05-10T14:09:09.770939
+========================================================================
+
+--- Traceback ---
+Traceback (most recent call last):
+
+  File "C:\Users\ruben\Proyectos\QUINO\quino\gui\canvas.py", line 828, in mousePressEvent
+    required = {
+               ^
+
+KeyError: 'create_sketch_arc_center'
+
+
+--- Last Qt messages (up to 200) ---
+[Qt/WARNING] QFont::setPointSize: Point size <= 0 (-1), must be greater than 0

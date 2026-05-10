@@ -1,4 +1,5 @@
 from quino.application.service import ApplicationService
+from quino.application.example_registry import ExampleEntry, ExampleRegistry
 from quino.application.examples import ExampleBuildResult, build_four_bar_example, build_slider_crank_example
 from quino.domain.inputs import (
     JointEndpointInput,
@@ -55,6 +56,8 @@ __all__ = [
     "Dimension",
     "Driver",
     "ExampleBuildResult",
+    "ExampleEntry",
+    "ExampleRegistry",
     "DriverType",
     "Joint",
     "JointEndpoint",
