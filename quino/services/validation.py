@@ -140,9 +140,9 @@ class ValidationService:
         if sketch is None:
             return
         seen_names: set[str] = set()
-        point_ids = {entity.id for entity in sketch.entities if isinstance(entity, SketchPoint)}
-        curve_ids = {entity.id for entity in sketch.entities if isinstance(entity, (SketchCircle, SketchArc))}
-        for entity in sketch.entities:
+        point_ids = {entity.id for entity in sketch.entities.values() if isinstance(entity, SketchPoint)}
+        curve_ids = {entity.id for entity in sketch.entities.values() if isinstance(entity, (SketchCircle, SketchArc))}
+        for entity in sketch.entities.values():
             if entity.name in seen_names:
                 report.messages.append(
                     ValidationMessage("warning", "duplicate_sketch_name", f"Duplicate sketch name: {entity.name}", entity.id)
@@ -157,7 +157,7 @@ class ValidationService:
             elif isinstance(entity, SketchCircle):
                 self._validate_point_refs(entity.id, [entity.center_point_id], point_ids, report)
             elif isinstance(entity, SketchArc):
-                refs = [entity.point_a_id, entity.point_b_id, entity.point_c_id]
+                refs = [entity.center_point_id, entity.start_point_id, entity.end_point_id]
                 self._validate_point_refs(entity.id, refs, point_ids, report)
                 if len(set(refs)) < 3:
                     report.messages.append(
@@ -170,7 +170,7 @@ class ValidationService:
                     )
                 self._validate_point_refs(entity.id, [entity.point_a_id, entity.point_b_id], point_ids, report)
         constraint_names: set[str] = set()
-        for constraint in sketch.constraints:
+        for constraint in sketch.constraints.values():
             if constraint.name in constraint_names:
                 report.messages.append(
                     ValidationMessage("warning", "duplicate_sketch_constraint_name", f"Duplicate sketch constraint name: {constraint.name}", constraint.id)

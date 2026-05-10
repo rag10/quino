@@ -44,7 +44,7 @@ class SketchDofAnalyzer:
         all_point_ids: set[str] = set()
         entity_point_map: dict[str, list[str]] = {}
 
-        for entity in sketch.entities:
+        for entity in sketch.entities.values():
             if isinstance(entity, SketchPoint):
                 all_point_ids.add(entity.id)
                 entity_point_map[entity.id] = [entity.id]
@@ -55,7 +55,7 @@ class SketchDofAnalyzer:
                 all_point_ids.add(entity.center_point_id)
                 entity_point_map[entity.id] = [entity.center_point_id]
             elif isinstance(entity, SketchArc):
-                pts = [entity.point_a_id, entity.point_b_id, entity.point_c_id]
+                pts = [entity.center_point_id, entity.start_point_id, entity.end_point_id]
                 all_point_ids.update(pts)
                 entity_point_map[entity.id] = pts
             elif isinstance(entity, SketchInfiniteLine):
@@ -64,7 +64,7 @@ class SketchDofAnalyzer:
 
         point_dof: dict[str, int] = {pid: 2 for pid in all_point_ids}
 
-        for constraint in sketch.constraints:
+        for constraint in sketch.constraints.values():
             removed = _CONSTRAINT_DOF_REMOVED.get(constraint.type, 0)
             refs = constraint.references
             if constraint.type is SketchConstraintType.FIX:

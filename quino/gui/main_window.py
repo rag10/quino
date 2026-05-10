@@ -11,6 +11,7 @@ from quino.domain.inputs import PropertyValueInput
 from quino.domain.model import (
     Body,
     Driver,
+    Expression,
     Joint,
     Marker,
     Parameter,
@@ -376,6 +377,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_slider_connect_tool = self._tool_action("ToSlide", CanvasMode.CONNECT_SLIDER, get_icon("slider-connect", color_kinematic), "Connect a marker to a slider")
         self.action_sketch_point_tool = self._tool_action("Point", CanvasMode.CREATE_SKETCH_POINT, get_icon("sketch-point", color_sketch), "Create a sketch point")
         self.action_sketch_line_tool = self._tool_action("Line", CanvasMode.CREATE_SKETCH_LINE_SEGMENT, get_icon("sketch-line", color_sketch), "Create a sketch line segment")
+        self.action_sketch_rectangle_tool = self._tool_action("Rect", CanvasMode.CREATE_SKETCH_RECTANGLE, get_icon("sketch-line", color_sketch), "Create a sketch rectangle")
         self.action_sketch_circle_tool = self._tool_action("Circle", CanvasMode.CREATE_SKETCH_CIRCLE, get_icon("sketch-circle", color_sketch), "Create a sketch circle")
         self.action_sketch_arc_tool = self._tool_action("Arc", CanvasMode.CREATE_SKETCH_ARC, get_icon("sketch-arc", color_sketch), "Create a sketch arc")
         self.action_sketch_infinite_line_tool = self._tool_action("Axis", CanvasMode.CREATE_SKETCH_INFINITE_LINE, get_icon("sketch-infinite-line", color_sketch), "Create a sketch infinite line")
@@ -417,6 +419,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_slider_connect_tool,
             self.action_sketch_point_tool,
             self.action_sketch_line_tool,
+            self.action_sketch_rectangle_tool,
             self.action_sketch_circle_tool,
             self.action_sketch_arc_tool,
             self.action_sketch_infinite_line_tool,
@@ -608,8 +611,8 @@ class MainWindow(QtWidgets.QMainWindow):
         t = self._sketch_toolbar
 
         self._add_toolbar_block(t, [
-            [self.action_sketch_point_tool, self.action_sketch_line_tool, self.action_sketch_circle_tool, self.action_sketch_arc_tool, self.action_sketch_arc_center_tool],
-            [self.action_sketch_infinite_line_tool, None, None, None, None],
+            [self.action_sketch_point_tool, self.action_sketch_line_tool, self.action_sketch_rectangle_tool, self.action_sketch_circle_tool, self.action_sketch_arc_tool],
+            [self.action_sketch_infinite_line_tool, self.action_sketch_arc_center_tool, None, None, None],
         ], "Draw")
         self._add_toolbar_sep(t)
 
@@ -1250,7 +1253,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 "InfiniteLines": [],
                 "Constraints": [],
             }
-            for entity in project.sketch.entities:
+            for entity in project.sketch.entities.values():
                 if isinstance(entity, SketchPoint):
                     groups["Points"].append(entity)
                 elif isinstance(entity, SketchLineSegment):
@@ -1261,7 +1264,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     groups["Arcs"].append(entity)
                 elif isinstance(entity, SketchInfiniteLine):
                     groups["InfiniteLines"].append(entity)
-            groups["Constraints"] = list(project.sketch.constraints)
+            groups["Constraints"] = list(project.sketch.constraints.values())
             for label, entities in groups.items():
                 group_item = QtWidgets.QTreeWidgetItem([f"{label}  ({len(entities)})", ""])
                 group_item.setFlags(group_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
@@ -1362,7 +1365,7 @@ class MainWindow(QtWidgets.QMainWindow):
         CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR, CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR,
         CanvasMode.CREATE_ANGLE_VECTOR_SENSOR,
         CanvasMode.CREATE_SKETCH_POINT, CanvasMode.CREATE_SKETCH_LINE_SEGMENT,
-        CanvasMode.CREATE_SKETCH_CIRCLE, CanvasMode.CREATE_SKETCH_ARC,
+        CanvasMode.CREATE_SKETCH_RECTANGLE, CanvasMode.CREATE_SKETCH_CIRCLE, CanvasMode.CREATE_SKETCH_ARC,
         CanvasMode.CREATE_SKETCH_INFINITE_LINE,
         CanvasMode.CREATE_SKETCH_FIX, CanvasMode.CREATE_SKETCH_HORIZONTAL,
         CanvasMode.CREATE_SKETCH_VERTICAL, CanvasMode.CREATE_SKETCH_DISTANCE,
@@ -1426,6 +1429,7 @@ class MainWindow(QtWidgets.QMainWindow):
             CanvasMode.CONNECT_SLIDER: self.action_slider_connect_tool,
             CanvasMode.CREATE_SKETCH_POINT: self.action_sketch_point_tool,
             CanvasMode.CREATE_SKETCH_LINE_SEGMENT: self.action_sketch_line_tool,
+            CanvasMode.CREATE_SKETCH_RECTANGLE: self.action_sketch_rectangle_tool,
             CanvasMode.CREATE_SKETCH_CIRCLE: self.action_sketch_circle_tool,
             CanvasMode.CREATE_SKETCH_ARC: self.action_sketch_arc_tool,
             CanvasMode.CREATE_SKETCH_INFINITE_LINE: self.action_sketch_infinite_line_tool,
@@ -1702,8 +1706,8 @@ class MainWindow(QtWidgets.QMainWindow):
         elif isinstance(entity, SketchPoint):
             prop("visible", "visible", str(entity.visible).lower(), "boolean", str(entity.visible).lower())
             prop("construction", "construction", str(entity.construction).lower(), "boolean", str(entity.construction).lower())
-            prop("x", "x", entity.x.expression, "expression", self._evaluate_scalar(entity.x))
-            prop("y", "y", entity.y.expression, "expression", self._evaluate_scalar(entity.y))
+            prop("x", "x", entity.x.text, "expression", self._evaluate_scalar(entity.x))
+            prop("y", "y", entity.y.text, "expression", self._evaluate_scalar(entity.y))
 
         elif isinstance(entity, SketchLineSegment):
             prop("visible", "visible", str(entity.visible).lower(), "boolean", str(entity.visible).lower())
@@ -1715,14 +1719,14 @@ class MainWindow(QtWidgets.QMainWindow):
             prop("visible", "visible", str(entity.visible).lower(), "boolean", str(entity.visible).lower())
             prop("construction", "construction", str(entity.construction).lower(), "boolean", str(entity.construction).lower())
             prop("center_point_id", "center_point_id", entity.center_point_id, "readonly", self._sketch_point_reference(entity.center_point_id))
-            prop("radius", "radius", entity.radius.expression, "expression", self._evaluate_scalar(entity.radius))
+            prop("radius", "radius", entity.radius.text, "expression", self._evaluate_scalar(entity.radius))
 
         elif isinstance(entity, SketchArc):
             prop("visible", "visible", str(entity.visible).lower(), "boolean", str(entity.visible).lower())
             prop("construction", "construction", str(entity.construction).lower(), "boolean", str(entity.construction).lower())
-            prop("point_a_id", "point_a_id", entity.point_a_id, "readonly", self._sketch_point_reference(entity.point_a_id))
-            prop("point_b_id", "point_b_id", entity.point_b_id, "readonly", self._sketch_point_reference(entity.point_b_id))
-            prop("point_c_id", "point_c_id", entity.point_c_id, "readonly", self._sketch_point_reference(entity.point_c_id))
+            prop("center_point_id", "center_point_id", entity.center_point_id, "readonly", self._sketch_point_reference(entity.center_point_id))
+            prop("start_point_id", "start_point_id", entity.start_point_id, "readonly", self._sketch_point_reference(entity.start_point_id))
+            prop("end_point_id", "end_point_id", entity.end_point_id, "readonly", self._sketch_point_reference(entity.end_point_id))
 
         elif isinstance(entity, SketchInfiniteLine):
             prop("visible", "visible", str(entity.visible).lower(), "boolean", str(entity.visible).lower())
@@ -1804,9 +1808,9 @@ class MainWindow(QtWidgets.QMainWindow):
         elif isinstance(entity, SketchCircle):
             rel("Points", "sketch-point", self._sketch_point_reference(entity.center_point_id), "center", entity.center_point_id)
         elif isinstance(entity, SketchArc):
-            rel("Points", "sketch-point", self._sketch_point_reference(entity.point_a_id), "A", entity.point_a_id)
-            rel("Points", "sketch-point", self._sketch_point_reference(entity.point_b_id), "B", entity.point_b_id)
-            rel("Points", "sketch-point", self._sketch_point_reference(entity.point_c_id), "C", entity.point_c_id)
+            rel("Points", "sketch-point", self._sketch_point_reference(entity.center_point_id), "center", entity.center_point_id)
+            rel("Points", "sketch-point", self._sketch_point_reference(entity.start_point_id), "start", entity.start_point_id)
+            rel("Points", "sketch-point", self._sketch_point_reference(entity.end_point_id), "end", entity.end_point_id)
         elif isinstance(entity, SketchInfiniteLine):
             rel("Points", "sketch-point", self._sketch_point_reference(entity.point_a_id), "A", entity.point_a_id)
             rel("Points", "sketch-point", self._sketch_point_reference(entity.point_b_id), "B", entity.point_b_id)
@@ -1827,6 +1831,13 @@ class MainWindow(QtWidgets.QMainWindow):
             return "null"
         try:
             variables = {"t": self.app_service.unit_service.quantity(0.0, "s")} if with_time else None
+            if isinstance(scalar, Expression):
+                quantity = self.app_service.expression_service.evaluate_expression(
+                    scalar.text,
+                    self.app_service.project.parameters,
+                    variables=variables,
+                )
+                return f"{self.app_service.unit_service.convert(quantity, scalar.unit):.6g} {scalar.unit}"
             quantity = self.app_service.expression_service.evaluate_property(
                 scalar,
                 self.app_service.project.parameters,
@@ -2094,6 +2105,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_slider_connect_tool,
             self.action_sketch_point_tool,
             self.action_sketch_line_tool,
+            self.action_sketch_rectangle_tool,
             self.action_sketch_circle_tool,
             self.action_sketch_arc_tool,
             self.action_sketch_infinite_line_tool,
@@ -2154,6 +2166,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "connect_slider": "To Slider",
             "create_sketch_point": "Point",
             "create_sketch_line_segment": "Line",
+            "create_sketch_rectangle": "Rect",
             "create_sketch_circle": "Circle",
             "create_sketch_arc": "Arc",
             "create_sketch_infinite_line": "Axis",
@@ -2182,13 +2195,14 @@ class MainWindow(QtWidgets.QMainWindow):
             "create_slider": "2 clicks for axis",
             "create_sketch_point": "1 click",
             "create_sketch_line_segment": "2 clicks or snap to existing points",
+            "create_sketch_rectangle": "2 opposite corners",
             "create_sketch_circle": "Center + radius point",
             "create_sketch_arc": "3 points",
             "create_sketch_infinite_line": "2 points define direction",
             "create_sketch_fix": "Click 1 sketch point",
             "create_sketch_horizontal": "Click 2 sketch points",
             "create_sketch_vertical": "Click 2 sketch points",
-            "create_sketch_distance": "Click 2 sketch points",
+            "create_sketch_distance": "Click 2 sketch points, then label",
             "create_sketch_coincident": "Click 2 sketch points",
             "create_sketch_parallel": "Click 4 sketch points (2 per line)",
             "create_sketch_perpendicular": "Click 4 sketch points (2 per line)",

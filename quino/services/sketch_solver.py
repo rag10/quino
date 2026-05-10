@@ -4,7 +4,7 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from quino.domain.model import Project, Sketch, SketchCircle, SketchArc, SketchConstraint, SketchPoint
+from quino.domain.model import Expression, Project, Sketch, SketchArc, SketchCircle, SketchConstraint, SketchPoint
 from quino.domain.sketch_constraints import CONSTRAINT_SPECS
 from quino.domain.types import SketchConstraintType
 from quino.services.expressions import ExpressionService
@@ -20,6 +20,7 @@ class SketchSolveResult:
     message: str | None = None
     constraint_errors: dict[str, float] = field(default_factory=dict)
     bad_constraints: list[str] = field(default_factory=list)
+    radius_updates: dict[str, float] = field(default_factory=dict)
 
 
 class SketchSolver:
@@ -61,6 +62,7 @@ class SketchSolver:
         }
         if not sketch.constraints:
             return SketchSolveResult(True, positions, 0, 0.0, None)
+        self._radius_updates: dict[str, float] = {}
 
         locked_axes: dict[str, list[bool]] = {
             point_id: [False, False] for point_id in point_map
@@ -68,7 +70,7 @@ class SketchSolver:
         for point_id in (locked_point_ids or set()):
             if point_id in locked_axes:
                 locked_axes[point_id] = [True, True]
-        for constraint in sketch.constraints:
+        for constraint in sketch.constraints.values():
             if constraint.type is SketchConstraintType.FIX:
                 for point_id in constraint.references:
                     if point_id in locked_axes:
@@ -77,21 +79,28 @@ class SketchSolver:
         max_error = 0.0
         for iteration in range(max_iterations):
             max_error = 0.0
-            for constraint in sketch.constraints:
+            for constraint in sketch.constraints.values():
                 error = self._apply_constraint(project, sketch, constraint, positions, locked_axes, tolerance)
                 max_error = max(max_error, error)
             if max_error <= tolerance:
-                return SketchSolveResult(True, positions, iteration + 1, max_error, None)
+                return SketchSolveResult(
+                    True,
+                    positions,
+                    iteration + 1,
+                    max_error,
+                    None,
+                    radius_updates=dict(self._radius_updates),
+                )
 
         # Near-convergence: within 1µm is visually indistinguishable — treat as success
         _NEAR_CONVERGENCE = 0.001  # mm
         if max_error <= _NEAR_CONVERGENCE:
-            return SketchSolveResult(True, positions, max_iterations, max_error, None)
+            return SketchSolveResult(True, positions, max_iterations, max_error, None, radius_updates=dict(self._radius_updates))
 
         # Build per-constraint diagnostics on failure
         constraint_errors: dict[str, float] = {}
         bad_constraints: list[str] = []
-        for constraint in sketch.constraints:
+        for constraint in sketch.constraints.values():
             error = self._apply_constraint(project, sketch, constraint, positions, locked_axes, tolerance)
             constraint_errors[constraint.id] = error
             if math.isinf(error):
@@ -107,6 +116,7 @@ class SketchSolver:
             msg,
             constraint_errors=constraint_errors,
             bad_constraints=bad_constraints,
+            radius_updates=dict(self._radius_updates),
         )
 
     # ------------------------------------------------------------------
@@ -114,9 +124,13 @@ class SketchSolver:
     # ------------------------------------------------------------------
 
     def _evaluate_point(self, project: Project, point: SketchPoint) -> tuple[float, float]:
-        x = self.expression_service.evaluate_property(point.x, project.parameters).value
-        y = self.expression_service.evaluate_property(point.y, project.parameters).value
+        x = self._evaluate_expression(point.x, project.parameters)
+        y = self._evaluate_expression(point.y, project.parameters)
         return x, y
+
+    def _evaluate_expression(self, expression: Expression, parameters: list[Parameter]) -> float:
+        quantity = self.expression_service.evaluate_expression(expression.text, parameters)
+        return self.unit_service.convert(quantity, expression.unit)
 
     def _apply_constraint(
         self,
@@ -283,21 +297,21 @@ class SketchSolver:
         sketch: Sketch,
         tolerance: float,
     ) -> float:
-        """Enforce circle radius by directly updating its ScalarProperty expression."""
-        circle = next(
-            (e for e in sketch.entities if isinstance(e, SketchCircle) and e.id == circle_entity_id),
-            None,
-        )
-        if circle is None:
+        """Enforce circle radius by returning a deferred radius update."""
+        circle = sketch.entities.get(circle_entity_id)
+        if circle is None or not isinstance(circle, SketchCircle):
             return 0.0
-        try:
-            current = float(circle.radius.expression.split()[0])
-        except (ValueError, TypeError, IndexError):
-            current = target
+        if circle.id in self._radius_updates:
+            current = self._radius_updates[circle.id]
+        else:
+            try:
+                current = float(circle.radius.text.split()[0])
+            except (ValueError, TypeError, IndexError):
+                current = target
         error = abs(current - target)
         if error <= tolerance:
             return error
-        circle.radius.expression = f"{target:.6g} mm"
+        self._radius_updates[circle.id] = target
         return error
 
     # ------------------------------------------------------------------
@@ -604,15 +618,15 @@ class SketchSolver:
         tolerance: float,
     ) -> float:
         """refs = [point_id]. entity_refs = [circle_entity_id]. Project point onto circle."""
-        circle = next((e for e in sketch.entities if e.id == entity_refs[0] and isinstance(e, (SketchCircle, SketchArc))), None)
-        if circle is None or not hasattr(circle, "center_point_id"):
+        entity = sketch.entities.get(entity_refs[0])
+        if entity is None or not isinstance(entity, (SketchCircle, SketchArc)):
             return 0.0
-        if circle.center_point_id not in positions:
+        if entity.center_point_id not in positions:
             return 0.0
-        radius = self.expression_service.evaluate_property(circle.radius, project.parameters).value
-        if radius <= 0.0:
+        radius = self._entity_radius(entity, project, positions)
+        if radius is None or radius <= 0.0:
             return 0.0
-        cx, cy = positions[circle.center_point_id]
+        cx, cy = positions[entity.center_point_id]
         px, py = positions[refs[0]]
         dx, dy = px - cx, py - cy
         dist = math.hypot(dx, dy)
@@ -642,15 +656,15 @@ class SketchSolver:
         """refs = [line_p1, line_p2]. entity_refs = [circle_entity_id].
         sign=+1 → exterior tangency (center on positive side of line),
         sign=-1 → interior."""
-        circle = next((e for e in sketch.entities if e.id == entity_refs[0] and isinstance(e, (SketchCircle, SketchArc))), None)
-        if circle is None or not hasattr(circle, "center_point_id"):
+        entity = sketch.entities.get(entity_refs[0])
+        if entity is None or not isinstance(entity, (SketchCircle, SketchArc)):
             return 0.0
-        if circle.center_point_id not in positions:
+        if entity.center_point_id not in positions:
             return 0.0
-        radius = self.expression_service.evaluate_property(circle.radius, project.parameters).value
-        if radius <= 0.0:
+        radius = self._entity_radius(entity, project, positions)
+        if radius is None or radius <= 0.0:
             return 0.0
-        cx, cy = positions[circle.center_point_id]
+        cx, cy = positions[entity.center_point_id]
         p1x, p1y = positions[refs[0]]
         p2x, p2y = positions[refs[1]]
         dx, dy = p2x - p1x, p2y - p1y
@@ -681,6 +695,20 @@ class SketchSolver:
             positions[refs[0]] = (p1x + shift * nx, p1y + shift * ny)
             positions[refs[1]] = (p2x + shift * nx, p2y + shift * ny)
         return abs(error)
+
+    def _entity_radius(
+        self,
+        entity: SketchCircle | SketchArc,
+        project: Project,
+        positions: dict[str, tuple[float, float]],
+    ) -> float | None:
+        if isinstance(entity, SketchCircle):
+            return self._evaluate_expression(entity.radius, project.parameters)
+        if isinstance(entity, SketchArc):
+            cx, cy = positions[entity.center_point_id]
+            sx, sy = positions[entity.start_point_id]
+            return math.hypot(sx - cx, sy - cy)
+        return None
 
     # ------------------------------------------------------------------
     # Shared helpers
@@ -780,5 +808,3 @@ class SketchSolver:
         while angle > math.pi:
             angle -= 2.0 * math.pi
         return angle
-
-

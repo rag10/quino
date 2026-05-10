@@ -13,7 +13,7 @@ from quino import (
     PropertyValueInput,
     SliderInput,
 )
-from quino.domain.model import SimulationResult
+from quino.domain.model import SimulationResult, SketchLineSegment
 
 
 def make_app() -> ApplicationService:
@@ -561,7 +561,7 @@ def test_sketch_entities_support_crud_and_cascade_delete() -> None:
     arc_id = app.create_sketch_arc(p1, p2, p3, "Arc1")
     inf_id = app.create_sketch_infinite_line(p2, p3, "Axis1")
 
-    assert {entity.id for entity in app.project.sketch.entities} >= {p1, p2, p3, line_id, circle_id, arc_id, inf_id}
+    assert {entity.id for entity in app.project.sketch.entities.values()} >= {p1, p2, p3, line_id, circle_id, arc_id, inf_id}
 
     app.update_sketch_entity(p1, "x", PropertyValueInput("expression", "10 mm"))
     app.update_sketch_entity(circle_id, "radius", PropertyValueInput("expression", "30 mm"))
@@ -570,17 +570,49 @@ def test_sketch_entities_support_crud_and_cascade_delete() -> None:
     point = app._find_sketch_point(p1)
     circle = app._find_sketch_entity(circle_id)
     line = app._find_sketch_entity(line_id)
-    assert point.x.expression == "10 mm"
-    assert circle.radius.expression == "30 mm"
+    assert point.x.text == "10 mm"
+    assert circle.radius.text == "30 mm"
     assert line.construction is True
 
     app.delete_sketch_entity(p1)
-    remaining_ids = {entity.id for entity in app.project.sketch.entities}
+    remaining_ids = {entity.id for entity in app.project.sketch.entities.values()}
     assert p1 not in remaining_ids
     assert line_id not in remaining_ids
     assert circle_id not in remaining_ids
     assert arc_id not in remaining_ids
     assert inf_id in remaining_ids
+
+
+def test_create_sketch_rectangle_builds_constrained_profile() -> None:
+    app = make_app()
+    app.new_project("SketchRectangle")
+
+    created_ids = app.create_sketch_rectangle((0.0, 0.0), (80.0, 40.0))
+
+    assert len(created_ids) == 8
+    sketch = app.project.sketch
+    assert sketch is not None
+    lines = [entity for entity in sketch.entities.values() if isinstance(entity, SketchLineSegment)]
+    assert len(lines) == 4
+    constraint_types = [constraint.type.value for constraint in sketch.constraints.values()]
+    assert constraint_types.count("horizontal") == 2
+    assert constraint_types.count("vertical") == 2
+
+
+def test_move_sketch_point_with_solver_locks_dragged_point() -> None:
+    app = make_app()
+    app.new_project("SketchDrag")
+    p1 = app.create_sketch_point("0 mm", "0 mm", "A")
+    p2 = app.create_sketch_point("30 mm", "10 mm", "B")
+    app.create_sketch_constraint("horizontal", [p1, p2])
+
+    app.move_sketch_point_with_solver(p1, "15 mm", "25 mm")
+
+    point_a = app._find_sketch_point(p1)
+    point_b = app._find_sketch_point(p2)
+    assert point_a.x.text == "15 mm"
+    assert point_a.y.text == "25 mm"
+    assert point_b.y.text == "25 mm"
 
 
 def test_sketch_undo_redo_and_validation() -> None:
@@ -590,11 +622,11 @@ def test_sketch_undo_redo_and_validation() -> None:
     p2 = app.create_sketch_point("10 mm", "0 mm")
     line_id = app.create_sketch_line_segment(p1, p2)
 
-    assert line_id in {entity.id for entity in app.project.sketch.entities}
+    assert line_id in {entity.id for entity in app.project.sketch.entities.values()}
     assert app.undo() is True
-    assert line_id not in {entity.id for entity in app.project.sketch.entities}
+    assert line_id not in {entity.id for entity in app.project.sketch.entities.values()}
     assert app.redo() is True
-    assert line_id in {entity.id for entity in app.project.sketch.entities}
+    assert line_id in {entity.id for entity in app.project.sketch.entities.values()}
 
     report = app.validate_model()
     assert not any(message.code == "broken_sketch_reference" for message in report.messages)
@@ -608,27 +640,27 @@ def test_sketch_constraints_propagate_geometry_and_can_update_distance() -> None
 
     horizontal_id = app.create_sketch_constraint("horizontal", [p1, p2], name="H1")
     point_b = app._find_sketch_point(p2)
-    assert point_b.y.expression == "0 mm"
+    assert point_b.y.text == "0 mm"
 
     distance_id = app.create_sketch_constraint("distance", [p1, p2], value="50 mm", name="D1")
     app.move_sketch_point(p1, "10 mm", "20 mm")
 
     point_a = app._find_sketch_point(p1)
     point_b = app._find_sketch_point(p2)
-    ax = float(point_a.x.expression.split()[0])
-    ay = float(point_a.y.expression.split()[0])
-    bx = float(point_b.x.expression.split()[0])
-    by = float(point_b.y.expression.split()[0])
+    ax = float(point_a.x.text.split()[0])
+    ay = float(point_a.y.text.split()[0])
+    bx = float(point_b.x.text.split()[0])
+    by = float(point_b.y.text.split()[0])
     assert abs(ay - by) < 1e-6
     assert abs((((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5) - 50.0) < 1e-3
 
     app.update_sketch_constraint(distance_id, "value", PropertyValueInput("expression", "60 mm"))
     point_b = app._find_sketch_point(p2)
-    bx = float(point_b.x.expression.split()[0])
-    by = float(point_b.y.expression.split()[0])
+    bx = float(point_b.x.text.split()[0])
+    by = float(point_b.y.text.split()[0])
     assert abs(ay - by) < 1e-6
     assert abs((((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5) - 60.0) < 1e-3
-    assert horizontal_id in {constraint.id for constraint in app.project.sketch.constraints}
+    assert horizontal_id in {constraint.id for constraint in app.project.sketch.constraints.values()}
 
 
 def test_sketch_validation_warns_on_unsolved_conflicting_constraints() -> None:
@@ -671,34 +703,34 @@ def test_sketch_solver_handles_parallel_midpoint_angle_and_on_circle() -> None:
     point_b = app._find_sketch_point(b)
     point_c = app._find_sketch_point(c)
     point_d = app._find_sketch_point(d)
-    ax = float(point_a.x.expression.split()[0])
-    ay = float(point_a.y.expression.split()[0])
-    bx = float(point_b.x.expression.split()[0])
-    by = float(point_b.y.expression.split()[0])
-    cx = float(point_c.x.expression.split()[0])
-    cy = float(point_c.y.expression.split()[0])
-    dx = float(point_d.x.expression.split()[0])
-    dy = float(point_d.y.expression.split()[0])
+    ax = float(point_a.x.text.split()[0])
+    ay = float(point_a.y.text.split()[0])
+    bx = float(point_b.x.text.split()[0])
+    by = float(point_b.y.text.split()[0])
+    cx = float(point_c.x.text.split()[0])
+    cy = float(point_c.y.text.split()[0])
+    dx = float(point_d.x.text.split()[0])
+    dy = float(point_d.y.text.split()[0])
     cross = (bx - ax) * (dy - cy) - (by - ay) * (dx - cx)
     assert abs(cross) < 1e-3
 
     mid = app._find_sketch_point(midpoint)
-    mx = float(mid.x.expression.split()[0])
-    my = float(mid.y.expression.split()[0])
+    mx = float(mid.x.text.split()[0])
+    my = float(mid.y.text.split()[0])
     assert abs(mx - 0.5 * (ax + bx)) < 1e-3
     assert abs(my - 0.5 * (ay + by)) < 1e-3
 
     p = app._find_sketch_point(on_circle_pt)
-    px = float(p.x.expression.split()[0])
-    py = float(p.y.expression.split()[0])
+    px = float(p.x.text.split()[0])
+    py = float(p.y.text.split()[0])
     assert abs((((px - 30.0) ** 2 + (py - 0.0) ** 2) ** 0.5) - 10.0) < 1e-3
 
     v = app._find_sketch_point(vertex)
     va = app._find_sketch_point(arm_a)
     vb = app._find_sketch_point(arm_b)
-    vx, vy = float(v.x.expression.split()[0]), float(v.y.expression.split()[0])
-    vax, vay = float(va.x.expression.split()[0]), float(va.y.expression.split()[0])
-    vbx, vby = float(vb.x.expression.split()[0]), float(vb.y.expression.split()[0])
+    vx, vy = float(v.x.text.split()[0]), float(v.y.text.split()[0])
+    vax, vay = float(va.x.text.split()[0]), float(va.y.text.split()[0])
+    vbx, vby = float(vb.x.text.split()[0]), float(vb.y.text.split()[0])
     d1x, d1y = vax - vx, vay - vy
     d2x, d2y = vbx - vx, vby - vy
     angle = abs(math.degrees(math.atan2(d1x * d2y - d1y * d2x, d1x * d2x + d1y * d2y)))
@@ -725,10 +757,10 @@ def test_sketch_solver_handles_tangent_constraint() -> None:
 
     point_a = app._find_sketch_point(line_a)
     point_b = app._find_sketch_point(line_b)
-    ax = float(point_a.x.expression.split()[0])
-    ay = float(point_a.y.expression.split()[0])
-    bx = float(point_b.x.expression.split()[0])
-    by = float(point_b.y.expression.split()[0])
+    ax = float(point_a.x.text.split()[0])
+    ay = float(point_a.y.text.split()[0])
+    bx = float(point_b.x.text.split()[0])
+    by = float(point_b.y.text.split()[0])
     distance = abs((by - ay) * 0.0 - (bx - ax) * 10.0 + bx * ay - by * ax) / math.hypot(by - ay, bx - ax)
     assert abs(distance - 5.0) < 1e-2
 
@@ -842,13 +874,13 @@ def test_create_sketch_constraint_validates_entity_reference_type() -> None:
     p1 = app.create_sketch_point("0 mm", "0 mm", "A")
     p2 = app.create_sketch_point("10 mm", "0 mm", "B")
     line_id = app.create_sketch_line_segment(p1, p2)
-    with pytest.raises(ValueError, match="On-circle constraint requires a circle entity reference"):
+    with pytest.raises(ValueError, match="On-circle constraint requires a circle or arc entity reference"):
         app.create_sketch_constraint(
             "on_circle",
             [p1],
             entity_references=[line_id],
         )
-    with pytest.raises(ValueError, match="Tangent constraint requires a circle entity reference"):
+    with pytest.raises(ValueError, match="Tangent constraint requires a circle or arc entity reference"):
         app.create_sketch_constraint(
             "tangent",
             [p1, p2],
@@ -959,9 +991,9 @@ def test_drag_constrained_point_respects_free_dof() -> None:
     app.move_sketch_point(p2, "30 mm", "80 mm")
 
     assert app.project.sketch.solve_error is None, app.project.sketch.solve_error
-    pts = {e.id: e for e in app.project.sketch.entities if hasattr(e, "x")}
-    x2 = app.expression_service.evaluate_property(pts[p2].x, app.project.parameters).value
-    y2 = app.expression_service.evaluate_property(pts[p2].y, app.project.parameters).value
+    pts = {e.id: e for e in app.project.sketch.entities.values() if hasattr(e, "x")}
+    x2 = app._evaluate_sketch_expression(pts[p2].x, app.project.parameters)
+    y2 = app._evaluate_sketch_expression(pts[p2].y, app.project.parameters)
     assert abs(x2) < 1e-4, f"VERTICAL must keep x=0, got {x2}"
     assert abs(y2 - 80.0) < 1e-4, f"Free y must be 80, got {y2}"
 
@@ -977,9 +1009,9 @@ def test_drag_distance_constrained_point_stays_on_circle() -> None:
     app.move_sketch_point(p2, "70 mm", "30 mm")
 
     assert app.project.sketch.solve_error is None, app.project.sketch.solve_error
-    pts = {e.id: e for e in app.project.sketch.entities if hasattr(e, "x")}
-    x2 = app.expression_service.evaluate_property(pts[p2].x, app.project.parameters).value
-    y2 = app.expression_service.evaluate_property(pts[p2].y, app.project.parameters).value
+    pts = {e.id: e for e in app.project.sketch.entities.values() if hasattr(e, "x")}
+    x2 = app._evaluate_sketch_expression(pts[p2].x, app.project.parameters)
+    y2 = app._evaluate_sketch_expression(pts[p2].y, app.project.parameters)
     dist = math.hypot(x2, y2)
     assert abs(dist - 50.0) < 0.1, f"Must stay on circle r=50, got dist={dist:.3f}"
 
@@ -995,8 +1027,8 @@ def test_inspector_edit_constrained_point_respects_free_dof() -> None:
     app.update_sketch_entity(p2, "x", PropertyValueInput(kind="expression", value="30 mm"))
 
     assert app.project.sketch.solve_error is None, app.project.sketch.solve_error
-    pts = {e.id: e for e in app.project.sketch.entities if hasattr(e, "x")}
-    x2 = app.expression_service.evaluate_property(pts[p2].x, app.project.parameters).value
+    pts = {e.id: e for e in app.project.sketch.entities.values() if hasattr(e, "x")}
+    x2 = app._evaluate_sketch_expression(pts[p2].x, app.project.parameters)
     assert abs(x2) < 1e-4, f"VERTICAL must keep x=0 after inspector edit, got {x2}"
 
 
@@ -1008,14 +1040,14 @@ def test_changing_distance_value_invalidates_solve_cache() -> None:
     app.create_sketch_constraint("fix", [p1])
     c_id = app.create_sketch_constraint("distance", [p1, p2])
 
-    pts = {e.id: e for e in app.project.sketch.entities if hasattr(e, "x")}
-    x2 = app.expression_service.evaluate_property(pts[p2].x, app.project.parameters).value
+    pts = {e.id: e for e in app.project.sketch.entities.values() if hasattr(e, "x")}
+    x2 = app._evaluate_sketch_expression(pts[p2].x, app.project.parameters)
     assert abs(x2 - 50.0) < 1e-4
 
     app.update_sketch_constraint(c_id, "value", PropertyValueInput(kind="expression", value="80 mm"))
 
-    pts = {e.id: e for e in app.project.sketch.entities if hasattr(e, "x")}
-    x2 = app.expression_service.evaluate_property(pts[p2].x, app.project.parameters).value
+    pts = {e.id: e for e in app.project.sketch.entities.values() if hasattr(e, "x")}
+    x2 = app._evaluate_sketch_expression(pts[p2].x, app.project.parameters)
     assert abs(x2 - 80.0) < 1e-4, f"After updating distance to 80mm, got x2={x2}"
 
 
@@ -1037,9 +1069,9 @@ def test_distance_on_circle_constrains_radius() -> None:
     result = app.sketch_solver.solve(project)
     assert result.success
     # Radius should now be 30mm
-    radius_val = app.expression_service.evaluate_property(
+    radius_val = app._evaluate_sketch_expression(
         circle.radius, project.parameters
-    ).value
+    )
     assert abs(radius_val - 30.0) < 0.01
 
 
@@ -1119,9 +1151,9 @@ def test_arc_endpoint_points_are_visible_midpoint_hidden() -> None:
     p3 = app.create_sketch_point("50 mm", "50 mm")
     arc_id = app.create_sketch_arc(p1, p2, p3)
     arc = app._find_sketch_entity(arc_id)
-    pt_a = app._find_sketch_point(arc.point_a_id)
-    pt_b = app._find_sketch_point(arc.point_b_id)
-    pt_c = app._find_sketch_point(arc.point_c_id)
-    assert pt_a.visible is True, "Arc start point (A) must be visible"
-    assert pt_c.visible is True, "Arc end point (C) must be visible"
-    assert pt_b.visible is False, "Arc midpoint (B) on arc must be hidden"
+    pt_center = app._find_sketch_point(arc.center_point_id)
+    pt_start = app._find_sketch_point(arc.start_point_id)
+    pt_end = app._find_sketch_point(arc.end_point_id)
+    assert pt_center.visible is True, "Arc center point must be visible"
+    assert pt_start.visible is True, "Arc start point must be visible"
+    assert pt_end.visible is True, "Arc end point must be visible"

@@ -48,5 +48,5 @@ def test_roundtrip_project_json_with_sketch() -> None:
     assert restored.sketch.name == "Main Sketch"
     assert len(restored.sketch.entities) == 7
     assert len(restored.sketch.constraints) == 2
-    assert any(entity.name == "Arc1" for entity in restored.sketch.entities)
-    assert any(constraint.name == "D1" for constraint in restored.sketch.constraints)
+    assert any(entity.name == "Arc1" for entity in restored.sketch.entities.values())
+    assert any(constraint.name == "D1" for constraint in restored.sketch.constraints.values())

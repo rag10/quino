@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from quino.domain.model import (
-    ScalarProperty,
+    Expression,
     Sketch,
     SketchConstraint,
     SketchLineSegment,
@@ -17,12 +17,8 @@ from quino.domain.types import (
 from quino.services.sketch_dof import SketchDofAnalyzer
 
 
-def _scalar(expression: str, unit: str = "mm", dim: Dimension = Dimension.LENGTH) -> ScalarProperty:
-    return ScalarProperty(
-        expression=expression,
-        unit=unit,
-        expected_dimension=dim,
-    )
+def _expr(expression: str, unit: str = "mm") -> Expression:
+    return Expression(text=expression, unit=unit)
 
 
 def _make_sketch(
@@ -30,15 +26,16 @@ def _make_sketch(
     constraints: list[SketchConstraint],
     entities: list | None = None,
 ) -> Sketch:
-    all_entities = list(points)
+    all_entities = {pt.id: pt for pt in points}
     if entities:
-        all_entities.extend(entities)
+        for entity in entities:
+            all_entities[entity.id] = entity
     return Sketch(
         id="sk1",
         name="S",
         visible=True,
         entities=all_entities,
-        constraints=constraints,
+        constraints={c.id: c for c in constraints},
     )
 
 
@@ -47,8 +44,8 @@ def test_no_constraints_all_free() -> None:
         id="p1",
         name="P1",
         type=SketchEntityType.POINT,
-        x=_scalar("0"),
-        y=_scalar("0"),
+        x=_expr("0"),
+        y=_expr("0"),
     )
     sketch = _make_sketch([pt], [])
     result = SketchDofAnalyzer().analyze(sketch)
@@ -60,8 +57,8 @@ def test_fix_removes_both_dof() -> None:
         id="p1",
         name="P1",
         type=SketchEntityType.POINT,
-        x=_scalar("0"),
-        y=_scalar("0"),
+        x=_expr("0"),
+        y=_expr("0"),
     )
     c = SketchConstraint(
         id="c1",
@@ -82,15 +79,15 @@ def test_horizontal_removes_one_dof() -> None:
         id="p1",
         name="P1",
         type=SketchEntityType.POINT,
-        x=_scalar("0"),
-        y=_scalar("0"),
+        x=_expr("0"),
+        y=_expr("0"),
     )
     p2 = SketchPoint(
         id="p2",
         name="P2",
         type=SketchEntityType.POINT,
-        x=_scalar("10"),
-        y=_scalar("5"),
+        x=_expr("10"),
+        y=_expr("5"),
     )
     c = SketchConstraint(
         id="c1",
@@ -110,15 +107,15 @@ def test_line_fully_constrained() -> None:
         id="p1",
         name="P1",
         type=SketchEntityType.POINT,
-        x=_scalar("0"),
-        y=_scalar("0"),
+        x=_expr("0"),
+        y=_expr("0"),
     )
     p2 = SketchPoint(
         id="p2",
         name="P2",
         type=SketchEntityType.POINT,
-        x=_scalar("10"),
-        y=_scalar("0"),
+        x=_expr("10"),
+        y=_expr("0"),
     )
     fix1 = SketchConstraint(
         id="c1",
@@ -147,15 +144,15 @@ def test_line_entity_fully_constrained_when_both_points_are() -> None:
         id="p1",
         name="P1",
         type=SketchEntityType.POINT,
-        x=_scalar("0"),
-        y=_scalar("0"),
+        x=_expr("0"),
+        y=_expr("0"),
     )
     p2 = SketchPoint(
         id="p2",
         name="P2",
         type=SketchEntityType.POINT,
-        x=_scalar("10"),
-        y=_scalar("0"),
+        x=_expr("10"),
+        y=_expr("0"),
     )
     line = SketchLineSegment(
         id="l1",
