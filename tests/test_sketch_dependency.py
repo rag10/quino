@@ -9,6 +9,7 @@ from quino.domain.model import (
     SketchInfiniteLine,
     SketchLineSegment,
     SketchPoint,
+    SketchSpline,
 )
 from quino.domain.sketch_dependency import SketchDependencyGraph
 from quino.domain.types import SketchConstraintType, SketchEntityType
@@ -108,6 +109,25 @@ def test_infinite_line_depends_on_both_points() -> None:
     params = g.parameters_for("il1")
     assert "a.x" in params
     assert "b.y" in params
+
+
+def test_spline_depends_on_control_point_parameters() -> None:
+    spline = SketchSpline(
+        id="sp1", name="sp1", type=SketchEntityType.SPLINE,
+        control_point_ids=["p1", "p2", "p3"],
+    )
+    sketch = Sketch(
+        id="sk", name="T",
+        entities={
+            "p1": _pt("p1"), "p2": _pt("p2"), "p3": _pt("p3"),
+            "sp1": spline,
+        },
+    )
+    g = SketchDependencyGraph.build(sketch)
+    params = g.parameters_for("sp1")
+    assert "p1.x" in params
+    assert "p2.y" in params
+    assert "p3.x" in params
 
 
 # --- Reverse index: Parameter → Entities ---
