@@ -212,6 +212,8 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._show_trajectories: bool = True
         self._snap_preview_world: tuple[float, float] | None = None
         self._snap_to_point: bool = False
+        self._dof_result = None
+        self._last_mouse_screen: QtCore.QPointF = QtCore.QPointF(0.0, 0.0)
         self._show_origin: bool = True
         self._show_axes: bool = True
         self._show_grid: bool = True
@@ -724,6 +726,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self.update()
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:  # pragma: no cover - exercised indirectly in GUI tests
+        self._last_mouse_screen = event.position()
         if event.button() in {QtCore.Qt.MouseButton.MiddleButton, QtCore.Qt.MouseButton.RightButton}:
             self._panning = True
             self._pan_last_screen = event.position()
@@ -1020,8 +1023,10 @@ class MechanismCanvas(QtWidgets.QWidget):
             project = self.app_service.project
             if project is not None and project.sketch is not None:
                 dof_result = SketchDofAnalyzer().analyze(project.sketch)
+                self._dof_result = dof_result
                 self.dofInfoChanged.emit(f"Free DOF: {dof_result.total_free_dof}")
             else:
+                self._dof_result = None
                 self.dofInfoChanged.emit("")
         else:
             self.dofInfoChanged.emit("")
@@ -1786,6 +1791,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             project = self.app_service.project
             if project is not None and project.sketch is not None:
                 dof_result = SketchDofAnalyzer().analyze(project.sketch)
+                self._dof_result = dof_result
 
         def _entity_color(entity_id: str, construction: bool) -> QtGui.QColor:
             if dof_result is not None and entity_id in dof_result.fully_constrained_entity_ids:
@@ -2604,6 +2610,24 @@ class MechanismCanvas(QtWidgets.QWidget):
                 return cpt
         return None
 
+    def _nearest_endpoint_of_entity(
+        self, entity: CanvasSketchEntity, click_screen: QtCore.QPointF
+    ) -> str | None:
+        """Return the point_id of the entity endpoint closest to click_screen."""
+        best_id = None
+        best_dist = float("inf")
+        transform = self._current_transform()
+        for pid in entity.point_ids:
+            pt = self._canvas_sketch_point_by_id(pid)
+            if pt is None:
+                continue
+            sp = self._to_screen(pt.x, pt.y, transform)
+            d = math.hypot(sp.x() - click_screen.x(), sp.y() - click_screen.y())
+            if d < best_dist:
+                best_dist = d
+                best_id = pid
+        return best_id
+
     def _handle_constraint_input_click(
         self,
         clicked_sketch_point: CanvasSketchPoint | None,
@@ -2647,16 +2671,19 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._creation_points.append((clicked_sketch_point.x, clicked_sketch_point.y))
                 self._sensor_marker_ids.append(clicked_sketch_point.entity_id)
 
-        # Point-only constraints with optional line-click to fill 2 slots
+        # Point-only constraints: line click → nearest endpoint only (1 slot)
         else:
             if (clicked_sketch_entity is not None
                     and clicked_sketch_entity.entity_type in (SketchEntityType.LINE_SEGMENT, SketchEntityType.INFINITE_LINE)
-                    and pts_left >= 2):
-                for pid in clicked_sketch_entity.point_ids[:2]:
-                    cpt = self._canvas_sketch_point_by_id(pid)
+                    and pts_left > 0):
+                nearest_id = self._nearest_endpoint_of_entity(
+                    clicked_sketch_entity, self._last_mouse_screen
+                )
+                if nearest_id is not None:
+                    cpt = self._canvas_sketch_point_by_id(nearest_id)
                     if cpt:
                         self._creation_points.append((cpt.x, cpt.y))
-                        self._sensor_marker_ids.append(pid)
+                        self._sensor_marker_ids.append(nearest_id)
             elif clicked_sketch_point is not None and pts_left > 0:
                 self._creation_points.append((clicked_sketch_point.x, clicked_sketch_point.y))
                 self._sensor_marker_ids.append(clicked_sketch_point.entity_id)

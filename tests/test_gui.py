@@ -943,3 +943,86 @@ def test_sketch_mode_renders_dimmed_model() -> None:
 
     window.close()
     qt_app.processEvents()
+
+
+def test_canvas_display_settings_and_preferences_dialog() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    # Default state
+    assert window.canvas.show_origin() is True
+    assert window.canvas.show_grid() is True
+    assert window.canvas.background_color() == "#f5f1e8"
+
+    # Toggle via toolbar actions
+    window.action_toggle_origin.setChecked(False)
+    window._on_toggle_origin()
+    qt_app.processEvents()
+    assert window.canvas.show_origin() is False
+
+    window.action_toggle_grid.setChecked(False)
+    window._on_toggle_grid()
+    qt_app.processEvents()
+    assert window.canvas.show_grid() is False
+
+    # Change background color directly
+    window.canvas.set_background_color("#ffffff")
+    qt_app.processEvents()
+    assert window.canvas.background_color() == "#ffffff"
+
+    # Preferences dialog exists and can be invoked
+    assert window.action_preferences is not None
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_coincident_on_line_click_picks_nearest_endpoint() -> None:
+    """Clicking a line in COINCIDENT mode should add only the nearest endpoint."""
+    from unittest.mock import patch
+
+    from quino.domain.types import SketchEntityType
+    from quino.gui.canvas import CanvasMode, CanvasSketchEntity, MechanismCanvas
+
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    app_svc = ApplicationService()
+    app_svc.new_project("test")
+    canvas = MechanismCanvas(app_svc)
+
+    app_svc.create_sketch()
+    p1 = app_svc.create_sketch_point("0 mm", "0 mm")
+    p2 = app_svc.create_sketch_point("100 mm", "0 mm")
+    line_id = app_svc.create_sketch_line_segment(p1, p2)
+    canvas.set_interaction_mode("sketch")
+    canvas.set_mode(CanvasMode.CREATE_SKETCH_COINCIDENT)
+
+    canvas._sensor_marker_ids.clear()
+    canvas._creation_points.clear()
+
+    project = app_svc.project
+    seg = app_svc.get_entity(line_id)
+    entity = CanvasSketchEntity(
+        entity_id=seg.id,
+        name="",
+        entity_type=SketchEntityType.LINE_SEGMENT,
+        point_ids=[seg.start_point_id, seg.end_point_id],
+        visible=True,
+        construction=False,
+    )
+    # Fake a CanvasSketchPoint for the start point so _canvas_sketch_point_by_id returns it
+    from quino.gui.canvas import CanvasSketchPoint
+    fake_cpt = CanvasSketchPoint(
+        entity_id=seg.start_point_id, name="P1",
+        x=0.0, y=0.0, visible=True, construction=False,
+    )
+    canvas._screen_sketch_points = [(fake_cpt, None)]
+
+    with patch.object(
+        canvas, "_nearest_endpoint_of_entity", return_value=seg.start_point_id
+    ) as mock_near:
+        canvas._handle_constraint_input_click(None, entity, n_pts=2, n_ent=0)
+        mock_near.assert_called_once()
+    assert len(canvas._sensor_marker_ids) == 1
+    assert canvas._sensor_marker_ids[0] == seg.start_point_id
