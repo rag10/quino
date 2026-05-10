@@ -5,7 +5,7 @@ from pathlib import Path
 from quino.gui.icons import get_icon
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from quino.application.examples import build_four_bar_example, build_slider_crank_example
+from quino.application.example_registry import ExampleEntry, ExampleRegistry
 from quino.application.service import ApplicationService
 from quino.domain.inputs import PropertyValueInput
 from quino.domain.model import (
@@ -43,6 +43,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._suspend_tree_injection = False
         self._last_simulation_result: SimulationResult | None = None
         self._last_simulation_state: dict[str, float] | None = None
+        self._last_dof_info: str = ""
         self._current_frame_index = 0
         self._current_project_path: Path | None = None
         self._project_dirty = False
@@ -99,6 +100,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.selectionCleared.connect(self._clear_selection)
         self.canvas.modelChanged.connect(self._on_canvas_model_changed)
         self.canvas.modeChanged.connect(self._on_canvas_mode_changed)
+        self.canvas.dofInfoChanged.connect(self._on_dof_info_changed)
         self.canvas.set_edit_guard(self._prepare_for_model_edit)
         self.action_fit_view.triggered.connect(self.canvas.fit_view)
         self._canvas_stack = QtWidgets.QWidget()
@@ -312,13 +314,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_stop.triggered.connect(self.stop_playback)
         self.action_stop.setToolTip("Stop animation")
 
-        self.action_four_bar = QtGui.QAction(get_icon("four-bar", color_base), "Load Four Bar", self)
-        self.action_four_bar.triggered.connect(self.load_four_bar_example)
-        self.action_four_bar.setToolTip("Load a four-bar linkage example")
-
-        self.action_slider_crank = QtGui.QAction(get_icon("slider-crank", color_base), "Load Slider Crank", self)
-        self.action_slider_crank.triggered.connect(self.load_slider_crank_example)
-        self.action_slider_crank.setToolTip("Load a slider-crank mechanism example")
+        self._example_registry = ExampleRegistry()
+        self._example_actions: list[tuple[QtGui.QAction, ExampleEntry]] = []
 
         self.action_fit_view = QtGui.QAction(get_icon("fit-view", color_base), "Fit View", self)
         self.action_fit_view.setToolTip("Fit mechanism to view")
@@ -346,6 +343,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_show_trajectories.setEnabled(False)
         self.action_show_trajectories.triggered.connect(self._on_toggle_trajectories)
         self.action_show_trajectories.setToolTip("Show/hide sensor position trajectories on canvas")
+
+        self.action_toggle_origin = QtGui.QAction(get_icon("origin", color_base), "Origin", self)
+        self.action_toggle_origin.setCheckable(True)
+        self.action_toggle_origin.setChecked(True)
+        self.action_toggle_origin.triggered.connect(self._on_toggle_origin)
+        self.action_toggle_origin.setToolTip("Show/hide origin and axes")
+
+        self.action_toggle_grid = QtGui.QAction(get_icon("grid", color_base), "Grid", self)
+        self.action_toggle_grid.setCheckable(True)
+        self.action_toggle_grid.setChecked(True)
+        self.action_toggle_grid.triggered.connect(self._on_toggle_grid)
+        self.action_toggle_grid.setToolTip("Show/hide grid")
+
+        self.action_preferences = QtGui.QAction(get_icon("preferences", color_base), "Preferences", self)
+        self.action_preferences.triggered.connect(self._show_preferences_dialog)
+        self.action_preferences.setToolTip("Open preferences dialog")
 
         self.action_delete = QtGui.QAction(get_icon("delete", color_danger), "Delete", self)
         self.action_delete.setShortcut(QtGui.QKeySequence.StandardKey.Delete)
@@ -462,10 +475,11 @@ class MainWindow(QtWidgets.QMainWindow):
         edit_menu.addAction(self.action_redo)
         edit_menu.addSeparator()
         edit_menu.addAction(self.action_delete)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.action_preferences)
 
         examples_menu = menubar.addMenu("E&xamples")
-        examples_menu.addAction(self.action_four_bar)
-        examples_menu.addAction(self.action_slider_crank)
+        self._build_examples_menu(examples_menu)
 
     def _add_toolbar_block(self, toolbar: QtWidgets.QToolBar, actions_grid: list[list[QtGui.QAction | None]], label: str) -> None:
         """Add a labeled block widget with a grid of tool buttons."""
@@ -583,6 +597,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._add_toolbar_block(toolbar, [
             [self.action_select_tool, self.action_fit_view, self.action_delete],
+            [self.action_toggle_origin, self.action_toggle_grid, None],
         ], "View")
 
     def _build_sketch_toolbar(self) -> None:
@@ -737,27 +752,46 @@ class MainWindow(QtWidgets.QMainWindow):
             self._project_dirty = False
         self._update_window_title()
 
+    def _build_examples_menu(self, menu: QtWidgets.QMenu) -> None:
+        icon_map = {
+            "Four Bar": "four-bar",
+            "Slider Crank": "slider-crank",
+        }
+        for entry in self._example_registry.list_examples():
+            icon_name = icon_map.get(entry.name, "example")
+            action = QtGui.QAction(get_icon(icon_name, "#7f5539"), f"Load {entry.name}", self)
+            action.setToolTip(entry.description)
+            action.triggered.connect(lambda _checked=False, e=entry: self._load_example(e))
+            menu.addAction(action)
+            self._example_actions.append((action, entry))
+
     def load_four_bar_example(self) -> None:
-        if not self._confirm_save_if_dirty():
-            return
-        result = build_four_bar_example(self.app_service)
-        self._current_project_path = None
-        self._mark_project_dirty()
-        self._selected_entity_id = result.body_ids[0]
-        self._clear_simulation_state()
-        self._append_message("Loaded four-bar example")
-        self.canvas.fit_view()
-        self.refresh_all()
+        """Convenience wrapper for tests."""
+        for entry in self._example_registry.list_examples():
+            if entry.name == "Four Bar":
+                self._load_example(entry)
+                return
 
     def load_slider_crank_example(self) -> None:
+        """Convenience wrapper for tests."""
+        for entry in self._example_registry.list_examples():
+            if entry.name == "Slider Crank":
+                self._load_example(entry)
+                return
+
+    def _load_example(self, entry: ExampleEntry) -> None:
         if not self._confirm_save_if_dirty():
             return
-        result = build_slider_crank_example(self.app_service)
+        self._example_registry.load(self.app_service, entry)
         self._current_project_path = None
         self._mark_project_dirty()
-        self._selected_entity_id = result.body_ids[0]
+        project = self.app_service.project
+        if project is not None and project.model.bodies:
+            self._selected_entity_id = project.model.bodies[0].id
+        else:
+            self._selected_entity_id = None
         self._clear_simulation_state()
-        self._append_message("Loaded slider-crank example")
+        self._append_message(f"Loaded example: {entry.name}")
         self.canvas.fit_view()
         self.refresh_all()
 
@@ -929,6 +963,67 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_toggle_trajectories(self) -> None:
         self.canvas.set_show_trajectories(self.action_show_trajectories.isChecked())
+
+    def _on_toggle_origin(self) -> None:
+        self.canvas.set_show_origin(self.action_toggle_origin.isChecked())
+
+    def _on_toggle_grid(self) -> None:
+        self.canvas.set_show_grid(self.action_toggle_grid.isChecked())
+
+    def _show_preferences_dialog(self) -> None:
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Preferences")
+        dialog.setMinimumWidth(320)
+        layout = QtWidgets.QFormLayout(dialog)
+
+        origin_checkbox = QtWidgets.QCheckBox("Show origin & axes")
+        origin_checkbox.setChecked(self.canvas.show_origin())
+        layout.addRow(origin_checkbox)
+
+        grid_checkbox = QtWidgets.QCheckBox("Show grid")
+        grid_checkbox.setChecked(self.canvas.show_grid())
+        layout.addRow(grid_checkbox)
+
+        color_layout = QtWidgets.QHBoxLayout()
+        color_button = QtWidgets.QPushButton("Choose…")
+        color_preview = QtWidgets.QLabel(self.canvas.background_color())
+        color_preview.setStyleSheet(
+            f"background-color: {self.canvas.background_color()}; border: 1px solid #888; min-width: 60px;"
+        )
+        current_color = self.canvas.background_color()
+
+        def _pick_color():
+            nonlocal current_color
+            color = QtWidgets.QColorDialog.getColor(
+                QtGui.QColor(current_color), dialog, "Canvas Background Color"
+            )
+            if color.isValid():
+                current_color = color.name()
+                color_preview.setText(current_color)
+                color_preview.setStyleSheet(
+                    f"background-color: {current_color}; border: 1px solid #888; min-width: 60px;"
+                )
+
+        color_button.clicked.connect(_pick_color)
+        color_layout.addWidget(color_preview)
+        color_layout.addWidget(color_button)
+        color_layout.addStretch()
+        layout.addRow("Background color:", color_layout)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            self.canvas.set_show_origin(origin_checkbox.isChecked())
+            self.canvas.set_show_axes(origin_checkbox.isChecked())
+            self.canvas.set_show_grid(grid_checkbox.isChecked())
+            self.canvas.set_background_color(current_color)
+            self.action_toggle_origin.setChecked(self.canvas.show_origin())
+            self.action_toggle_grid.setChecked(self.canvas.show_grid())
 
     def _update_trajectories(self) -> None:
         project = self.app_service.project
@@ -1194,12 +1289,13 @@ class MainWindow(QtWidgets.QMainWindow):
             sensors_root.addChild(self._entity_item(sensor.name, sensor.type.value, sensor.id))
 
         self.tree.expandAll()
-        self.tree.blockSignals(False)
 
         if self._selected_entity_id:
             item = self._tree_items.get(self._selected_entity_id)
             if item is not None:
                 self.tree.setCurrentItem(item)
+
+        self.tree.blockSignals(False)
 
     def _entity_item(self, label: str, kind: str, entity_id: str) -> QtWidgets.QTreeWidgetItem:
         item = QtWidgets.QTreeWidgetItem([label, kind])
@@ -1363,6 +1459,10 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 # Para botones que no están en tool_group (como drivers)
                 action_for_mode.setChecked(True)
+        self._update_status_message()
+
+    def _on_dof_info_changed(self, text: str) -> None:
+        self._last_dof_info = text
         self._update_status_message()
 
     def _set_canvas_mode(self, mode: str) -> None:
@@ -2120,4 +2220,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusBar().setStyleSheet("QStatusBar { color: #b84840; }")
         else:
             self.statusBar().setStyleSheet("")
+        dof_text = getattr(self, "_last_dof_info", "")
+        if dof_text:
+            message += f"  |  {dof_text}"
         self.statusBar().showMessage(message)
