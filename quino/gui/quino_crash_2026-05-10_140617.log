@@ -1,6 +1,0 @@
-Quino fault log — 2026-05-10T14:06:17.146007
-========================================================================
-
---- Last Qt messages (up to 200) will appear below on fault ---
-
-[Qt/WARNING] QFont::setPointSize: Point size <= 0 (-1), must be greater than 0

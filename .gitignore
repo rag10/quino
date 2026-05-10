@@ -41,3 +41,4 @@ htmlcov/
 # Project-specific
 .claude/
 recursos_desarrollo/
+logs/

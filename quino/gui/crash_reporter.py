@@ -7,8 +7,9 @@ from collections import deque
 from datetime import datetime
 from pathlib import Path
 
-# Directory next to this file (quino/gui/)
-_LOG_DIR = Path(__file__).parent
+# logs/ folder at the project/executable root
+_LOG_DIR = Path(__file__).parent.parent.parent / "logs"
+_LOG_DIR.mkdir(exist_ok=True)
 
 _MAX_QT_MESSAGES = 200
 _qt_message_buffer: deque[str] = deque(maxlen=_MAX_QT_MESSAGES)
