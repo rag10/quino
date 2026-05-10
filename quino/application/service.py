@@ -226,6 +226,7 @@ class ApplicationService:
         center_point_id: str,
         radius: str,
         name: str | None = None,
+        edge_point_id: str | None = None,
     ) -> str:
         project = self._require_project()
         self._ensure_sketch_point_exists(center_point_id)
@@ -243,6 +244,10 @@ class ApplicationService:
         sketch = self._require_sketch(create_if_missing=True)
         self._snapshot()
         sketch.entities.append(entity)
+        if edge_point_id is not None:
+            edge_pt = self._find_sketch_point(edge_point_id)
+            if edge_pt is not None:
+                edge_pt.visible = False
         return entity.id
 
     def create_sketch_arc(

@@ -1053,6 +1053,20 @@ def test_distance_on_circle_rejected_without_entity_ref() -> None:
         app.create_sketch_constraint("distance", [center_id])
 
 
+def test_circle_edge_point_is_hidden_after_creation() -> None:
+    """After creating a circle from center + edge points, the edge point should be hidden."""
+    app = make_app()
+    app.create_sketch()
+    center_id = app.create_sketch_point("0 mm", "0 mm")
+    edge_id = app.create_sketch_point("50 mm", "0 mm")
+    import math
+    circle_id = app.create_sketch_circle(center_id, "50 mm", edge_point_id=edge_id)
+    edge_pt = app._find_sketch_point(edge_id)
+    center_pt = app._find_sketch_point(center_id)
+    assert center_pt.visible is True, "Circle center must be visible"
+    assert edge_pt.visible is False, "Circle edge/radius point must be hidden"
+
+
 def test_arc_endpoint_points_are_visible_midpoint_hidden() -> None:
     """Arc endpoints (A=start, C=end) must be visible; midpoint B on arc is hidden."""
     app = make_app()

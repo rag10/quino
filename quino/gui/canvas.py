@@ -2574,7 +2574,9 @@ class MechanismCanvas(QtWidgets.QWidget):
             x2 = self.app_service.expression_service.evaluate_property(p2.x, self.app_service.project.parameters).value
             y2 = self.app_service.expression_service.evaluate_property(p2.y, self.app_service.project.parameters).value
             radius = math.hypot(x2 - x1, y2 - y1)
-            created_id = self.app_service.create_sketch_circle(point_ids[0], self._mm_expression(radius))
+            created_id = self.app_service.create_sketch_circle(
+                point_ids[0], self._mm_expression(radius), edge_point_id=point_ids[1]
+            )
             message = "Created sketch circle"
         elif self._mode == CanvasMode.CREATE_SKETCH_ARC:
             created_id = self.app_service.create_sketch_arc(point_ids[0], point_ids[1], point_ids[2])
