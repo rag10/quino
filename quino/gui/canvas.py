@@ -155,6 +155,14 @@ _CONSTRAINT_LABEL: dict[str, str] = {
 }
 _CONSTRAINT_LABEL.setdefault(CanvasMode.CREATE_SKETCH_CONCENTRIC, "Concentric")
 
+# Modes where a single segment click should contribute both endpoints at once.
+# The user sees "click 2 segments" instead of "click 4 points".
+_SEGMENT_PAIR_MODES: frozenset[str] = frozenset({
+    CanvasMode.CREATE_SKETCH_PARALLEL,
+    CanvasMode.CREATE_SKETCH_PERPENDICULAR,
+    CanvasMode.CREATE_SKETCH_EQUAL_LENGTH,
+})
+
 _SKETCH_CONSTRAINT_TYPE_STR: dict[str, str] = {
     CanvasMode.CREATE_SKETCH_HORIZONTAL:    "horizontal",
     CanvasMode.CREATE_SKETCH_VERTICAL:      "vertical",
@@ -2950,19 +2958,27 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._finalize_sketch_constraint_creation()
                 return
 
-        # Point-only constraints: line click → nearest endpoint only (1 slot)
+        # Point-only constraints
         else:
             if (clicked_sketch_entity is not None
                     and clicked_sketch_entity.entity_type in (SketchEntityType.LINE_SEGMENT, SketchEntityType.INFINITE_LINE)
                     and pts_left > 0):
-                nearest_id = self._nearest_endpoint_of_entity(
-                    clicked_sketch_entity, self._last_mouse_screen
-                )
-                if nearest_id is not None:
-                    cpt = self._canvas_sketch_point_by_id(nearest_id)
-                    if cpt:
-                        self._creation_points.append((cpt.x, cpt.y))
-                        self._sensor_marker_ids.append(nearest_id)
+                if self._mode in _SEGMENT_PAIR_MODES and pts_left >= 2:
+                    # PARALLEL / PERPENDICULAR / EQUAL_LENGTH: one segment click = both endpoints
+                    for pid in clicked_sketch_entity.point_ids[:2]:
+                        cpt = self._canvas_sketch_point_by_id(pid)
+                        if cpt:
+                            self._creation_points.append((cpt.x, cpt.y))
+                            self._sensor_marker_ids.append(pid)
+                else:
+                    nearest_id = self._nearest_endpoint_of_entity(
+                        clicked_sketch_entity, self._last_mouse_screen
+                    )
+                    if nearest_id is not None:
+                        cpt = self._canvas_sketch_point_by_id(nearest_id)
+                        if cpt:
+                            self._creation_points.append((cpt.x, cpt.y))
+                            self._sensor_marker_ids.append(nearest_id)
             elif clicked_sketch_point is not None and pts_left > 0:
                 self._creation_points.append((clicked_sketch_point.x, clicked_sketch_point.y))
                 self._sensor_marker_ids.append(clicked_sketch_point.entity_id)
@@ -2973,6 +2989,12 @@ class MechanismCanvas(QtWidgets.QWidget):
             self.modelChanged.emit(
                 f"{_CONSTRAINT_LABEL.get(self._mode, 'Constraint')}: "
                 f"{collected_pts}/{n_pts} points, {collected_ents}/{n_ent} curves"
+            )
+        elif self._mode in _SEGMENT_PAIR_MODES:
+            segments_done = len(self._sensor_marker_ids) // 2
+            self.modelChanged.emit(
+                f"{_CONSTRAINT_LABEL.get(self._mode, 'Constraint')}: "
+                f"{segments_done}/2 segments"
             )
         else:
             self.modelChanged.emit(
