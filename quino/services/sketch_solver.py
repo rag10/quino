@@ -47,7 +47,7 @@ class SketchSolver:
         project: Project,
         *,
         locked_point_ids: set[str] | None = None,
-        max_iterations: int = 120,
+        max_iterations: int = 200,
         tolerance: float = 1e-6,
     ) -> SketchSolveResult:
         sketch = project.sketch

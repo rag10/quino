@@ -1053,6 +1053,34 @@ def test_distance_on_circle_rejected_without_entity_ref() -> None:
         app.create_sketch_constraint("distance", [center_id])
 
 
+def test_dof_horizontal_reduces_system_dof() -> None:
+    """HORIZONTAL(p1,p2) should reduce total system DOF by 1."""
+    from quino.services.sketch_dof import SketchDofAnalyzer
+    app = make_app()
+    p1 = app.create_sketch_point("0 mm", "0 mm")
+    p2 = app.create_sketch_point("100 mm", "10 mm")
+    app.create_sketch_line_segment(p1, p2)
+    app.create_sketch_constraint("horizontal", [p1, p2])
+    result = SketchDofAnalyzer().analyze(app.project.sketch)
+    # 2 points × 2 DOF = 4 DOF total; HORIZONTAL removes 1 → 3 free DOF
+    assert result.total_free_dof == 3
+
+
+def test_dof_fix_plus_horizontal_plus_distance_fully_constrains_line() -> None:
+    """FIX(p1) + HORIZONTAL + DISTANCE fully constrains a line (0 free DOF)."""
+    from quino.services.sketch_dof import SketchDofAnalyzer
+    app = make_app()
+    p1 = app.create_sketch_point("0 mm", "0 mm")
+    p2 = app.create_sketch_point("100 mm", "0 mm")
+    app.create_sketch_line_segment(p1, p2)
+    app.create_sketch_constraint("fix", [p1])
+    app.create_sketch_constraint("horizontal", [p1, p2])
+    app.create_sketch_constraint("distance", [p1, p2], value="100 mm")
+    result = SketchDofAnalyzer().analyze(app.project.sketch)
+    assert result.total_free_dof == 0
+    assert p2 in result.fully_constrained_point_ids
+
+
 def test_circle_edge_point_is_hidden_after_creation() -> None:
     """After creating a circle from center + edge points, the edge point should be hidden."""
     app = make_app()
