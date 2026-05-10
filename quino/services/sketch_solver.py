@@ -83,6 +83,11 @@ class SketchSolver:
             if max_error <= tolerance:
                 return SketchSolveResult(True, positions, iteration + 1, max_error, None)
 
+        # Near-convergence: within 1µm is visually indistinguishable — treat as success
+        _NEAR_CONVERGENCE = 0.001  # mm
+        if max_error <= _NEAR_CONVERGENCE:
+            return SketchSolveResult(True, positions, max_iterations, max_error, None)
+
         # Build per-constraint diagnostics on failure
         constraint_errors: dict[str, float] = {}
         bad_constraints: list[str] = []

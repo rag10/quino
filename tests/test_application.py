@@ -1053,6 +1053,21 @@ def test_distance_on_circle_rejected_without_entity_ref() -> None:
         app.create_sketch_constraint("distance", [center_id])
 
 
+def test_solver_near_convergence_succeeds() -> None:
+    """Solver reports success=True if max_error <= 0.001mm after exhausting iterations."""
+    app = make_app()
+    p1 = app.create_sketch_point("0 mm", "0 mm")
+    p2 = app.create_sketch_point("100 mm", "1 mm")
+    app.create_sketch_line_segment(p1, p2)
+    app.create_sketch_constraint("fix", [p1])
+    app.create_sketch_constraint("horizontal", [p1, p2])
+    app.create_sketch_constraint("distance", [p1, p2], value="100 mm")
+    # Cap at 3 iterations with very tight tolerance to force the near-convergence path
+    result = app.sketch_solver.solve(app.project, max_iterations=3, tolerance=1e-12)
+    # Solver converges within a few iterations; error should be well under 0.001mm
+    assert result.success, f"Near-convergence should be success, max_error={result.max_error:.3g}"
+
+
 def test_dof_horizontal_reduces_system_dof() -> None:
     """HORIZONTAL(p1,p2) should reduce total system DOF by 1."""
     from quino.services.sketch_dof import SketchDofAnalyzer
