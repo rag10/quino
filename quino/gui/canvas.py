@@ -2671,6 +2671,20 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._creation_points.append((clicked_sketch_point.x, clicked_sketch_point.y))
                 self._sensor_marker_ids.append(clicked_sketch_point.entity_id)
 
+        # DISTANCE on circle: clicking a circle = radius constraint (1 pt + 1 entity)
+        elif (self._mode == CanvasMode.CREATE_SKETCH_DISTANCE
+              and clicked_sketch_entity is not None
+              and clicked_sketch_entity.entity_type is SketchEntityType.CIRCLE
+              and not self._sensor_marker_ids):
+            center_id = clicked_sketch_entity.point_ids[0]
+            cpt = self._canvas_sketch_point_by_id(center_id)
+            if cpt:
+                self._creation_points.append((cpt.x, cpt.y))
+                self._sensor_marker_ids.append(center_id)
+                self._creation_entity_ids.append(clicked_sketch_entity.entity_id)
+                self._finalize_sketch_constraint_creation()
+                return
+
         # Point-only constraints: line click → nearest endpoint only (1 slot)
         else:
             if (clicked_sketch_entity is not None
@@ -2705,7 +2719,15 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def _finalize_sketch_constraint_creation(self) -> None:
         n_pts = _CONSTRAINT_SPEC.get(self._mode, (2, 0))[0]
-        point_ids = list(self._sensor_marker_ids[:n_pts])
+        # Radius form: DISTANCE with 1 point + 1 entity ref
+        actual_n_pts = (
+            1
+            if (self._mode == CanvasMode.CREATE_SKETCH_DISTANCE
+                and len(self._creation_entity_ids) == 1
+                and len(self._sensor_marker_ids) == 1)
+            else n_pts
+        )
+        point_ids = list(self._sensor_marker_ids[:actual_n_pts])
         entity_refs = list(self._creation_entity_ids)
         self._sensor_marker_ids = []
         self._creation_entity_ids = []

@@ -126,6 +126,12 @@ class SketchSolver:
         t = constraint.type
         if t is SketchConstraintType.FIX or not refs:
             return 0.0
+        # DISTANCE radius form: 1 point + 1 entity ref — bypass spec.points check
+        if t is SketchConstraintType.DISTANCE and len(constraint.entity_references) == 1:
+            handler = self._handlers.get(t)
+            if handler is None:
+                return float("inf")
+            return handler(project, sketch, constraint, refs, positions, locked_axes, tolerance)
         spec = CONSTRAINT_SPECS.get(t)
         if spec is None:
             return float("inf")
@@ -153,6 +159,10 @@ class SketchSolver:
         if constraint.value is None:
             return 0.0
         target = self.expression_service.evaluate_property(constraint.value, project.parameters).value
+        if constraint.entity_references:
+            return self._apply_radius(
+                refs[0], constraint.entity_references[0], target, sketch, tolerance
+            )
         return self._apply_distance(refs[0], refs[1], target, positions, locked_axes, tolerance)
 
     def _apply_angle_handler(self, project, sketch, constraint, refs, positions, locked_axes, tolerance):
@@ -259,6 +269,31 @@ class SketchSolver:
             positions[point_a_id] = (ax + c * ux, ay + c * uy)
             positions[point_b_id] = (bx - c * ux, by - c * uy)
         return abs(error)
+
+    def _apply_radius(
+        self,
+        center_id: str,
+        circle_entity_id: str,
+        target: float,
+        sketch: Sketch,
+        tolerance: float,
+    ) -> float:
+        """Enforce circle radius by directly updating its ScalarProperty expression."""
+        circle = next(
+            (e for e in sketch.entities if isinstance(e, SketchCircle) and e.id == circle_entity_id),
+            None,
+        )
+        if circle is None:
+            return 0.0
+        try:
+            current = float(circle.radius.expression.split()[0])
+        except (ValueError, TypeError, IndexError):
+            current = target
+        error = abs(current - target)
+        if error <= tolerance:
+            return error
+        circle.radius.expression = f"{target:.6g} mm"
+        return error
 
     # ------------------------------------------------------------------
     # New constraint solvers

@@ -335,7 +335,20 @@ class ApplicationService:
         self._validate_sketch_constraint_references(constraint_enum, normalized_refs, normalized_entity_refs)
         scalar_value = None
         if constraint_enum is SketchConstraintType.DISTANCE:
-            default_value = value or self._current_sketch_distance_expression(normalized_refs[0], normalized_refs[1])
+            is_radius_form = (len(normalized_refs) == 1 and len(normalized_entity_refs) == 1)
+            if is_radius_form:
+                entity = self._find_sketch_entity(normalized_entity_refs[0])
+                if value is None:
+                    current_radius = self.expression_service.evaluate_property(
+                        entity.radius, project.parameters
+                    ).value
+                    default_value = f"{current_radius:.6g} mm"
+                else:
+                    default_value = value
+            else:
+                default_value = value or self._current_sketch_distance_expression(
+                    normalized_refs[0], normalized_refs[1]
+                )
             scalar_value = self._scalar(default_value, "mm", Dimension.LENGTH)
             distance_eval = self.expression_service.evaluate_property(scalar_value, project.parameters)
             if distance_eval.value <= 0:
@@ -1423,6 +1436,13 @@ class ApplicationService:
     ) -> None:
         for point_id in references:
             self._ensure_sketch_point_exists(point_id)
+        # Special case: DISTANCE with 1 point + 1 circle entity = radius constraint
+        if constraint_type is SketchConstraintType.DISTANCE:
+            if len(references) == 1 and len(entity_references or []) == 1:
+                entity = self._find_sketch_entity((entity_references or [])[0])
+                if not isinstance(entity, SketchCircle):
+                    raise ValueError("Distance radius constraint requires a circle entity reference")
+                return  # valid radius form — skip generic checks below
         spec = CONSTRAINT_SPECS.get(constraint_type)
         expected_pts = spec.points if spec is not None else 2
         if len(references) != expected_pts:

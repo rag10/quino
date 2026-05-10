@@ -1017,3 +1017,37 @@ def test_changing_distance_value_invalidates_solve_cache() -> None:
     pts = {e.id: e for e in app.project.sketch.entities if hasattr(e, "x")}
     x2 = app.expression_service.evaluate_property(pts[p2].x, app.project.parameters).value
     assert abs(x2 - 80.0) < 1e-4, f"After updating distance to 80mm, got x2={x2}"
+
+
+def test_distance_on_circle_constrains_radius() -> None:
+    """DISTANCE constraint on a circle with entity_ref enforces its radius."""
+    app = make_app()
+    app.create_sketch()
+    center_id = app.create_sketch_point("0 mm", "0 mm")
+    circle_id = app.create_sketch_circle(center_id, "50 mm")
+    constraint_id = app.create_sketch_constraint(
+        "distance",
+        [center_id],
+        value="30 mm",
+        entity_references=[circle_id],
+    )
+    assert constraint_id is not None
+    project = app.project
+    circle = app.get_entity(circle_id)
+    result = app.sketch_solver.solve(project)
+    assert result.success
+    # Radius should now be 30mm
+    radius_val = app.expression_service.evaluate_property(
+        circle.radius, project.parameters
+    ).value
+    assert abs(radius_val - 30.0) < 0.01
+
+
+def test_distance_on_circle_rejected_without_entity_ref() -> None:
+    """DISTANCE with 1 point and no entity_ref must raise."""
+    app = make_app()
+    app.create_sketch()
+    center_id = app.create_sketch_point("0 mm", "0 mm")
+    app.create_sketch_circle(center_id, "50 mm")
+    with pytest.raises(ValueError):
+        app.create_sketch_constraint("distance", [center_id])
