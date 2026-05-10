@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from quino import (
@@ -491,3 +493,190 @@ def test_validate_model_reports_unreachable_four_bar_loop() -> None:
     report = app.validate_model(duration=1.0, steps=20)
 
     assert any(message.code == "kinematic_loop_reach" for message in report.messages)
+
+
+def test_sketch_entities_support_crud_and_cascade_delete() -> None:
+    app = make_app()
+    app.new_project("SketchDemo")
+
+    sketch_id = app.create_sketch()
+    assert sketch_id.startswith("sketch_")
+
+    p1 = app.create_sketch_point("0 mm", "0 mm", "PointA")
+    p2 = app.create_sketch_point("100 mm", "0 mm", "PointB")
+    p3 = app.create_sketch_point("100 mm", "50 mm", "PointC")
+    line_id = app.create_sketch_line_segment(p1, p2, "Line1")
+    circle_id = app.create_sketch_circle(p1, "25 mm", "Circle1")
+    arc_id = app.create_sketch_arc(p1, p2, p3, "Arc1")
+    inf_id = app.create_sketch_infinite_line(p2, p3, "Axis1")
+
+    assert {entity.id for entity in app.project.sketch.entities} >= {p1, p2, p3, line_id, circle_id, arc_id, inf_id}
+
+    app.update_sketch_entity(p1, "x", PropertyValueInput("expression", "10 mm"))
+    app.update_sketch_entity(circle_id, "radius", PropertyValueInput("expression", "30 mm"))
+    app.update_sketch_entity(line_id, "construction", PropertyValueInput("boolean", True))
+
+    point = app._find_sketch_point(p1)
+    circle = app._find_sketch_entity(circle_id)
+    line = app._find_sketch_entity(line_id)
+    assert point.x.expression == "10 mm"
+    assert circle.radius.expression == "30 mm"
+    assert line.construction is True
+
+    app.delete_sketch_entity(p1)
+    remaining_ids = {entity.id for entity in app.project.sketch.entities}
+    assert p1 not in remaining_ids
+    assert line_id not in remaining_ids
+    assert circle_id not in remaining_ids
+    assert arc_id not in remaining_ids
+    assert inf_id in remaining_ids
+
+
+def test_sketch_undo_redo_and_validation() -> None:
+    app = make_app()
+    app.new_project("SketchUndo")
+    p1 = app.create_sketch_point("0 mm", "0 mm")
+    p2 = app.create_sketch_point("10 mm", "0 mm")
+    line_id = app.create_sketch_line_segment(p1, p2)
+
+    assert line_id in {entity.id for entity in app.project.sketch.entities}
+    assert app.undo() is True
+    assert line_id not in {entity.id for entity in app.project.sketch.entities}
+    assert app.redo() is True
+    assert line_id in {entity.id for entity in app.project.sketch.entities}
+
+    report = app.validate_model()
+    assert not any(message.code == "broken_sketch_reference" for message in report.messages)
+
+
+def test_sketch_constraints_propagate_geometry_and_can_update_distance() -> None:
+    app = make_app()
+    app.new_project("SketchConstraints")
+    p1 = app.create_sketch_point("0 mm", "0 mm", "A")
+    p2 = app.create_sketch_point("40 mm", "10 mm", "B")
+
+    horizontal_id = app.create_sketch_constraint("horizontal", [p1, p2], name="H1")
+    point_b = app._find_sketch_point(p2)
+    assert point_b.y.expression == "0 mm"
+
+    distance_id = app.create_sketch_constraint("distance", [p1, p2], value="50 mm", name="D1")
+    app.move_sketch_point(p1, "10 mm", "20 mm")
+
+    point_a = app._find_sketch_point(p1)
+    point_b = app._find_sketch_point(p2)
+    ax = float(point_a.x.expression.split()[0])
+    ay = float(point_a.y.expression.split()[0])
+    bx = float(point_b.x.expression.split()[0])
+    by = float(point_b.y.expression.split()[0])
+    assert abs(ay - by) < 1e-6
+    assert abs((((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5) - 50.0) < 1e-3
+
+    app.update_sketch_constraint(distance_id, "value", PropertyValueInput("expression", "60 mm"))
+    point_b = app._find_sketch_point(p2)
+    bx = float(point_b.x.expression.split()[0])
+    by = float(point_b.y.expression.split()[0])
+    assert abs(ay - by) < 1e-6
+    assert abs((((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5) - 60.0) < 1e-3
+    assert horizontal_id in {constraint.id for constraint in app.project.sketch.constraints}
+
+
+def test_sketch_validation_warns_on_unsolved_conflicting_constraints() -> None:
+    app = make_app()
+    app.new_project("SketchConflict")
+    p1 = app.create_sketch_point("0 mm", "0 mm", "A")
+    p2 = app.create_sketch_point("40 mm", "10 mm", "B")
+    app.create_sketch_constraint("fix", [p1], name="FixA")
+    app.create_sketch_constraint("fix", [p2], name="FixB")
+    app.create_sketch_constraint("horizontal", [p1, p2], name="H1")
+
+    report = app.validate_model()
+
+    assert any(message.code == "sketch_not_solved" for message in report.messages)
+
+
+def test_sketch_solver_handles_parallel_midpoint_angle_and_on_circle() -> None:
+    app = make_app()
+    app.new_project("SketchAdvanced")
+
+    a = app.create_sketch_point("0 mm", "0 mm", "A")
+    b = app.create_sketch_point("10 mm", "0 mm", "B")
+    c = app.create_sketch_point("0 mm", "5 mm", "C")
+    d = app.create_sketch_point("10 mm", "7 mm", "D")
+    midpoint = app.create_sketch_point("5 mm", "9 mm", "M")
+    center = app.create_sketch_point("30 mm", "0 mm", "O")
+    radius_pt = app.create_sketch_point("40 mm", "0 mm", "R")
+    on_circle_pt = app.create_sketch_point("35 mm", "0 mm", "P")
+    vertex = app.create_sketch_point("60 mm", "0 mm", "V")
+    arm_a = app.create_sketch_point("70 mm", "0 mm", "VA")
+    arm_b = app.create_sketch_point("70 mm", "10 mm", "VB")
+    circle_id = app.create_sketch_circle(center, "10 mm", "C1")
+
+    app.create_sketch_constraint("parallel", [a, b, c, d], name="Parallel1")
+    app.create_sketch_constraint("midpoint", [midpoint, a, b], name="Mid1")
+    app.create_sketch_constraint("on_circle", [on_circle_pt], name="OnCircle1", entity_references=[circle_id])
+    app.create_sketch_constraint("angle", [vertex, arm_a, arm_b], value="45 deg", name="Angle1")
+
+    point_a = app._find_sketch_point(a)
+    point_b = app._find_sketch_point(b)
+    point_c = app._find_sketch_point(c)
+    point_d = app._find_sketch_point(d)
+    ax = float(point_a.x.expression.split()[0])
+    ay = float(point_a.y.expression.split()[0])
+    bx = float(point_b.x.expression.split()[0])
+    by = float(point_b.y.expression.split()[0])
+    cx = float(point_c.x.expression.split()[0])
+    cy = float(point_c.y.expression.split()[0])
+    dx = float(point_d.x.expression.split()[0])
+    dy = float(point_d.y.expression.split()[0])
+    cross = (bx - ax) * (dy - cy) - (by - ay) * (dx - cx)
+    assert abs(cross) < 1e-3
+
+    mid = app._find_sketch_point(midpoint)
+    mx = float(mid.x.expression.split()[0])
+    my = float(mid.y.expression.split()[0])
+    assert abs(mx - 0.5 * (ax + bx)) < 1e-3
+    assert abs(my - 0.5 * (ay + by)) < 1e-3
+
+    p = app._find_sketch_point(on_circle_pt)
+    px = float(p.x.expression.split()[0])
+    py = float(p.y.expression.split()[0])
+    assert abs((((px - 30.0) ** 2 + (py - 0.0) ** 2) ** 0.5) - 10.0) < 1e-3
+
+    v = app._find_sketch_point(vertex)
+    va = app._find_sketch_point(arm_a)
+    vb = app._find_sketch_point(arm_b)
+    vx, vy = float(v.x.expression.split()[0]), float(v.y.expression.split()[0])
+    vax, vay = float(va.x.expression.split()[0]), float(va.y.expression.split()[0])
+    vbx, vby = float(vb.x.expression.split()[0]), float(vb.y.expression.split()[0])
+    d1x, d1y = vax - vx, vay - vy
+    d2x, d2y = vbx - vx, vby - vy
+    angle = abs(math.degrees(math.atan2(d1x * d2y - d1y * d2x, d1x * d2x + d1y * d2y)))
+    assert abs(angle - 45.0) < 1.0
+
+
+def test_sketch_solver_handles_tangent_constraint() -> None:
+    app = make_app()
+    app.new_project("SketchTangent")
+
+    line_a = app.create_sketch_point("-10 mm", "0 mm", "L1")
+    line_b = app.create_sketch_point("10 mm", "0 mm", "L2")
+    center = app.create_sketch_point("0 mm", "10 mm", "O")
+    app.create_sketch_point("5 mm", "10 mm", "Probe")
+    circle_id = app.create_sketch_circle(center, "5 mm", "C1")
+
+    app.create_sketch_constraint(
+        "tangent",
+        [line_a, line_b],
+        value="1",
+        name="Tan1",
+        entity_references=[circle_id],
+    )
+
+    point_a = app._find_sketch_point(line_a)
+    point_b = app._find_sketch_point(line_b)
+    ax = float(point_a.x.expression.split()[0])
+    ay = float(point_a.y.expression.split()[0])
+    bx = float(point_b.x.expression.split()[0])
+    by = float(point_b.y.expression.split()[0])
+    distance = abs((by - ay) * 0.0 - (bx - ax) * 10.0 + bx * ay - by * ax) / math.hypot(by - ay, bx - ax)
+    assert abs(distance - 5.0) < 1e-2

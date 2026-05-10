@@ -1,7 +1,20 @@
 from __future__ import annotations
 
-from quino.domain.model import Body, Joint, Model, Project, ValidationMessage, ValidationReport
-from quino.domain.types import MarkerType
+from quino.domain.model import (
+    Body,
+    Joint,
+    Model,
+    Project,
+    SketchConstraint,
+    SketchArc,
+    SketchCircle,
+    SketchInfiniteLine,
+    SketchLineSegment,
+    SketchPoint,
+    ValidationMessage,
+    ValidationReport,
+)
+from quino.domain.types import MarkerType, SketchConstraintType
 
 
 class ValidationService:
@@ -13,6 +26,7 @@ class ValidationService:
         self._validate_joint_references(project.model, report)
         self._validate_driver_references(project.model, report)
         self._validate_driver_duplicates(project.model, report)
+        self._validate_sketch(project, report)
         return report
 
     def _validate_unique_names(self, project: Project, report: ValidationReport) -> None:
@@ -119,6 +133,125 @@ class ValidationService:
 
         serialized = sorted([serialize(joint.endpoint_a), serialize(joint.endpoint_b)])
         return serialized[0], serialized[1]
+
+    def _validate_sketch(self, project: Project, report: ValidationReport) -> None:
+        sketch = project.sketch
+        if sketch is None:
+            return
+        seen_names: set[str] = set()
+        point_ids = {entity.id for entity in sketch.entities if isinstance(entity, SketchPoint)}
+        curve_ids = {entity.id for entity in sketch.entities if isinstance(entity, (SketchCircle, SketchArc))}
+        for entity in sketch.entities:
+            if entity.name in seen_names:
+                report.messages.append(
+                    ValidationMessage("warning", "duplicate_sketch_name", f"Duplicate sketch name: {entity.name}", entity.id)
+                )
+            seen_names.add(entity.name)
+            if isinstance(entity, SketchLineSegment | SketchInfiniteLine):
+                if entity.start_point_id == entity.end_point_id if isinstance(entity, SketchLineSegment) else entity.point_a_id == entity.point_b_id:
+                    report.messages.append(
+                        ValidationMessage("warning", "invalid_sketch_reference", f"{entity.name} requires two distinct points", entity.id)
+                    )
+            if isinstance(entity, SketchLineSegment):
+                self._validate_point_refs(entity.id, [entity.start_point_id, entity.end_point_id], point_ids, report)
+            elif isinstance(entity, SketchCircle):
+                self._validate_point_refs(entity.id, [entity.center_point_id], point_ids, report)
+            elif isinstance(entity, SketchArc):
+                refs = [entity.point_a_id, entity.point_b_id, entity.point_c_id]
+                self._validate_point_refs(entity.id, refs, point_ids, report)
+                if len(set(refs)) < 3:
+                    report.messages.append(
+                        ValidationMessage("warning", "invalid_sketch_reference", f"{entity.name} requires three distinct points", entity.id)
+                    )
+            elif isinstance(entity, SketchInfiniteLine):
+                self._validate_point_refs(entity.id, [entity.point_a_id, entity.point_b_id], point_ids, report)
+                if entity.point_a_id == entity.point_b_id:
+                    report.messages.append(
+                        ValidationMessage("warning", "invalid_sketch_reference", f"{entity.name} requires two distinct points", entity.id)
+                    )
+        constraint_names: set[str] = set()
+        for constraint in sketch.constraints:
+            if constraint.name in constraint_names:
+                report.messages.append(
+                    ValidationMessage("warning", "duplicate_sketch_constraint_name", f"Duplicate sketch constraint name: {constraint.name}", constraint.id)
+                )
+            constraint_names.add(constraint.name)
+            self._validate_sketch_constraint(constraint, point_ids, curve_ids, report)
+
+    def _validate_point_refs(
+        self,
+        entity_id: str,
+        point_refs: list[str],
+        point_ids: set[str],
+        report: ValidationReport,
+    ) -> None:
+        for point_id in point_refs:
+            if point_id not in point_ids:
+                report.messages.append(
+                    ValidationMessage("warning", "broken_sketch_reference", "Sketch entity references an unknown point", entity_id)
+                )
+
+    def _validate_sketch_constraint(
+        self,
+        constraint: SketchConstraint,
+        point_ids: set[str],
+        curve_ids: set[str],
+        report: ValidationReport,
+    ) -> None:
+        for point_id in constraint.references:
+            if point_id not in point_ids:
+                report.messages.append(
+                    ValidationMessage("warning", "broken_sketch_constraint_reference", "Sketch constraint references an unknown point", constraint.id)
+                )
+        if constraint.type is SketchConstraintType.FIX:
+            if len(constraint.references) != 1:
+                report.messages.append(
+                    ValidationMessage("warning", "invalid_sketch_constraint", f"{constraint.name} requires exactly one point", constraint.id)
+                )
+        else:
+            expected_points = {
+                SketchConstraintType.HORIZONTAL: 2,
+                SketchConstraintType.VERTICAL: 2,
+                SketchConstraintType.COINCIDENT: 2,
+                SketchConstraintType.DISTANCE: 2,
+                SketchConstraintType.PARALLEL: 4,
+                SketchConstraintType.PERPENDICULAR: 4,
+                SketchConstraintType.EQUAL_LENGTH: 4,
+                SketchConstraintType.ANGLE: 3,
+                SketchConstraintType.MIDPOINT: 3,
+                SketchConstraintType.COLLINEAR: 3,
+                SketchConstraintType.SYMMETRIC: 4,
+                SketchConstraintType.ON_CIRCLE: 1,
+                SketchConstraintType.TANGENT: 2,
+            }.get(constraint.type)
+            if expected_points is not None and (
+                len(constraint.references) != expected_points
+                or len(set(constraint.references)) != len(constraint.references)
+            ):
+                report.messages.append(
+                    ValidationMessage("warning", "invalid_sketch_constraint", f"{constraint.name} requires {expected_points} distinct point references", constraint.id)
+                )
+        if constraint.type is SketchConstraintType.DISTANCE and constraint.value is None:
+            report.messages.append(
+                ValidationMessage("warning", "invalid_sketch_constraint", f"{constraint.name} requires a distance value", constraint.id)
+            )
+        if constraint.type is SketchConstraintType.ANGLE and constraint.value is None:
+            report.messages.append(
+                ValidationMessage("warning", "invalid_sketch_constraint", f"{constraint.name} requires an angle value", constraint.id)
+            )
+        expected_entities = {
+            SketchConstraintType.ON_CIRCLE: 1,
+            SketchConstraintType.TANGENT: 1,
+        }.get(constraint.type, 0)
+        if len(constraint.entity_references) != expected_entities:
+            report.messages.append(
+                ValidationMessage("warning", "invalid_sketch_constraint", f"{constraint.name} requires {expected_entities} entity references", constraint.id)
+            )
+        for entity_id in constraint.entity_references:
+            if entity_id not in curve_ids:
+                report.messages.append(
+                    ValidationMessage("warning", "broken_sketch_constraint_reference", "Sketch constraint references an unknown curve entity", constraint.id)
+                )
 
     def ensure_unique_name(self, entities: list[object], name: str, entity_id: str | None = None) -> None:
         for entity in entities:

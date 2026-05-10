@@ -15,11 +15,28 @@ from quino.domain.model import (
     Project,
     ScalarProperty,
     Sensor,
+    Sketch,
+    SketchConstraint,
+    SketchArc,
+    SketchCircle,
+    SketchInfiniteLine,
+    SketchLineSegment,
+    SketchPoint,
     Slider,
     Style,
     ViewState,
 )
-from quino.domain.types import BodyType, Dimension, DriverType, JointEndpointKind, JointType, MarkerType, SensorType
+from quino.domain.types import (
+    BodyType,
+    Dimension,
+    DriverType,
+    JointEndpointKind,
+    JointType,
+    MarkerType,
+    SensorType,
+    SketchEntityType,
+    SketchConstraintType,
+)
 
 
 class JsonMapper:
@@ -32,6 +49,7 @@ class JsonMapper:
                 "metadata": project.metadata.values,
             },
             "parameters": [self._parameter_to_dict(parameter) for parameter in project.parameters],
+            "sketch": self._sketch_to_dict(project.sketch),
             "model": {
                 "bodies": [self._body_to_dict(body) for body in project.model.bodies],
                 "sliders": [self._slider_to_dict(slider) for slider in project.model.sliders],
@@ -58,6 +76,7 @@ class JsonMapper:
             name=project_block["name"],
             schema_version=data["schema_version"],
             parameters=[self._parameter_from_dict(item) for item in data.get("parameters", [])],
+            sketch=self._sketch_from_dict(data.get("sketch")),
             model=Model(
                 bodies=[self._body_from_dict(item) for item in model_block.get("bodies", [])],
                 sliders=[self._slider_from_dict(item) for item in model_block.get("sliders", [])],
@@ -280,4 +299,132 @@ class JsonMapper:
             type=SensorType(data["type"]),
             marker_ids=data.get("marker_ids", []),
             metadata=Metadata(data.get("metadata", {})),
+        )
+
+    def _sketch_to_dict(self, sketch: Sketch | None) -> dict | None:
+        if sketch is None:
+            return None
+        return {
+            "id": sketch.id,
+            "name": sketch.name,
+            "visible": sketch.visible,
+            "style": self._style_to_dict(sketch.style),
+            "entities": [self._sketch_entity_to_dict(entity) for entity in sketch.entities],
+            "constraints": [self._sketch_constraint_to_dict(constraint) for constraint in sketch.constraints],
+            "metadata": sketch.metadata.values,
+        }
+
+    def _sketch_from_dict(self, data: dict | None) -> Sketch | None:
+        if data is None:
+            return None
+        return Sketch(
+            id=data["id"],
+            name=data["name"],
+            visible=data.get("visible", True),
+            style=self._style_from_dict(data.get("style")),
+            entities=[self._sketch_entity_from_dict(item) for item in data.get("entities", [])],
+            constraints=[self._sketch_constraint_from_dict(item) for item in data.get("constraints", [])],
+            metadata=Metadata(data.get("metadata", {})),
+        )
+
+    def _sketch_constraint_to_dict(self, constraint: SketchConstraint) -> dict:
+        return {
+            "id": constraint.id,
+            "name": constraint.name,
+            "type": constraint.type.value,
+            "references": list(constraint.references),
+            "value": self._scalar_to_dict(constraint.value) if constraint.value is not None else None,
+            "driving": constraint.driving,
+            "entity_references": list(constraint.entity_references),
+            "metadata": constraint.metadata.values,
+        }
+
+    def _sketch_constraint_from_dict(self, data: dict) -> SketchConstraint:
+        return SketchConstraint(
+            id=data["id"],
+            name=data["name"],
+            type=SketchConstraintType(data["type"]),
+            references=list(data.get("references", [])),
+            value=self._scalar_from_dict(data["value"]) if data.get("value") is not None else None,
+            driving=data.get("driving", False),
+            entity_references=list(data.get("entity_references", [])),
+            metadata=Metadata(data.get("metadata", {})),
+        )
+
+    def _sketch_entity_to_dict(
+        self,
+        entity: SketchPoint | SketchLineSegment | SketchCircle | SketchArc | SketchInfiniteLine,
+    ) -> dict:
+        base = {
+            "id": entity.id,
+            "name": entity.name,
+            "type": entity.type.value,
+            "visible": entity.visible,
+            "construction": entity.construction,
+            "style": self._style_to_dict(entity.style),
+            "metadata": entity.metadata.values,
+        }
+        if isinstance(entity, SketchPoint):
+            base["x"] = self._scalar_to_dict(entity.x)
+            base["y"] = self._scalar_to_dict(entity.y)
+        elif isinstance(entity, SketchLineSegment):
+            base["start_point_id"] = entity.start_point_id
+            base["end_point_id"] = entity.end_point_id
+        elif isinstance(entity, SketchCircle):
+            base["center_point_id"] = entity.center_point_id
+            base["radius"] = self._scalar_to_dict(entity.radius)
+        elif isinstance(entity, SketchArc):
+            base["point_a_id"] = entity.point_a_id
+            base["point_b_id"] = entity.point_b_id
+            base["point_c_id"] = entity.point_c_id
+            base["arc_center_mode"] = entity.arc_center_mode
+        elif isinstance(entity, SketchInfiniteLine):
+            base["point_a_id"] = entity.point_a_id
+            base["point_b_id"] = entity.point_b_id
+        return base
+
+    def _sketch_entity_from_dict(
+        self,
+        data: dict,
+    ) -> SketchPoint | SketchLineSegment | SketchCircle | SketchArc | SketchInfiniteLine:
+        entity_type = SketchEntityType(data["type"])
+        common = {
+            "id": data["id"],
+            "name": data["name"],
+            "type": entity_type,
+            "visible": data.get("visible", True),
+            "construction": data.get("construction", False),
+            "style": self._style_from_dict(data.get("style")),
+            "metadata": Metadata(data.get("metadata", {})),
+        }
+        if entity_type is SketchEntityType.POINT:
+            return SketchPoint(
+                x=self._scalar_from_dict(data["x"]),
+                y=self._scalar_from_dict(data["y"]),
+                **common,
+            )
+        if entity_type is SketchEntityType.LINE_SEGMENT:
+            return SketchLineSegment(
+                start_point_id=data["start_point_id"],
+                end_point_id=data["end_point_id"],
+                **common,
+            )
+        if entity_type is SketchEntityType.CIRCLE:
+            return SketchCircle(
+                center_point_id=data["center_point_id"],
+                radius=self._scalar_from_dict(data["radius"]),
+                **common,
+            )
+        if entity_type is SketchEntityType.ARC:
+            return SketchArc(
+                point_a_id=data["point_a_id"],
+                point_b_id=data["point_b_id"],
+                point_c_id=data["point_c_id"],
+                arc_center_mode=data.get("arc_center_mode", False),
+                **common,
+            )
+        return SketchInfiniteLine(
+            point_a_id=data["point_a_id"],
+            point_b_id=data["point_b_id"],
+            **common,
         )

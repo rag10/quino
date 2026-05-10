@@ -11,6 +11,14 @@ def _expr_value(expression: str) -> float:
     return float(expression.split()[0])
 
 
+def _inspector_row_by_property(window: MainWindow, property_name: str) -> int:
+    for row in range(window.inspector.rowCount()):
+        item = window.inspector.item(row, 0)
+        if item is not None and item.text() == property_name:
+            return row
+    raise AssertionError(f"Property row not found: {property_name}")
+
+
 def test_main_window_loads_examples_and_runs_validation() -> None:
     qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = MainWindow(ApplicationService())
@@ -19,7 +27,7 @@ def test_main_window_loads_examples_and_runs_validation() -> None:
 
     assert window.app_service.project is not None
     assert window.app_service.project.name == "Four Bar"
-    assert window.tree.topLevelItemCount() == 4
+    assert window.tree.topLevelItemCount() == 6
     assert "Bodies: 3" in window.canvas_summary.toPlainText()
     assert window.canvas is not None
     assert not window.canvas.grab().isNull()
@@ -560,6 +568,145 @@ def test_canvas_helpers_can_rename_joint_toggle_type_and_edit_driver(monkeypatch
     )
     window.canvas._edit_driver_law_dialog(driver_id)
     assert window.app_service._find_entity(driver_id).law.expression == "45 deg * t / 1 s"
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_canvas_can_create_basic_sketch_entities_and_toggle_visibility() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    window.action_sketch_point_tool.trigger()
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=window.canvas.screen_position_for_world(0.0, 0.0))
+    qt_app.processEvents()
+    point_id = window.app_service.project.sketch.entities[0].id
+
+    window.action_sketch_line_tool.trigger()
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=window.canvas.screen_position_for_entity(point_id))
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=window.canvas.screen_position_for_world(60.0, 0.0))
+    qt_app.processEvents()
+
+    window.action_sketch_circle_tool.trigger()
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=window.canvas.screen_position_for_entity(point_id))
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=window.canvas.screen_position_for_world(20.0, 0.0))
+    qt_app.processEvents()
+
+    assert window.app_service.project.sketch is not None
+    assert len(window.app_service.project.sketch.entities) >= 4
+
+    window.action_toggle_sketch_visible.setChecked(False)
+    qt_app.processEvents()
+    assert window.app_service.project.sketch.visible is False
+    window.action_toggle_sketch_visible.setChecked(True)
+    qt_app.processEvents()
+    assert window.app_service.project.sketch.visible is True
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_sketch_point_can_be_edited_from_inspector_and_canvas_drag_snaps_marker() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    sketch_point_id = window.app_service.create_sketch_point("30 mm", "30 mm", "SnapPoint")
+    body_id = window.app_service.create_body("Mass1", [MarkerInput("0 mm", "0 mm", "P1")])
+    marker_id = next(marker.id for marker in window.app_service._find_body(body_id).structural_markers())
+    window.refresh_all()
+
+    window._select_entity_by_id(sketch_point_id)
+    qt_app.processEvents()
+    x_item = window.inspector.item(3, 1)
+    x_item.setText("40 mm")
+    qt_app.processEvents()
+    assert window.app_service._find_sketch_point(sketch_point_id).x.expression == "40 mm"
+
+    window.action_select_tool.trigger()
+    start = window.canvas.screen_position_for_entity(marker_id)
+    end = window.canvas.screen_position_for_world(39.5, 30.4)
+    assert start is not None
+    QtTest.QTest.mousePress(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=start)
+    QtTest.QTest.mouseMove(window.canvas, end)
+    QtTest.QTest.mouseRelease(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=end)
+    qt_app.processEvents()
+
+    marker = window.app_service._find_entity(marker_id)
+    assert abs(_expr_value(marker.x.expression) - 40.0) < 0.5
+    assert abs(_expr_value(marker.y.expression) - 30.0) < 0.5
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_sketch_status_hint_and_reference_fields_are_readonly() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    p1 = window.app_service.create_sketch_point("0 mm", "0 mm", "P1")
+    p2 = window.app_service.create_sketch_point("50 mm", "0 mm", "P2")
+    line_id = window.app_service.create_sketch_line_segment(p1, p2, "L1")
+    window.refresh_all()
+
+    window.action_sketch_circle_tool.trigger()
+    qt_app.processEvents()
+    assert "Center + radius point" in window.statusBar().currentMessage()
+
+    window._select_entity_by_id(line_id)
+    qt_app.processEvents()
+    start_row = _inspector_row_by_property(window, "start_point_id")
+    end_row = _inspector_row_by_property(window, "end_point_id")
+    start_item = window.inspector.item(start_row, 1)
+    end_item = window.inspector.item(end_row, 1)
+    start_eval = window.inspector.item(start_row, 2)
+    end_eval = window.inspector.item(end_row, 2)
+    assert start_item is not None and end_item is not None
+    assert start_eval is not None and end_eval is not None
+    assert "P1 (" in start_eval.text()
+    assert "P2 (" in end_eval.text()
+    assert not bool(start_item.flags() & QtCore.Qt.ItemFlag.ItemIsEditable)
+    assert not bool(end_item.flags() & QtCore.Qt.ItemFlag.ItemIsEditable)
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_canvas_can_create_sketch_constraints_and_solve_on_drag() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    p1 = window.app_service.create_sketch_point("0 mm", "0 mm", "A")
+    p2 = window.app_service.create_sketch_point("40 mm", "15 mm", "B")
+    window.refresh_all()
+
+    window.action_sketch_horizontal_tool.trigger()
+    assert window.canvas.mode() == "create_sketch_horizontal"
+    window.canvas.inject_entity_selection(p1)
+    window.canvas.inject_entity_selection(p2)
+    qt_app.processEvents()
+
+    assert any(constraint.type.value == "horizontal" for constraint in window.app_service.project.sketch.constraints)
+
+    window.action_select_tool.trigger()
+    start = window.canvas.screen_position_for_entity(p1)
+    end = window.canvas.screen_position_for_world(10.0, 25.0)
+    assert start is not None
+    QtTest.QTest.mousePress(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=start)
+    QtTest.QTest.mouseMove(window.canvas, end)
+    QtTest.QTest.mouseRelease(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=end)
+    qt_app.processEvents()
+
+    point_a = window.app_service._find_sketch_point(p1)
+    point_b = window.app_service._find_sketch_point(p2)
+    assert point_a.y.expression == point_b.y.expression
 
     window.close()
     qt_app.processEvents()

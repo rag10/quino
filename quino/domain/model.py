@@ -3,7 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from quino.domain.types import BodyType, Dimension, DriverType, JointEndpointKind, JointType, MarkerType, SensorType
+from quino.domain.types import (
+    BodyType,
+    Dimension,
+    DriverType,
+    JointEndpointKind,
+    JointType,
+    MarkerType,
+    SensorType,
+    SketchConstraintType,
+    SketchEntityType,
+)
 
 
 @dataclass(slots=True)
@@ -134,6 +144,102 @@ class SensorOutput:
 
 
 @dataclass(slots=True)
+class SketchPoint:
+    id: str
+    name: str
+    type: SketchEntityType
+    x: ScalarProperty
+    y: ScalarProperty
+    visible: bool = True
+    construction: bool = False
+    style: Style = field(default_factory=Style)
+    metadata: Metadata = field(default_factory=Metadata)
+
+
+@dataclass(slots=True)
+class SketchLineSegment:
+    id: str
+    name: str
+    type: SketchEntityType
+    start_point_id: str
+    end_point_id: str
+    visible: bool = True
+    construction: bool = False
+    style: Style = field(default_factory=Style)
+    metadata: Metadata = field(default_factory=Metadata)
+
+
+@dataclass(slots=True)
+class SketchCircle:
+    id: str
+    name: str
+    type: SketchEntityType
+    center_point_id: str
+    radius: ScalarProperty
+    visible: bool = True
+    construction: bool = False
+    style: Style = field(default_factory=Style)
+    metadata: Metadata = field(default_factory=Metadata)
+
+
+@dataclass(slots=True)
+class SketchArc:
+    id: str
+    name: str
+    type: SketchEntityType
+    point_a_id: str
+    point_b_id: str
+    point_c_id: str
+    visible: bool = True
+    construction: bool = False
+    arc_center_mode: bool = False
+    style: Style = field(default_factory=Style)
+    metadata: Metadata = field(default_factory=Metadata)
+
+
+@dataclass(slots=True)
+class SketchInfiniteLine:
+    id: str
+    name: str
+    type: SketchEntityType
+    point_a_id: str
+    point_b_id: str
+    visible: bool = True
+    construction: bool = False
+    style: Style = field(default_factory=Style)
+    metadata: Metadata = field(default_factory=Metadata)
+
+
+@dataclass(slots=True)
+class SketchConstraint:
+    id: str
+    name: str
+    type: SketchConstraintType
+    references: list[str]
+    value: ScalarProperty | None = None
+    driving: bool = False
+    entity_references: list[str] = field(default_factory=list)
+    metadata: Metadata = field(default_factory=Metadata)
+
+
+@dataclass(slots=True)
+class Sketch:
+    id: str
+    name: str
+    visible: bool = True
+    style: Style = field(default_factory=Style)
+    entities: list[
+        SketchPoint | SketchLineSegment | SketchCircle | SketchArc | SketchInfiniteLine
+    ] = field(default_factory=list)
+    constraints: list[SketchConstraint] = field(default_factory=list)
+    metadata: Metadata = field(default_factory=Metadata)
+    solve_error: str | None = None
+
+    def points(self) -> list[SketchPoint]:
+        return [entity for entity in self.entities if isinstance(entity, SketchPoint)]
+
+
+@dataclass(slots=True)
 class Model:
     bodies: list[Body] = field(default_factory=list)
     sliders: list[Slider] = field(default_factory=list)
@@ -160,6 +266,7 @@ class Project:
     schema_version: str
     model: Model = field(default_factory=Model)
     parameters: list[Parameter] = field(default_factory=list)
+    sketch: Sketch | None = None
     view_state: ViewState = field(default_factory=ViewState)
     metadata: Metadata = field(default_factory=Metadata)
     sensor_outputs: dict[str, SensorOutput] = field(default_factory=dict)

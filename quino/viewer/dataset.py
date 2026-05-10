@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 from quino.domain.model import Project, SensorOutput
 
@@ -58,3 +60,53 @@ class SensorDataset:
     def has_data(self) -> bool:
         """Check if any sensor outputs are available."""
         return len(self._matrices) > 0
+
+
+def load_from_csv(path: Path) -> tuple[np.ndarray, list[str], str]:
+    """Load a CSV or TSV file and return (data_matrix, headers, name).
+
+    First row is assumed to be column headers. If parsing fails or headers
+    look numeric, integer column indices are used instead. The returned name
+    is the file stem.
+    """
+    path = Path(path)
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    lines = [ln for ln in raw.splitlines() if ln.strip()]
+    if not lines:
+        raise ValueError(f"Empty file: {path}")
+
+    # Detect delimiter
+    first = lines[0]
+    delimiter = "\t" if first.count("\t") >= first.count(",") else ","
+
+    # Try to parse header row
+    candidate_headers = [h.strip() for h in first.split(delimiter)]
+    try:
+        [float(h) for h in candidate_headers]
+        # All values look numeric → no header row, use indices
+        headers: list[str] = [str(i) for i in range(len(candidate_headers))]
+        data_lines = lines
+    except ValueError:
+        headers = candidate_headers
+        data_lines = lines[1:]
+
+    if not data_lines:
+        raise ValueError(f"No data rows in file: {path}")
+
+    rows: list[list[float]] = []
+    for line in data_lines:
+        parts = [p.strip() for p in line.split(delimiter)]
+        try:
+            rows.append([float(p) for p in parts])
+        except ValueError:
+            continue  # Skip non-numeric rows (e.g. trailing comments)
+
+    if not rows:
+        raise ValueError(f"No numeric data found in file: {path}")
+
+    data = np.array(rows)
+    # Pad headers if column count grew
+    while len(headers) < data.shape[1]:
+        headers.append(str(len(headers)))
+
+    return data, headers[: data.shape[1]], path.stem

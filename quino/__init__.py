@@ -1,6 +1,17 @@
 from quino.application.service import ApplicationService
 from quino.application.examples import ExampleBuildResult, build_four_bar_example, build_slider_crank_example
-from quino.domain.inputs import JointEndpointInput, MarkerInput, PropertyValueInput, SliderInput
+from quino.domain.inputs import (
+    JointEndpointInput,
+    MarkerInput,
+    PropertyValueInput,
+    SketchConstraintInput,
+    SketchArcInput,
+    SketchCircleInput,
+    SketchInfiniteLineInput,
+    SketchLineSegmentInput,
+    SketchPointInput,
+    SliderInput,
+)
 from quino.domain.model import (
     Body,
     Driver,
@@ -12,6 +23,13 @@ from quino.domain.model import (
     Parameter,
     Project,
     ScalarProperty,
+    Sketch,
+    SketchConstraint,
+    SketchArc,
+    SketchCircle,
+    SketchInfiniteLine,
+    SketchLineSegment,
+    SketchPoint,
     SimulationResult,
     Slider,
     Style,
@@ -19,7 +37,16 @@ from quino.domain.model import (
     ValidationReport,
     ViewState,
 )
-from quino.domain.types import BodyType, Dimension, DriverType, JointEndpointKind, JointType, MarkerType
+from quino.domain.types import (
+    BodyType,
+    Dimension,
+    DriverType,
+    JointEndpointKind,
+    JointType,
+    MarkerType,
+    SketchConstraintType,
+    SketchEntityType,
+)
 
 __all__ = [
     "ApplicationService",
@@ -43,6 +70,21 @@ __all__ = [
     "Project",
     "PropertyValueInput",
     "ScalarProperty",
+    "Sketch",
+    "SketchConstraint",
+    "SketchConstraintInput",
+    "SketchConstraintType",
+    "SketchArc",
+    "SketchArcInput",
+    "SketchCircle",
+    "SketchCircleInput",
+    "SketchEntityType",
+    "SketchInfiniteLine",
+    "SketchInfiniteLineInput",
+    "SketchLineSegment",
+    "SketchLineSegmentInput",
+    "SketchPoint",
+    "SketchPointInput",
     "SimulationResult",
     "Slider",
     "SliderInput",

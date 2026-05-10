@@ -42,3 +42,48 @@ class SensorInput:
     name: str
     sensor_type: str
     marker_ids: list[str]
+
+
+@dataclass(slots=True)
+class SketchPointInput:
+    x: str
+    y: str
+    name: str | None = None
+
+
+@dataclass(slots=True)
+class SketchLineSegmentInput:
+    start_point_id: str
+    end_point_id: str
+    name: str | None = None
+
+
+@dataclass(slots=True)
+class SketchCircleInput:
+    center_point_id: str
+    radius: str
+    name: str | None = None
+
+
+@dataclass(slots=True)
+class SketchArcInput:
+    point_a_id: str
+    point_b_id: str
+    point_c_id: str
+    name: str | None = None
+
+
+@dataclass(slots=True)
+class SketchInfiniteLineInput:
+    point_a_id: str
+    point_b_id: str
+    name: str | None = None
+
+
+@dataclass(slots=True)
+class SketchConstraintInput:
+    constraint_type: str
+    references: list[str]
+    value: str | None = None
+    name: str | None = None
+    driving: bool = False

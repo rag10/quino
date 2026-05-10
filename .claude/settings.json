@@ -25,7 +25,11 @@
       "PowerShell(cd \"c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\"; python -W all test_plot_in_app.py 2>&1; echo \"exit: $LASTEXITCODE\")",
       "PowerShell(cd \"c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\"; python test_plot_in_app.py 2>&1; echo \"exit: $LASTEXITCODE\")",
       "PowerShell(cd \"c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\"; python test_plot_in_app.py 2>&1; echo \"EXIT: $LASTEXITCODE\")",
-      "Bash(xargs cat)"
+      "Bash(xargs cat)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\" -Recurse -File -Filter \"*.py\")",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "PowerShell(head -50)",
+      "PowerShell(\\(Get-Content \"C:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\quino\\\\gui\\\\canvas.py\" | Measure-Object -Line\\).Lines; \\(Get-Content \"C:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\quino\\\\application\\\\service.py\" | Measure-Object -Line\\).Lines)"
     ]
   }
 }

@@ -50,3 +50,28 @@ class SensorType(StrEnum):
     ANGLE_HORIZONTAL = "angle_horizontal"
     ANGLE_VERTICAL = "angle_vertical"
     ANGLE_VECTOR = "angle_vector"
+
+
+class SketchEntityType(StrEnum):
+    POINT = "point"
+    LINE_SEGMENT = "line_segment"
+    CIRCLE = "circle"
+    ARC = "arc"
+    INFINITE_LINE = "infinite_line"
+
+
+class SketchConstraintType(StrEnum):
+    FIX = "fix"
+    HORIZONTAL = "horizontal"
+    VERTICAL = "vertical"
+    DISTANCE = "distance"
+    COINCIDENT = "coincident"
+    PARALLEL = "parallel"
+    PERPENDICULAR = "perpendicular"
+    EQUAL_LENGTH = "equal_length"
+    ANGLE = "angle"
+    MIDPOINT = "midpoint"
+    COLLINEAR = "collinear"
+    SYMMETRIC = "symmetric"
+    ON_CIRCLE = "on_circle"
+    TANGENT = "tangent"

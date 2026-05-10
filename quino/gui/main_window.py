@@ -8,10 +8,26 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from quino.application.examples import build_four_bar_example, build_slider_crank_example
 from quino.application.service import ApplicationService
 from quino.domain.inputs import PropertyValueInput
-from quino.domain.model import Body, Driver, Joint, Marker, Parameter, Project, Sensor, SimulationResult, Slider
+from quino.domain.model import (
+    Body,
+    Driver,
+    Joint,
+    Marker,
+    Parameter,
+    Project,
+    Sensor,
+    SimulationResult,
+    Sketch,
+    SketchConstraint,
+    SketchArc,
+    SketchCircle,
+    SketchInfiniteLine,
+    SketchLineSegment,
+    SketchPoint,
+    Slider,
+)
 from quino.gui.canvas import CanvasMode, MechanismCanvas
-from quino.viewer.dataset import SensorDataset
-from quino.viewer.qt_widget import SensorPlotWidget
+from quino.viewer.plot_window import PlotWindow
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -24,10 +40,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._selected_entity_id: str | None = None
         self._suspend_property_updates = False
         self._suspend_parameter_updates = False
+        self._suspend_tree_injection = False
         self._last_simulation_result: SimulationResult | None = None
         self._last_simulation_state: dict[str, float] | None = None
         self._current_frame_index = 0
-        self._plot_windows: list[QtWidgets.QMainWindow] = []
+        self._plot_windows: list[PlotWindow] = []
         self._playback_timer = QtCore.QTimer(self)
         self._playback_timer.timeout.connect(self._advance_playback)
 
@@ -311,6 +328,34 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_slider_tool = self._tool_action("Slider", CanvasMode.CREATE_SLIDER, get_icon("slider", color_base), "Create a slider")
         self.action_ground_tool = self._tool_action("Ground Joint", CanvasMode.CONNECT_GROUND, get_icon("ground", color_base), "Connect a marker to ground")
         self.action_slider_connect_tool = self._tool_action("Marker To Slider", CanvasMode.CONNECT_SLIDER, get_icon("slider-connect", color_base), "Connect a marker to a slider")
+        self.action_sketch_point_tool = self._tool_action("Sketch Point", CanvasMode.CREATE_SKETCH_POINT, get_icon("sketch-point", color_base), "Create a sketch point")
+        self.action_sketch_line_tool = self._tool_action("Sketch Line", CanvasMode.CREATE_SKETCH_LINE_SEGMENT, get_icon("sketch-line", color_base), "Create a sketch line segment")
+        self.action_sketch_circle_tool = self._tool_action("Sketch Circle", CanvasMode.CREATE_SKETCH_CIRCLE, get_icon("sketch-circle", color_base), "Create a sketch circle")
+        self.action_sketch_arc_tool = self._tool_action("Sketch Arc", CanvasMode.CREATE_SKETCH_ARC, get_icon("sketch-arc", color_base), "Create a sketch arc")
+        self.action_sketch_infinite_line_tool = self._tool_action("Sketch Infinite", CanvasMode.CREATE_SKETCH_INFINITE_LINE, get_icon("sketch-infinite-line", color_base), "Create a sketch infinite line")
+        self.action_sketch_fix_tool = self._tool_action("Sketch Fix", CanvasMode.CREATE_SKETCH_FIX, get_icon("constraint-fix", color_base), "Fix a sketch point in place")
+        self.action_sketch_horizontal_tool = self._tool_action("Sketch Horizontal", CanvasMode.CREATE_SKETCH_HORIZONTAL, get_icon("constraint-horizontal", color_base), "Constrain two sketch points horizontally")
+        self.action_sketch_vertical_tool = self._tool_action("Sketch Vertical", CanvasMode.CREATE_SKETCH_VERTICAL, get_icon("constraint-vertical", color_base), "Constrain two sketch points vertically")
+        self.action_sketch_distance_tool = self._tool_action("Sketch Distance", CanvasMode.CREATE_SKETCH_DISTANCE, get_icon("constraint-distance", color_base), "Constrain the distance between two sketch points")
+        self.action_sketch_coincident_tool = self._tool_action("Sketch Coincident", CanvasMode.CREATE_SKETCH_COINCIDENT, get_icon("constraint-coincident", color_base), "Constrain two sketch points to coincide")
+        self.action_sketch_parallel_tool = self._tool_action("Sketch Parallel", CanvasMode.CREATE_SKETCH_PARALLEL, get_icon("parallel", color_base), "Constrain two line segments to be parallel (4 points)")
+        self.action_sketch_perpendicular_tool = self._tool_action("Sketch Perpendicular", CanvasMode.CREATE_SKETCH_PERPENDICULAR, get_icon("perpendicular", color_base), "Constrain two line segments to be perpendicular (4 points)")
+        self.action_sketch_equal_length_tool = self._tool_action("Sketch Equal Length", CanvasMode.CREATE_SKETCH_EQUAL_LENGTH, get_icon("equal-length", color_base), "Constrain two line segments to have equal length (4 points)")
+        self.action_sketch_angle_tool = self._tool_action("Sketch Angle", CanvasMode.CREATE_SKETCH_ANGLE, get_icon("angle-constraint", color_base), "Constrain the angle at a vertex (vertex + 2 arm points)")
+        self.action_sketch_midpoint_tool = self._tool_action("Sketch Midpoint", CanvasMode.CREATE_SKETCH_MIDPOINT, get_icon("midpoint", color_base), "Constrain a point to be the midpoint of a segment (midpoint + 2 ends)")
+        self.action_sketch_collinear_tool = self._tool_action("Collinear", CanvasMode.CREATE_SKETCH_COLLINEAR, get_icon("collinear", color_base), "Constrain 3 points to be collinear (click 3 points or 1 line + 1 point)")
+        self.action_sketch_symmetric_tool = self._tool_action("Symmetric", CanvasMode.CREATE_SKETCH_SYMMETRIC, get_icon("symmetric", color_base), "Constrain 2 points to be symmetric about an axis (2 pts + axis line)")
+        self.action_sketch_on_circle_tool = self._tool_action("On Circle", CanvasMode.CREATE_SKETCH_ON_CIRCLE, get_icon("on-circle", color_base), "Constrain a point to lie on a circle (1 point + 1 circle)")
+        self.action_sketch_tangent_tool = self._tool_action("Tangent", CanvasMode.CREATE_SKETCH_TANGENT, get_icon("tangent", color_base), "Constrain a line to be tangent to a circle (1 line + 1 circle)")
+        self.action_sketch_concentric_tool = self._tool_action("Concentric", CanvasMode.CREATE_SKETCH_CONCENTRIC, get_icon("concentric", color_base), "Constrain two circles to be concentric (click 2 circles)")
+        self.action_sketch_arc_center_tool = self._tool_action("Arc (center)", CanvasMode.CREATE_SKETCH_ARC_CENTER, get_icon("arc-center", color_base), "Create an arc: click center, start, end")
+        self.action_solve_sketch = QtGui.QAction(get_icon("sketch-solve", color_base), "Solve Sketch", self)
+        self.action_solve_sketch.triggered.connect(self.solve_sketch)
+        self.action_solve_sketch.setToolTip("Run the sketch constraint solver")
+        self.action_toggle_sketch_visible = QtGui.QAction(get_icon("sketch-visible", color_base), "Sketch Visible", self)
+        self.action_toggle_sketch_visible.setCheckable(True)
+        self.action_toggle_sketch_visible.toggled.connect(self._toggle_sketch_visible)
+        self.action_toggle_sketch_visible.setToolTip("Show/hide sketch")
 
         self.tool_group = QtGui.QActionGroup(self)
         self.tool_group.setExclusive(True)
@@ -324,6 +369,27 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_slider_tool,
             self.action_ground_tool,
             self.action_slider_connect_tool,
+            self.action_sketch_point_tool,
+            self.action_sketch_line_tool,
+            self.action_sketch_circle_tool,
+            self.action_sketch_arc_tool,
+            self.action_sketch_infinite_line_tool,
+            self.action_sketch_fix_tool,
+            self.action_sketch_horizontal_tool,
+            self.action_sketch_vertical_tool,
+            self.action_sketch_distance_tool,
+            self.action_sketch_coincident_tool,
+            self.action_sketch_parallel_tool,
+            self.action_sketch_perpendicular_tool,
+            self.action_sketch_equal_length_tool,
+            self.action_sketch_angle_tool,
+            self.action_sketch_midpoint_tool,
+            self.action_sketch_collinear_tool,
+            self.action_sketch_symmetric_tool,
+            self.action_sketch_on_circle_tool,
+            self.action_sketch_tangent_tool,
+            self.action_sketch_concentric_tool,
+            self.action_sketch_arc_center_tool,
             self.action_add_rotation_driver,
             self.action_add_translation_driver,
             self.action_point_sensor,
@@ -392,11 +458,11 @@ class MainWindow(QtWidgets.QMainWindow):
                         continue
                     btn = QtWidgets.QToolButton()
                     btn.setDefaultAction(action)
-                    btn.setIconSize(QtCore.QSize(28, 28))
+                    btn.setIconSize(QtCore.QSize(22, 22))
                     btn.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-                    btn.setFixedSize(52, 52)
+                    btn.setFixedSize(44, 44)
                     font = btn.font()
-                    font.setPointSize(7)
+                    font.setPointSize(6)
                     btn.setFont(font)
                     grid.addWidget(btn, row_idx, col_idx)
 
@@ -441,6 +507,24 @@ class MainWindow(QtWidgets.QMainWindow):
         _sep()
 
         _block([
+            [self.action_sketch_point_tool, self.action_sketch_line_tool, self.action_sketch_circle_tool, self.action_sketch_arc_tool, self.action_sketch_arc_center_tool],
+            [self.action_sketch_infinite_line_tool, self.action_toggle_sketch_visible, self.action_solve_sketch, None, None],
+        ], "Sketch Draw")
+        _sep()
+
+        _block([
+            [self.action_sketch_fix_tool, self.action_sketch_horizontal_tool, self.action_sketch_vertical_tool, self.action_sketch_coincident_tool, self.action_sketch_collinear_tool],
+            [self.action_sketch_distance_tool, self.action_sketch_angle_tool, self.action_sketch_midpoint_tool, self.action_sketch_symmetric_tool, self.action_sketch_on_circle_tool],
+        ], "Sketch Point Constr.")
+        _sep()
+
+        _block([
+            [self.action_sketch_parallel_tool, self.action_sketch_perpendicular_tool, self.action_sketch_equal_length_tool, self.action_sketch_tangent_tool],
+            [self.action_sketch_concentric_tool, None, None, None],
+        ], "Sketch Line/Curve")
+        _sep()
+
+        _block([
             [self.action_point_sensor, self.action_distance_sensor, self.action_angle_h_sensor],
             [self.action_angle_v_sensor, self.action_angle_vector_sensor, None],
         ], "Sensors")
@@ -466,8 +550,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._populate_tree(project)
         self._populate_parameters(project)
         self._populate_inspector()
+        self.action_toggle_sketch_visible.setChecked(project.sketch.visible if project.sketch is not None else False)
         self.canvas.set_selection(self._selected_entity_id)
         self._update_interaction_state()
+        self._update_status_message()
 
     def load_four_bar_example(self) -> None:
         result = build_four_bar_example(self.app_service)
@@ -566,50 +652,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_play_pause.setText("Play")
 
     def create_plot_window(self) -> None:
-        if self.app_service.project is None:
-            self._append_message("No project loaded")
-            return
-        dataset = SensorDataset(self.app_service.project)
-        if not dataset.has_data():
-            QtWidgets.QMessageBox.information(self, "No Data", "No sensor data available. Run a simulation first.")
-            return
-        sensor_names = dataset.get_matrix_names()
-        if not sensor_names:
-            QtWidgets.QMessageBox.information(self, "No Data", "No sensor data available.")
-            return
-        dialog = QtWidgets.QDialog(self, QtCore.Qt.WindowType.Window)
-        dialog.setWindowTitle("Select Sensors to Plot")
-        dialog.resize(300, 400)
-        layout = QtWidgets.QVBoxLayout(dialog)
-        layout.addWidget(QtWidgets.QLabel("Select sensors to load:"))
-        list_widget = QtWidgets.QListWidget()
-        for name in sensor_names:
-            list_widget.addItem(name)
-        list_widget.setSelectionMode(QtWidgets.QListWidget.SelectionMode.MultiSelection)
-        layout.addWidget(list_widget)
-        button_layout = QtWidgets.QHBoxLayout()
-        btn_ok = QtWidgets.QPushButton("OK")
-        btn_cancel = QtWidgets.QPushButton("Cancel")
-        button_layout.addWidget(btn_ok)
-        button_layout.addWidget(btn_cancel)
-        layout.addLayout(button_layout)
-        btn_ok.clicked.connect(dialog.accept)
-        btn_cancel.clicked.connect(dialog.reject)
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        selected = [item.text() for item in list_widget.selectedItems()]
-        if not selected:
-            return
-        plot_window = QtWidgets.QMainWindow(self)
-        plot_window.setWindowTitle(f"QUINO Plot - {', '.join(selected[:2])}{'...' if len(selected) > 2 else ''}")
-        plot_window.resize(1200, 600)
-        plot_widget = SensorPlotWidget(dataset, plot_window)
-        plot_window.setCentralWidget(plot_widget)
-        plot_window.show()
-        for sensor_name in selected:
-            plot_widget.load_sensor(sensor_name)
-        self._plot_windows.append(plot_window)
-        self._append_message(f"Created plot with {len(selected)} sensor(s)")
+        win = PlotWindow(app_service=self.app_service, parent=self)
+        win.window_closed.connect(lambda: self._plot_windows.remove(win) if win in self._plot_windows else None)
+        win.show()
+        win.prompt_import_from_simulation()
+        self._plot_windows.append(win)
 
     def delete_selected_entity(self) -> None:
         if not self._editing_allowed():
@@ -790,14 +837,28 @@ class MainWindow(QtWidgets.QMainWindow):
         "point": "sensor-point", "distance": "sensor-distance",
         "angle_horizontal": "sensor-angle-h", "angle_vertical": "sensor-angle-v",
         "angle_vector": "sensor-angle-vec",
+        "constraint_fix": "constraint-fix",
+        "constraint_horizontal": "constraint-horizontal",
+        "constraint_vertical": "constraint-vertical",
+        "constraint_distance": "constraint-distance",
+        "constraint_coincident": "constraint-coincident",
+        "fix": "constraint-fix", "horizontal": "constraint-horizontal",
+        "vertical": "constraint-vertical", "coincident": "constraint-coincident",
+        "line_segment": "sketch-line",
+        "circle": "sketch-circle",
+        "arc": "sketch-arc",
+        "infinite_line": "sketch-infinite-line",
     }
     _SECTION_ICON: dict[str, str] = {
         "Bodies": "body", "Sliders": "slider", "Joints": "revolute",
         "Drivers": "rotate-driver", "Sensors": "sensor-point",
+        "Sketch": "sketch-point",
+        "Constraints": "constraint-distance",
     }
     _SECTION_COLOR: dict[str, str] = {
         "Bodies": "#31556f", "Sliders": "#457b9d", "Joints": "#2f3a4b",
         "Drivers": "#7f5539", "Sensors": "#1a6b4a",
+        "Sketch": "#7f8c8d",
     }
 
     def _populate_tree(self, project: Project) -> None:
@@ -822,7 +883,40 @@ class MainWindow(QtWidgets.QMainWindow):
         joints_root = _root("Joints", len(project.model.joints))
         drivers_root = _root("Drivers", len(project.model.drivers))
         sensors_root = _root("Sensors", len(project.model.sensors))
-        self.tree.addTopLevelItems([bodies_root, sliders_root, joints_root, drivers_root, sensors_root])
+        sketch_count = (len(project.sketch.entities) + len(project.sketch.constraints)) if project.sketch is not None else 0
+        sketch_root = _root("Sketch", sketch_count)
+        self.tree.addTopLevelItems([sketch_root, bodies_root, sliders_root, joints_root, drivers_root, sensors_root])
+
+        if project.sketch is not None:
+            groups = {
+                "Points": [],
+                "LineSegments": [],
+                "Circles": [],
+                "Arcs": [],
+                "InfiniteLines": [],
+                "Constraints": [],
+            }
+            for entity in project.sketch.entities:
+                if isinstance(entity, SketchPoint):
+                    groups["Points"].append(entity)
+                elif isinstance(entity, SketchLineSegment):
+                    groups["LineSegments"].append(entity)
+                elif isinstance(entity, SketchCircle):
+                    groups["Circles"].append(entity)
+                elif isinstance(entity, SketchArc):
+                    groups["Arcs"].append(entity)
+                elif isinstance(entity, SketchInfiniteLine):
+                    groups["InfiniteLines"].append(entity)
+            groups["Constraints"] = list(project.sketch.constraints)
+            for label, entities in groups.items():
+                group_item = QtWidgets.QTreeWidgetItem([f"{label}  ({len(entities)})", ""])
+                group_item.setFlags(group_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
+                sketch_root.addChild(group_item)
+                for entity in entities:
+                    kind = entity.type.value if hasattr(entity, "type") else "point"
+                    if label == "Constraints":
+                        kind = f"constraint_{kind}"
+                    group_item.addChild(self._entity_item(entity.name, kind, entity.id))
 
         for body in project.model.bodies:
             body_item = self._entity_item(body.name, body.type.value, body.id)
@@ -913,10 +1007,24 @@ class MainWindow(QtWidgets.QMainWindow):
         CanvasMode.CREATE_POINT_SENSOR, CanvasMode.CREATE_DISTANCE_SENSOR,
         CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR, CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR,
         CanvasMode.CREATE_ANGLE_VECTOR_SENSOR,
+        CanvasMode.CREATE_SKETCH_POINT, CanvasMode.CREATE_SKETCH_LINE_SEGMENT,
+        CanvasMode.CREATE_SKETCH_CIRCLE, CanvasMode.CREATE_SKETCH_ARC,
+        CanvasMode.CREATE_SKETCH_INFINITE_LINE,
+        CanvasMode.CREATE_SKETCH_FIX, CanvasMode.CREATE_SKETCH_HORIZONTAL,
+        CanvasMode.CREATE_SKETCH_VERTICAL, CanvasMode.CREATE_SKETCH_DISTANCE,
+        CanvasMode.CREATE_SKETCH_COINCIDENT,
+        CanvasMode.CREATE_SKETCH_PARALLEL, CanvasMode.CREATE_SKETCH_PERPENDICULAR,
+        CanvasMode.CREATE_SKETCH_EQUAL_LENGTH, CanvasMode.CREATE_SKETCH_ANGLE,
+        CanvasMode.CREATE_SKETCH_MIDPOINT,
+        CanvasMode.CREATE_SKETCH_COLLINEAR, CanvasMode.CREATE_SKETCH_SYMMETRIC,
+        CanvasMode.CREATE_SKETCH_ON_CIRCLE, CanvasMode.CREATE_SKETCH_TANGENT,
+        CanvasMode.CREATE_SKETCH_CONCENTRIC, CanvasMode.CREATE_SKETCH_ARC_CENTER,
     }
 
     def _on_tree_selection_changed(self, current: QtWidgets.QTreeWidgetItem | None, previous) -> None:
         del previous
+        if self._suspend_tree_injection:
+            return
         entity_id = current.data(0, QtCore.Qt.ItemDataRole.UserRole) if current else None
         if entity_id is not None and self.canvas.mode() in self._CREATION_MODES:
             # In a creation workflow: route the selection to the canvas without
@@ -932,7 +1040,11 @@ class MainWindow(QtWidgets.QMainWindow):
         matches = self.tree.findItems("", QtCore.Qt.MatchFlag.MatchContains | QtCore.Qt.MatchFlag.MatchRecursive, 0)
         for item in matches:
             if item.data(0, QtCore.Qt.ItemDataRole.UserRole) == entity_id:
-                self.tree.setCurrentItem(item)
+                self._suspend_tree_injection = True
+                try:
+                    self.tree.setCurrentItem(item)
+                finally:
+                    self._suspend_tree_injection = False
                 break
         self._populate_inspector()
         self.canvas.set_selection(entity_id)
@@ -959,6 +1071,27 @@ class MainWindow(QtWidgets.QMainWindow):
             CanvasMode.CREATE_SLIDER: self.action_slider_tool,
             CanvasMode.CONNECT_GROUND: self.action_ground_tool,
             CanvasMode.CONNECT_SLIDER: self.action_slider_connect_tool,
+            CanvasMode.CREATE_SKETCH_POINT: self.action_sketch_point_tool,
+            CanvasMode.CREATE_SKETCH_LINE_SEGMENT: self.action_sketch_line_tool,
+            CanvasMode.CREATE_SKETCH_CIRCLE: self.action_sketch_circle_tool,
+            CanvasMode.CREATE_SKETCH_ARC: self.action_sketch_arc_tool,
+            CanvasMode.CREATE_SKETCH_INFINITE_LINE: self.action_sketch_infinite_line_tool,
+            CanvasMode.CREATE_SKETCH_FIX: self.action_sketch_fix_tool,
+            CanvasMode.CREATE_SKETCH_HORIZONTAL: self.action_sketch_horizontal_tool,
+            CanvasMode.CREATE_SKETCH_VERTICAL: self.action_sketch_vertical_tool,
+            CanvasMode.CREATE_SKETCH_DISTANCE: self.action_sketch_distance_tool,
+            CanvasMode.CREATE_SKETCH_COINCIDENT: self.action_sketch_coincident_tool,
+            CanvasMode.CREATE_SKETCH_PARALLEL: self.action_sketch_parallel_tool,
+            CanvasMode.CREATE_SKETCH_PERPENDICULAR: self.action_sketch_perpendicular_tool,
+            CanvasMode.CREATE_SKETCH_EQUAL_LENGTH: self.action_sketch_equal_length_tool,
+            CanvasMode.CREATE_SKETCH_ANGLE: self.action_sketch_angle_tool,
+            CanvasMode.CREATE_SKETCH_MIDPOINT: self.action_sketch_midpoint_tool,
+            CanvasMode.CREATE_SKETCH_COLLINEAR: self.action_sketch_collinear_tool,
+            CanvasMode.CREATE_SKETCH_SYMMETRIC: self.action_sketch_symmetric_tool,
+            CanvasMode.CREATE_SKETCH_ON_CIRCLE: self.action_sketch_on_circle_tool,
+            CanvasMode.CREATE_SKETCH_TANGENT: self.action_sketch_tangent_tool,
+            CanvasMode.CREATE_SKETCH_CONCENTRIC: self.action_sketch_concentric_tool,
+            CanvasMode.CREATE_SKETCH_ARC_CENTER: self.action_sketch_arc_center_tool,
             CanvasMode.CREATE_ROTATION_DRIVER: self.action_add_rotation_driver,
             CanvasMode.CREATE_TRANSLATION_DRIVER: self.action_add_translation_driver,
             CanvasMode.CREATE_POINT_SENSOR: self.action_point_sensor,
@@ -1112,6 +1245,12 @@ class MainWindow(QtWidgets.QMainWindow):
             return "sensor"
         if isinstance(entity, Parameter):
             return "parameter"
+        if isinstance(entity, Sketch):
+            return "sketch"
+        if isinstance(entity, SketchConstraint):
+            return "constraint"
+        if isinstance(entity, SketchPoint):
+            return "point"
         return ""
 
     def _entity_default_icon(self, entity: object) -> str:
@@ -1127,6 +1266,24 @@ class MainWindow(QtWidgets.QMainWindow):
             return "rotate-driver"
         if isinstance(entity, Sensor):
             return "sensor-point"
+        if isinstance(entity, SketchPoint):
+            return "sketch-point"
+        if isinstance(entity, SketchLineSegment):
+            return "sketch-line"
+        if isinstance(entity, SketchCircle):
+            return "sketch-circle"
+        if isinstance(entity, SketchArc):
+            return "sketch-arc"
+        if isinstance(entity, SketchInfiniteLine):
+            return "sketch-infinite-line"
+        if isinstance(entity, SketchConstraint):
+            return {
+                "fix": "constraint-fix",
+                "horizontal": "constraint-horizontal",
+                "vertical": "constraint-vertical",
+                "distance": "constraint-distance",
+                "coincident": "constraint-coincident",
+            }.get(entity.type.value, "constraint-distance")
         return ""
 
     def _on_tree_item_double_clicked(self, item: QtWidgets.QTreeWidgetItem, _col: int) -> None:
@@ -1142,7 +1299,7 @@ class MainWindow(QtWidgets.QMainWindow):
         def prop(label, path, value, kind, evaluated):
             rows.append((label, path, value, kind, evaluated, None))
 
-        if isinstance(entity, (Body, Marker, Slider, Joint, Driver, Sensor, Parameter)):
+        if isinstance(entity, (Body, Marker, Slider, Joint, Driver, Sensor, Parameter, SketchPoint, SketchLineSegment, SketchCircle, SketchArc, SketchInfiniteLine, SketchConstraint)):
             prop("name", "name", entity.name, "expression", entity.name)
 
         if isinstance(entity, Body):
@@ -1185,6 +1342,43 @@ class MainWindow(QtWidgets.QMainWindow):
         elif isinstance(entity, Parameter):
             prop("expression", "", entity.expression, "readonly", self._evaluate_parameter(entity))
             prop("unit", "", entity.unit, "readonly", entity.unit)
+
+        elif isinstance(entity, SketchPoint):
+            prop("visible", "visible", str(entity.visible).lower(), "boolean", str(entity.visible).lower())
+            prop("construction", "construction", str(entity.construction).lower(), "boolean", str(entity.construction).lower())
+            prop("x", "x", entity.x.expression, "expression", self._evaluate_scalar(entity.x))
+            prop("y", "y", entity.y.expression, "expression", self._evaluate_scalar(entity.y))
+
+        elif isinstance(entity, SketchLineSegment):
+            prop("visible", "visible", str(entity.visible).lower(), "boolean", str(entity.visible).lower())
+            prop("construction", "construction", str(entity.construction).lower(), "boolean", str(entity.construction).lower())
+            prop("start_point_id", "start_point_id", entity.start_point_id, "readonly", self._sketch_point_reference(entity.start_point_id))
+            prop("end_point_id", "end_point_id", entity.end_point_id, "readonly", self._sketch_point_reference(entity.end_point_id))
+
+        elif isinstance(entity, SketchCircle):
+            prop("visible", "visible", str(entity.visible).lower(), "boolean", str(entity.visible).lower())
+            prop("construction", "construction", str(entity.construction).lower(), "boolean", str(entity.construction).lower())
+            prop("center_point_id", "center_point_id", entity.center_point_id, "readonly", self._sketch_point_reference(entity.center_point_id))
+            prop("radius", "radius", entity.radius.expression, "expression", self._evaluate_scalar(entity.radius))
+
+        elif isinstance(entity, SketchArc):
+            prop("visible", "visible", str(entity.visible).lower(), "boolean", str(entity.visible).lower())
+            prop("construction", "construction", str(entity.construction).lower(), "boolean", str(entity.construction).lower())
+            prop("point_a_id", "point_a_id", entity.point_a_id, "readonly", self._sketch_point_reference(entity.point_a_id))
+            prop("point_b_id", "point_b_id", entity.point_b_id, "readonly", self._sketch_point_reference(entity.point_b_id))
+            prop("point_c_id", "point_c_id", entity.point_c_id, "readonly", self._sketch_point_reference(entity.point_c_id))
+
+        elif isinstance(entity, SketchInfiniteLine):
+            prop("visible", "visible", str(entity.visible).lower(), "boolean", str(entity.visible).lower())
+            prop("construction", "construction", str(entity.construction).lower(), "boolean", str(entity.construction).lower())
+            prop("point_a_id", "point_a_id", entity.point_a_id, "readonly", self._sketch_point_reference(entity.point_a_id))
+            prop("point_b_id", "point_b_id", entity.point_b_id, "readonly", self._sketch_point_reference(entity.point_b_id))
+
+        elif isinstance(entity, SketchConstraint):
+            prop("type", "", entity.type.value, "readonly", entity.type.value)
+            prop("driving", "driving", str(entity.driving).lower(), "boolean", str(entity.driving).lower())
+            if entity.value is not None:
+                prop("value", "value", entity.value.expression, "expression", self._evaluate_scalar(entity.value))
 
         return rows
 
@@ -1268,7 +1462,32 @@ class MainWindow(QtWidgets.QMainWindow):
                 except Exception:
                     rel("Markers", "marker", mid, "", mid)
 
+        elif isinstance(entity, SketchLineSegment):
+            rel("Points", "sketch-point", self._sketch_point_reference(entity.start_point_id), "start", entity.start_point_id)
+            rel("Points", "sketch-point", self._sketch_point_reference(entity.end_point_id), "end", entity.end_point_id)
+        elif isinstance(entity, SketchCircle):
+            rel("Points", "sketch-point", self._sketch_point_reference(entity.center_point_id), "center", entity.center_point_id)
+        elif isinstance(entity, SketchArc):
+            rel("Points", "sketch-point", self._sketch_point_reference(entity.point_a_id), "A", entity.point_a_id)
+            rel("Points", "sketch-point", self._sketch_point_reference(entity.point_b_id), "B", entity.point_b_id)
+            rel("Points", "sketch-point", self._sketch_point_reference(entity.point_c_id), "C", entity.point_c_id)
+        elif isinstance(entity, SketchInfiniteLine):
+            rel("Points", "sketch-point", self._sketch_point_reference(entity.point_a_id), "A", entity.point_a_id)
+            rel("Points", "sketch-point", self._sketch_point_reference(entity.point_b_id), "B", entity.point_b_id)
+        elif isinstance(entity, SketchConstraint):
+            for index, point_id in enumerate(entity.references, start=1):
+                rel("Points", "sketch-point", self._sketch_point_reference(point_id), f"P{index}", point_id)
+
         return rels
+
+    def _sketch_point_reference(self, point_id: str) -> str:
+        try:
+            point = self.app_service._find_entity(point_id)
+        except Exception:
+            return point_id
+        if not isinstance(point, SketchPoint):
+            return point_id
+        return f"{point.name} ({point_id})"
 
     def _evaluate_scalar(self, scalar, with_time: bool = False) -> str:
         if scalar is None:
@@ -1349,7 +1568,36 @@ class MainWindow(QtWidgets.QMainWindow):
             value = PropertyValueInput("null", None)
         else:
             value = PropertyValueInput("expression", normalized)
-        self.app_service.update_property(entity_id, path, value)
+        entity = self.app_service._find_entity(entity_id)
+        if isinstance(entity, (SketchPoint, SketchLineSegment, SketchCircle, SketchArc, SketchInfiniteLine)):
+            self.app_service.update_sketch_entity(entity_id, path, value)
+        elif isinstance(entity, SketchConstraint):
+            self.app_service.update_sketch_constraint(entity_id, path, value)
+        else:
+            self.app_service.update_property(entity_id, path, value)
+
+    def solve_sketch(self) -> None:
+        if not self._editing_allowed():
+            self._append_message("Editing is only available at t=0")
+            return
+        if not self._prepare_for_model_edit():
+            return
+        report = self.app_service.solve_sketch()
+        for message in report.messages:
+            self._append_message(message.message)
+        self.refresh_all()
+
+    def _toggle_sketch_visible(self, checked: bool) -> None:
+        project = self.app_service.project
+        if project is None:
+            return
+        if project.sketch is None and checked:
+            self.app_service.create_sketch()
+        if project.sketch is not None:
+            if project.sketch.visible != checked:
+                self.app_service._snapshot()
+            project.sketch.visible = checked
+        self.refresh_all()
 
     def _add_parameter(self) -> None:
         if not self._editing_allowed():
@@ -1492,11 +1740,34 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_slider_tool,
             self.action_ground_tool,
             self.action_slider_connect_tool,
+            self.action_sketch_point_tool,
+            self.action_sketch_line_tool,
+            self.action_sketch_circle_tool,
+            self.action_sketch_arc_tool,
+            self.action_sketch_infinite_line_tool,
+            self.action_sketch_fix_tool,
+            self.action_sketch_horizontal_tool,
+            self.action_sketch_vertical_tool,
+            self.action_sketch_distance_tool,
+            self.action_sketch_coincident_tool,
+            self.action_sketch_parallel_tool,
+            self.action_sketch_perpendicular_tool,
+            self.action_sketch_equal_length_tool,
+            self.action_sketch_angle_tool,
+            self.action_sketch_midpoint_tool,
+            self.action_sketch_collinear_tool,
+            self.action_sketch_symmetric_tool,
+            self.action_sketch_on_circle_tool,
+            self.action_sketch_tangent_tool,
+            self.action_sketch_concentric_tool,
+            self.action_sketch_arc_center_tool,
+            self.action_solve_sketch,
             self.action_delete,
             self.action_add_rotation_driver,
             self.action_add_translation_driver,
         ):
             action.setEnabled(editing_allowed)
+        self.action_toggle_sketch_visible.setEnabled(True)
         self.add_parameter_button.setEnabled(editing_allowed)
         self.delete_parameter_button.setEnabled(editing_allowed)
         self.action_play_pause.setEnabled(has_simulation)
@@ -1529,9 +1800,56 @@ class MainWindow(QtWidgets.QMainWindow):
             "create_slider": "Create Slider",
             "connect_ground": "Ground Joint",
             "connect_slider": "Slider Joint",
+            "create_sketch_point": "Sketch Point",
+            "create_sketch_line_segment": "Sketch Line",
+            "create_sketch_circle": "Sketch Circle",
+            "create_sketch_arc": "Sketch Arc",
+            "create_sketch_infinite_line": "Sketch Infinite Line",
+            "create_sketch_fix": "Sketch Fix",
+            "create_sketch_horizontal": "Sketch Horizontal",
+            "create_sketch_vertical": "Sketch Vertical",
+            "create_sketch_distance": "Sketch Distance",
+            "create_sketch_coincident": "Sketch Coincident",
+            "create_sketch_parallel": "Sketch Parallel",
+            "create_sketch_perpendicular": "Sketch Perpendicular",
+            "create_sketch_equal_length": "Sketch Equal Length",
+            "create_sketch_angle": "Sketch Angle",
+            "create_sketch_midpoint": "Sketch Midpoint",
+            "create_sketch_collinear": "Sketch Collinear",
+            "create_sketch_symmetric": "Sketch Symmetric",
+            "create_sketch_on_circle": "Sketch On Circle",
+            "create_sketch_tangent": "Sketch Tangent",
+            "create_sketch_concentric": "Sketch Concentric",
+            "create_sketch_arc_center": "Sketch Arc (center)",
             "create_rotation_driver": "Rotation Driver",
             "create_translation_driver": "Translation Driver",
         }.get(mode, mode)
+        mode_hint = {
+            "create_bar": "2 clicks",
+            "create_body": "Click to place points, Enter/Esc to finish",
+            "create_slider": "2 clicks for axis",
+            "create_sketch_point": "1 click",
+            "create_sketch_line_segment": "2 clicks or snap to existing points",
+            "create_sketch_circle": "Center + radius point",
+            "create_sketch_arc": "3 points",
+            "create_sketch_infinite_line": "2 points define direction",
+            "create_sketch_fix": "Click 1 sketch point",
+            "create_sketch_horizontal": "Click 2 sketch points",
+            "create_sketch_vertical": "Click 2 sketch points",
+            "create_sketch_distance": "Click 2 sketch points",
+            "create_sketch_coincident": "Click 2 sketch points",
+            "create_sketch_parallel": "Click 4 sketch points (2 per line)",
+            "create_sketch_perpendicular": "Click 4 sketch points (2 per line)",
+            "create_sketch_equal_length": "Click 4 sketch points (2 per line)",
+            "create_sketch_angle": "Click vertex then 2 arm points",
+            "create_sketch_midpoint": "Click midpoint then 2 endpoints",
+            "create_sketch_collinear": "Click 3 points (or 1 line + 1 point)",
+            "create_sketch_symmetric": "Click 2 points then axis line (2 pts)",
+            "create_sketch_on_circle": "Click 1 point then 1 circle",
+            "create_sketch_tangent": "Click 1 line then 1 circle",
+            "create_sketch_concentric": "Click 2 circles",
+            "create_sketch_arc_center": "Click center, start, end",
+        }.get(mode)
 
         if self._editing_allowed():
             suffix = "Editable (t=0)"
@@ -1539,5 +1857,15 @@ class MainWindow(QtWidgets.QMainWindow):
             suffix = f"Playback frame {self._current_frame_index + 1} (read-only)"
 
         backend = self.app_service.simulation_runner.describe_backend().replace(" backend: ", " ")
-        message = f"Backend: {backend}  |  Tool: {mode_label}  |  {suffix}"
+        if mode_hint:
+            message = f"Backend: {backend}  |  Tool: {mode_label} ({mode_hint})  |  {suffix}"
+        else:
+            message = f"Backend: {backend}  |  Tool: {mode_label}  |  {suffix}"
+
+        sketch = self.app_service.project.sketch if self.app_service.project else None
+        if sketch and sketch.solve_error:
+            message += f"  |  ⚠ Sketch: {sketch.solve_error}"
+            self.statusBar().setStyleSheet("QStatusBar { color: #b84840; }")
+        else:
+            self.statusBar().setStyleSheet("")
         self.statusBar().showMessage(message)

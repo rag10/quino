@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!-- arc from ~210° to ~330° (bottom of circle, short arc) -->
+  <path d="M 5.4 17.5 A 9 9 0 0 1 18.6 17.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <!-- center point marked with cross -->
+  <circle cx="12" cy="8.5" r="1.8" fill="currentColor"/>
+  <!-- radii dashed lines to arc endpoints -->
+  <line x1="12" y1="8.5" x2="5.4"  y2="17.5" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2.5,2" stroke-linecap="round"/>
+  <line x1="12" y1="8.5" x2="18.6" y2="17.5" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2.5,2" stroke-linecap="round"/>
+  <!-- arc endpoints -->
+  <circle cx="5.4"  cy="17.5" r="1.5" fill="currentColor"/>
+  <circle cx="18.6" cy="17.5" r="1.5" fill="currentColor"/>
+</svg>

@@ -31,6 +31,8 @@ class Quantity:
         return not self.dimensions
 
     def is_pure(self, dimension: Dimension) -> bool:
+        if dimension is Dimension.UNITLESS:
+            return not self.dimensions
         return self.dimensions == {dimension: 1}
 
 
