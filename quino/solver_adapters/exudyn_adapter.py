@@ -17,6 +17,7 @@ from quino.simulation.assembler import (
     MechanismAssembler,
 )
 from quino.solver_adapters.base import SolverAdapter
+from quino.solver_adapters.exudyn_script_generator import generate_exudyn_script
 
 
 class ExudynAdapter(SolverAdapter):
@@ -28,6 +29,10 @@ class ExudynAdapter(SolverAdapter):
 
     def is_available(self) -> bool:
         return importlib.util.find_spec("exudyn") is not None
+
+    def export_script(self, project: Project, duration: float = 1.0, steps: int = 100) -> str:
+        assembled = self.assembler.assemble(project)
+        return generate_exudyn_script(project, assembled, duration, steps, self.expression_service)
 
     def run(self, project: Project, duration: float = 1.0, steps: int = 100) -> SimulationResult:
         try:

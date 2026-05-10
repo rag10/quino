@@ -118,6 +118,8 @@ def test_mode_switch_toggles_toolbars() -> None:
     assert window._sim_toolbar.isVisible()
     assert not window._sketch_toolbar.isVisible()
     assert not window._model_toolbar.isVisible()
+    assert hasattr(window, "action_export_script")
+    assert window.action_export_script.isEnabled()  # Exudyn is the default backend
 
     # Switch back to Model mode
     window._set_app_mode("model")

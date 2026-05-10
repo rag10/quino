@@ -334,6 +334,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_new_plot.triggered.connect(self.create_plot_window)
         self.action_new_plot.setToolTip("Create a new plot from sensor data")
 
+        self.action_export_script = QtGui.QAction(get_icon("content-save", color_dynamic), "Export Script", self)
+        self.action_export_script.triggered.connect(self.export_to_python_script)
+        self.action_export_script.setToolTip("Export Exudyn standalone Python script")
+
         self.action_refresh = QtGui.QAction(get_icon("refresh"), "Refresh", self)
         self.action_refresh.triggered.connect(self.refresh_all)
         self.action_refresh.setToolTip("Force a full UI refresh (use if display seems out of sync)")
@@ -400,7 +404,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_solve_sketch = QtGui.QAction(get_icon("sketch-solve", color_sketch), "Solve", self)
         self.action_solve_sketch.triggered.connect(self.solve_sketch)
         self.action_solve_sketch.setToolTip("Run the sketch constraint solver")
-        self.action_toggle_sketch_visible = QtGui.QAction(get_icon("sketch-visible", color_sketch), "Show", self)
+        self.action_toggle_sketch_visible = QtGui.QAction(get_icon("sketch-visible", color_sketch), "Show Sketch", self)
         self.action_toggle_sketch_visible.setCheckable(True)
         self.action_toggle_sketch_visible.toggled.connect(self._toggle_sketch_visible)
         self.action_toggle_sketch_visible.setToolTip("Show/hide sketch")
@@ -600,7 +604,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._add_toolbar_block(toolbar, [
             [self.action_select_tool, self.action_fit_view, self.action_delete],
-            [self.action_toggle_origin, self.action_toggle_grid, None],
+            [self.action_toggle_origin, self.action_toggle_grid, self.action_toggle_sketch_visible],
         ], "View")
 
     def _build_sketch_toolbar(self) -> None:
@@ -628,7 +632,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._add_toolbar_sep(t)
 
         self._add_toolbar_block(t, [
-            [self.action_toggle_sketch_visible, self.action_solve_sketch],
+            [self.action_solve_sketch],
         ], "Tools")
 
         self._sketch_toolbar.setVisible(False)
@@ -677,6 +681,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._add_toolbar_block(t, [
             [self.action_new_plot, self.action_show_trajectories],
         ], "View")
+        self._add_toolbar_sep(t)
+
+        self._add_toolbar_block(t, [
+            [self.action_export_script],
+        ], "Export")
 
         self._sim_toolbar.setVisible(False)
 
@@ -709,6 +718,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._sketch_toolbar.setVisible(False)
             self._model_toolbar.setVisible(False)
             self._sim_toolbar.setVisible(True)
+            is_exudyn = self.app_service.simulation_runner.backend_name() == "exudyn"
+            self.action_export_script.setEnabled(is_exudyn)
             self.refresh_all()
         else:
             self._mode_sketch_btn.setChecked(False)
@@ -717,6 +728,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._sketch_toolbar.setVisible(False)
             self._model_toolbar.setVisible(True)
             self._sim_toolbar.setVisible(False)
+            self.refresh_all()
 
         # Force select mode when switching
         self.action_select_tool.setChecked(True)
@@ -809,6 +821,39 @@ class MainWindow(QtWidgets.QMainWindow):
         for line in lines:
             self._append_message(line)
         self.refresh_all()
+
+    def export_to_python_script(self) -> None:
+        if self.app_service.simulation_runner.backend_name() != "exudyn":
+            QtWidgets.QMessageBox.information(
+                self,
+                "Export not available",
+                "Script export is only supported for the Exudyn solver backend.",
+            )
+            return
+        default_dir = Path("logs")
+        default_dir.mkdir(exist_ok=True)
+        default_path = str(default_dir / "exudyn_simulation.py")
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Export Exudyn Script",
+            default_path,
+            "Python Files (*.py)",
+        )
+        if not file_path:
+            return
+        try:
+            script = self.app_service.export_exudyn_script(
+                duration=float(self.duration_spin.value()),
+                steps=int(self.steps_spin.value()),
+            )
+            Path(file_path).write_text(script, encoding="utf-8")
+            self._append_message(f"Exported Exudyn script to {file_path}")
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Export failed",
+                f"Failed to export script:\n\n{exc}",
+            )
 
     def run_simulation(self) -> None:
         self._playback_timer.stop()
@@ -2131,7 +2176,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_add_translation_driver,
         ):
             action.setEnabled(editing_allowed)
-        self.action_toggle_sketch_visible.setEnabled(True)
+        in_sketch_mode = self._app_mode == "sketch"
+        self.action_toggle_sketch_visible.setEnabled(not in_sketch_mode)
+        if in_sketch_mode:
+            self.action_toggle_sketch_visible.setChecked(True)
         self.add_parameter_button.setEnabled(editing_allowed)
         self.delete_parameter_button.setEnabled(editing_allowed)
         self.action_play_pause.setEnabled(has_simulation)

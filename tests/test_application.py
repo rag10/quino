@@ -888,6 +888,21 @@ def test_create_sketch_constraint_validates_entity_reference_type() -> None:
         )
 
 
+def test_parallel_constraint_allows_shared_endpoint() -> None:
+    # Two segments sharing an endpoint: seg1=(p1,p2), seg2=(p2,p3)
+    # references=[p1,p2,p2,p3] should be accepted for PARALLEL/PERPENDICULAR/EQUAL_LENGTH
+    app = make_app()
+    p1 = app.create_sketch_point("0 mm", "0 mm", "A")
+    p2 = app.create_sketch_point("50 mm", "0 mm", "B")
+    p3 = app.create_sketch_point("50 mm", "50 mm", "C")
+    app.create_sketch_line_segment(p1, p2)
+    app.create_sketch_line_segment(p2, p3)
+    # Must not raise — shared endpoint p2 is valid for segment-pair constraints
+    app.create_sketch_constraint("parallel", [p1, p2, p2, p3])
+    app.create_sketch_constraint("perpendicular", [p1, p2, p2, p3])
+    app.create_sketch_constraint("equal_length", [p1, p2, p2, p3])
+
+
 def test_create_sketch_tangent_rejects_invalid_sign() -> None:
     app = make_app()
     p1 = app.create_sketch_point("0 mm", "0 mm", "A")

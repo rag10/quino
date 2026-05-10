@@ -581,3 +581,37 @@ def test_exudyn_adapter_reports_diagnostics_on_execution_failure(monkeypatch) ->
     assert any("Solver phase:" in message for message in result.messages)
     assert any("Model summary:" in message for message in result.messages)
     assert any("RuntimeError: boom" in message for message in result.messages)
+
+
+def test_exudyn_adapter_export_script_generates_valid_python(monkeypatch) -> None:
+    app = ApplicationService()
+    build_slider_crank_example(app)
+    adapter = ExudynAdapter(app.expression_service)
+    script = adapter.export_script(app.project, duration=1.0, steps=10)
+
+    assert "import exudyn" in script
+    assert "mbs.SolveDynamic" in script
+    assert "_driver_" in script
+    assert "_interp" in script
+
+    # Verify it is valid Python syntax
+    import ast
+    ast.parse(script)
+
+
+def test_application_service_export_exudyn_script_raises_for_non_exudyn() -> None:
+    app = ApplicationService()
+    app.new_project("Test")
+    # swap adapter to a fake one
+    from quino.simulation.runner import SimulationRunner
+    from quino.solver_adapters.base import SolverAdapter
+
+    class FakeAdapter(SolverAdapter):
+        name = "fake"
+
+        def run(self, project, duration=1.0, steps=100):
+            return project
+
+    app.simulation_runner = SimulationRunner(FakeAdapter())
+    with pytest.raises(RuntimeError, match="only supported for the Exudyn"):
+        app.export_exudyn_script()

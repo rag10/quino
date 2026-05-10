@@ -1164,6 +1164,12 @@ class ApplicationService:
         self._validate_sketch_solve(project, report)
         return report
 
+    def export_exudyn_script(self, duration: float = 1.0, steps: int = 100) -> str:
+        project = self._require_project()
+        if self.simulation_runner.backend_name() != "exudyn":
+            raise RuntimeError("Export is only supported for the Exudyn backend")
+        return self.simulation_runner.adapter.export_script(project, duration=duration, steps=steps)
+
     def run_kinematic_simulation(self, duration: float = 1.0, steps: int = 100) -> SimulationResult:
         project = self._require_project()
         report = self.validate_model(duration=duration, steps=steps)
@@ -1574,7 +1580,16 @@ class ApplicationService:
         expected_pts = spec.points if spec is not None else 2
         if len(references) != expected_pts:
             raise ValueError(f"{constraint_type.value} constraint requires {expected_pts} point reference(s)")
-        if len(set(references)) != len(references):
+        _segment_pair_types = {
+            SketchConstraintType.PARALLEL,
+            SketchConstraintType.PERPENDICULAR,
+            SketchConstraintType.EQUAL_LENGTH,
+        }
+        if constraint_type in _segment_pair_types:
+            # Allow shared endpoint between segments but reject within-segment duplicates
+            if references[0] == references[1] or references[2] == references[3]:
+                raise ValueError("Constraint references must be distinct within each segment")
+        elif len(set(references)) != len(references):
             raise ValueError("Constraint references must be distinct")
         expected_ents = spec.entities if spec is not None else 0
         actual_ents = len(entity_references) if entity_references else 0
