@@ -58,7 +58,7 @@ class ExpressionService:
 
     def _environment(self) -> dict[str, object]:
         env: dict[str, object] = {}
-        for unit in self.unit_service._UNITS:
+        for unit in self.unit_service.known_units():
             env[unit] = self.unit_service.quantity(1.0, unit)
         env["pi"] = Quantity(math.pi, {})
         env["sin"] = self._sin

@@ -60,6 +60,9 @@ class UnitService:
             raise ValueError(f"Unknown unit: {unit}")
         return self._UNITS[unit][1]
 
+    def known_units(self) -> set[str]:
+        return set(self._UNITS.keys())
+
     def quantity(self, value: float, unit: str) -> Quantity:
         dimension = self.dimension(unit)
         dimensions = {} if dimension is Dimension.UNITLESS else {dimension: 1}

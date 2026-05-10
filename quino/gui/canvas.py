@@ -19,6 +19,7 @@ from quino.domain.model import (
     SketchPoint,
     Slider,
 )
+from quino.domain.sketch_constraints import CONSTRAINT_SPECS, ConstraintSpec
 from quino.domain.types import DriverType, JointEndpointKind, JointType, MarkerType, SketchConstraintType, SketchEntityType
 from quino.simulation.assembler import AssembledMechanism
 
@@ -64,7 +65,7 @@ class CanvasSketchEntity:
     visible: bool
     construction: bool
     radius: float | None = None
-    arc_center_mode: bool = False
+
 
 
 class CanvasMode:
@@ -107,27 +108,39 @@ class CanvasMode:
     CREATE_SKETCH_ARC_CENTER = "create_sketch_arc_center"
 
 
-# (n_point_refs_needed, n_entity_refs_needed) per constraint mode.
-# Line entity clicks auto-fill 2 point slots; circle entity clicks fill entity slots.
-_CONSTRAINT_SPEC: dict[str, tuple[int, int]] = {
-    CanvasMode.CREATE_SKETCH_HORIZONTAL:    (2, 0),
-    CanvasMode.CREATE_SKETCH_VERTICAL:      (2, 0),
-    CanvasMode.CREATE_SKETCH_DISTANCE:      (2, 0),
-    CanvasMode.CREATE_SKETCH_COINCIDENT:    (2, 0),
-    CanvasMode.CREATE_SKETCH_PARALLEL:      (4, 0),
-    CanvasMode.CREATE_SKETCH_PERPENDICULAR: (4, 0),
-    CanvasMode.CREATE_SKETCH_EQUAL_LENGTH:  (4, 0),
-    CanvasMode.CREATE_SKETCH_ANGLE:         (3, 0),
-    CanvasMode.CREATE_SKETCH_MIDPOINT:      (3, 0),
-    CanvasMode.CREATE_SKETCH_COLLINEAR:     (3, 0),
-    CanvasMode.CREATE_SKETCH_SYMMETRIC:     (4, 0),
-    CanvasMode.CREATE_SKETCH_ON_CIRCLE:     (1, 1),
-    CanvasMode.CREATE_SKETCH_TANGENT:       (2, 1),
-    CanvasMode.CREATE_SKETCH_CONCENTRIC:    (2, 0),
+# Map CanvasMode constraint creation strings to SketchConstraintType
+_CONSTRAINT_MODE_TO_TYPE: dict[str, SketchConstraintType] = {
+    CanvasMode.CREATE_SKETCH_HORIZONTAL:    SketchConstraintType.HORIZONTAL,
+    CanvasMode.CREATE_SKETCH_VERTICAL:      SketchConstraintType.VERTICAL,
+    CanvasMode.CREATE_SKETCH_DISTANCE:      SketchConstraintType.DISTANCE,
+    CanvasMode.CREATE_SKETCH_COINCIDENT:    SketchConstraintType.COINCIDENT,
+    CanvasMode.CREATE_SKETCH_PARALLEL:      SketchConstraintType.PARALLEL,
+    CanvasMode.CREATE_SKETCH_PERPENDICULAR: SketchConstraintType.PERPENDICULAR,
+    CanvasMode.CREATE_SKETCH_EQUAL_LENGTH:  SketchConstraintType.EQUAL_LENGTH,
+    CanvasMode.CREATE_SKETCH_ANGLE:         SketchConstraintType.ANGLE,
+    CanvasMode.CREATE_SKETCH_MIDPOINT:      SketchConstraintType.MIDPOINT,
+    CanvasMode.CREATE_SKETCH_COLLINEAR:     SketchConstraintType.COLLINEAR,
+    CanvasMode.CREATE_SKETCH_SYMMETRIC:     SketchConstraintType.SYMMETRIC,
+    CanvasMode.CREATE_SKETCH_ON_CIRCLE:     SketchConstraintType.ON_CIRCLE,
+    CanvasMode.CREATE_SKETCH_TANGENT:       SketchConstraintType.TANGENT,
+    CanvasMode.CREATE_SKETCH_CONCENTRIC:    SketchConstraintType.COINCIDENT,  # maps to coincident
 }
 
-# Keep legacy alias so existing references still work
+_CONSTRAINT_SPEC: dict[str, tuple[int, int]] = {
+    mode: (spec.points, spec.entities)
+    for mode, ctype in _CONSTRAINT_MODE_TO_TYPE.items()
+    if (spec := CONSTRAINT_SPECS.get(ctype)) is not None
+}
+# concentric is a special case handled above via coincident mapping
+_CONSTRAINT_SPEC.setdefault(CanvasMode.CREATE_SKETCH_CONCENTRIC, (2, 0))
+
 _SKETCH_CONSTRAINT_POINT_COUNT: dict[str, int] = {k: v[0] for k, v in _CONSTRAINT_SPEC.items()}
+
+_CONSTRAINT_LABEL: dict[str, str] = {
+    mode: (CONSTRAINT_SPECS.get(ctype) or ConstraintSpec(0, 0, None, "Constraint")).label
+    for mode, ctype in _CONSTRAINT_MODE_TO_TYPE.items()
+}
+_CONSTRAINT_LABEL.setdefault(CanvasMode.CREATE_SKETCH_CONCENTRIC, "Concentric")
 
 _SKETCH_CONSTRAINT_TYPE_STR: dict[str, str] = {
     CanvasMode.CREATE_SKETCH_HORIZONTAL:    "horizontal",
@@ -172,7 +185,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._editing_enabled = True
         self._creation_points: list[tuple[float, float]] = []
         self._joint_start_marker: CanvasMarker | None = None
-        self._slider_start_marker: CanvasMarker | None = None
+        self._slider_joint_start: CanvasMarker | CanvasSlider | None = None
         self._driver_start_joint_id: str | None = None
         self._sensor_marker_ids: list[str] = []
         self._creation_entity_ids: list[str] = []
@@ -239,11 +252,10 @@ class MechanismCanvas(QtWidgets.QWidget):
             return True
         return False
 
-    def set_mode(self, mode: str) -> None:
-        self._mode = mode
+    def _reset_tool_state(self) -> None:
         self._creation_points.clear()
         self._joint_start_marker = None
-        self._slider_start_marker = None
+        self._slider_joint_start = None
         self._driver_start_joint_id = None
         self._sensor_marker_ids = []
         self._creation_entity_ids = []
@@ -258,8 +270,57 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._dragging_slider_preview = None
         self._pending_joint_creation = None
         self._snap_preview_world = None
+
+    def set_mode(self, mode: str) -> None:
+        if self._mode in _CONSTRAINT_SPEC and mode != self._mode:
+            # Constraint was in progress and tool changed — provide feedback
+            self.modelChanged.emit("Constraint cancelled: tool changed")
+        self._reset_tool_state()
+        self._mode = mode
+        self._set_cursor_for_mode(mode)
         self.modeChanged.emit(mode)
         self.update()
+
+    def _set_cursor_for_mode(self, mode: str) -> None:
+        cursor_map = {
+            CanvasMode.CREATE_SKETCH_POINT: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_LINE_SEGMENT: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_CIRCLE: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_ARC: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_ARC_CENTER: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_INFINITE_LINE: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_FIX: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_HORIZONTAL: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_VERTICAL: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_DISTANCE: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_COINCIDENT: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_PARALLEL: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_PERPENDICULAR: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_EQUAL_LENGTH: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_ANGLE: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_MIDPOINT: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_COLLINEAR: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_SYMMETRIC: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_ON_CIRCLE: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_TANGENT: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_CONCENTRIC: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_BAR: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_BODY: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.ADD_MARKER: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_REVOLUTE: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_RIGID: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SLIDER: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CONNECT_GROUND: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CONNECT_SLIDER: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_ROTATION_DRIVER: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_TRANSLATION_DRIVER: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_POINT_SENSOR: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_DISTANCE_SENSOR: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_ANGLE_VECTOR_SENSOR: QtCore.Qt.CursorShape.CrossCursor,
+        }
+        self.setCursor(QtGui.QCursor(cursor_map.get(mode, QtCore.Qt.CursorShape.ArrowCursor)))
 
     def fit_view(self) -> None:
         transform = self._fit_transform()
@@ -332,7 +393,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         if not enabled:
             self._creation_points.clear()
             self._joint_start_marker = None
-            self._slider_start_marker = None
+            self._slider_joint_start = None
             self._driver_start_joint_id = None
             self._sensor_marker_ids = []
             self._dragging_marker = None
@@ -395,15 +456,20 @@ class MechanismCanvas(QtWidgets.QWidget):
         if self._mode == CanvasMode.CONNECT_SLIDER:
             marker = marker_map.get(entity_id)
             slider = slider_map.get(entity_id)
-            if self._slider_start_marker is None:
-                if marker is not None:
-                    self._slider_start_marker = marker
-                    self.entitySelected.emit(entity_id)
-                    self.update()
-            else:
-                if slider is not None:
-                    self._create_slider_joint(self._slider_start_marker, slider)
-                    self._slider_start_marker = None
+            if self._slider_joint_start is None:
+                if marker is None and slider is None:
+                    return
+                self._slider_joint_start = marker if marker is not None else slider
+                self.entitySelected.emit(entity_id)
+                self.update()
+                return
+            start = self._slider_joint_start
+            if isinstance(start, CanvasMarker) and slider is not None:
+                self._create_slider_joint(start, slider, align="marker_to_slider")
+                self._slider_joint_start = None
+            elif isinstance(start, CanvasSlider) and marker is not None:
+                self._create_slider_joint(marker, start, align="marker_to_slider")
+                self._slider_joint_start = None
             return
 
         if self._mode in {
@@ -443,12 +509,11 @@ class MechanismCanvas(QtWidgets.QWidget):
             CanvasMode.CREATE_SKETCH_INFINITE_LINE: 2,
         }
         if self._mode in _sketch_entity_modes:
-            try:
-                sketch_point = self.app_service._find_sketch_point(entity_id)
-                x = self.app_service.expression_service.evaluate_property(sketch_point.x, project.parameters).value
-                y = self.app_service.expression_service.evaluate_property(sketch_point.y, project.parameters).value
-            except Exception:
+            sketch_point = self.app_service.get_sketch_point(entity_id)
+            if sketch_point is None:
                 return
+            x = self.app_service.expression_service.evaluate_property(sketch_point.x, project.parameters).value
+            y = self.app_service.expression_service.evaluate_property(sketch_point.y, project.parameters).value
             self._creation_points.append((x, y))
             self._sensor_marker_ids.append(sketch_point.id)
             required = _sketch_entity_modes[self._mode]
@@ -461,10 +526,7 @@ class MechanismCanvas(QtWidgets.QWidget):
 
         if self._mode in _CONSTRAINT_SPEC:
             # In inject_entity_selection, entity_id is always a sketch point or entity
-            try:
-                sketch_point = self.app_service._find_sketch_point(entity_id)
-            except Exception:
-                sketch_point = None
+            sketch_point = self.app_service.get_sketch_point(entity_id)
             n_pts, n_ent = _CONSTRAINT_SPEC[self._mode]
             if sketch_point is not None:
                 x = self.app_service.expression_service.evaluate_property(sketch_point.x, project.parameters).value
@@ -475,9 +537,8 @@ class MechanismCanvas(QtWidgets.QWidget):
             return
 
         if self._mode == CanvasMode.CREATE_SKETCH_FIX:
-            try:
-                sketch_point = self.app_service._find_sketch_point(entity_id)
-            except Exception:
+            sketch_point = self.app_service.get_sketch_point(entity_id)
+            if sketch_point is None:
                 return
             constraint_id = self.app_service.create_sketch_constraint(
                 SketchConstraintType.FIX.value,
@@ -526,10 +587,11 @@ class MechanismCanvas(QtWidgets.QWidget):
                     return self.screen_position_for_world(position[0], position[1])
         for driver in project.model.drivers:
             if driver.id == entity_id:
-                joint = self.app_service._find_joint(driver.target_joint_id)
-                position = self._joint_world_position(joint, marker_map, slider_map)
-                if position is not None:
-                    return self.screen_position_for_world(position[0], position[1])
+                joint = self.app_service.get_joint(driver.target_joint_id)
+                if joint is not None:
+                    position = self._joint_world_position(joint, marker_map, slider_map)
+                    if position is not None:
+                        return self.screen_position_for_world(position[0], position[1])
         return None
 
     def paintEvent(self, event: QtGui.QPaintEvent) -> None:  # pragma: no cover - exercised indirectly in GUI tests
@@ -552,19 +614,42 @@ class MechanismCanvas(QtWidgets.QWidget):
         sketch_points = self._collect_sketch_points(project)
         sketch_entities = self._collect_sketch_entities(project)
         sketch_invalid = project.sketch is not None and project.sketch.solve_error is not None
+        model_dimmed = self._interaction_mode == "sketch"
+
         self._draw_grid(painter, transform)
-        self._draw_sketch(painter, sketch_points, sketch_entities, transform, invalid=sketch_invalid)
-        self._draw_sketch_constraints(painter, project, sketch_points, transform, invalid=sketch_invalid)
-        self._draw_sliders(painter, sliders, transform)
-        if project.model.bodies:
-            self._draw_bodies(painter, project, markers, transform)
-            self._draw_joints(painter, project, markers, sliders, transform)
-            self._draw_drivers(painter, project, markers, sliders, transform)
-            self._draw_markers(painter, markers, transform)
-        elif not sketch_points and not sketch_entities:
-            self._draw_empty_state(painter)
-        if self._show_trajectories and self._trajectories:
-            self._draw_trajectories(painter, transform)
+
+        if model_dimmed:
+            # In sketch mode: draw dimmed model layer first, then crisp sketch on top
+            painter.save()
+            painter.setOpacity(0.25)
+            self._draw_sliders(painter, sliders, transform)
+            if project.model.bodies:
+                self._draw_bodies(painter, project, markers, transform)
+                self._draw_joints(painter, project, markers, sliders, transform)
+                self._draw_drivers(painter, project, markers, sliders, transform)
+                self._draw_markers(painter, markers, transform)
+            painter.restore()
+            self._draw_sketch(painter, sketch_points, sketch_entities, transform, invalid=sketch_invalid)
+            self._draw_sketch_constraints(painter, project, sketch_points, transform, invalid=sketch_invalid)
+            if self._show_trajectories and self._trajectories:
+                self._draw_trajectories(painter, transform)
+            if not sketch_points and not sketch_entities and not project.model.bodies:
+                self._draw_empty_state(painter)
+        else:
+            # Normal order: sketch then model
+            self._draw_sketch(painter, sketch_points, sketch_entities, transform, invalid=sketch_invalid)
+            self._draw_sketch_constraints(painter, project, sketch_points, transform, invalid=sketch_invalid)
+            self._draw_sliders(painter, sliders, transform)
+            if project.model.bodies:
+                self._draw_bodies(painter, project, markers, transform)
+                self._draw_joints(painter, project, markers, sliders, transform)
+                self._draw_drivers(painter, project, markers, sliders, transform)
+                self._draw_markers(painter, markers, transform)
+            elif not sketch_points and not sketch_entities:
+                self._draw_empty_state(painter)
+            if self._show_trajectories and self._trajectories:
+                self._draw_trajectories(painter, transform)
+
         self._draw_creation_overlay(painter, transform)
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # pragma: no cover - UI behavior
@@ -754,18 +839,26 @@ class MechanismCanvas(QtWidgets.QWidget):
             return
 
         if self._mode == CanvasMode.CONNECT_SLIDER:
-            if self._slider_start_marker is None:
-                if clicked_marker is None:
+            if self._slider_joint_start is None:
+                if clicked_marker is None and clicked_slider is None:
                     return
-                self._slider_start_marker = clicked_marker
-                self.entitySelected.emit(clicked_marker.entity_id)
+                self._slider_joint_start = clicked_marker if clicked_marker is not None else clicked_slider
+                self.entitySelected.emit(self._slider_joint_start.entity_id)
                 self.update()
                 return
-            if clicked_slider is None:
+            start = self._slider_joint_start
+            if isinstance(start, CanvasMarker):
+                if clicked_slider is None:
+                    return
+                self._create_slider_joint(start, clicked_slider, align="marker_to_slider")
+                self._slider_joint_start = None
                 return
-            self._create_slider_joint(self._slider_start_marker, clicked_slider)
-            self._slider_start_marker = None
-            return
+            if isinstance(start, CanvasSlider):
+                if clicked_marker is None:
+                    return
+                self._create_slider_joint(clicked_marker, start, align="marker_to_slider")
+                self._slider_joint_start = None
+                return
 
         if self._mode in {CanvasMode.CREATE_ROTATION_DRIVER, CanvasMode.CREATE_TRANSLATION_DRIVER}:
             if clicked_joint is None:
@@ -840,12 +933,23 @@ class MechanismCanvas(QtWidgets.QWidget):
             CanvasMode.CREATE_SKETCH_LINE_SEGMENT,
             CanvasMode.CREATE_SKETCH_CIRCLE,
             CanvasMode.CREATE_SKETCH_ARC,
+            CanvasMode.CREATE_SKETCH_ARC_CENTER,
             CanvasMode.CREATE_SKETCH_INFINITE_LINE,
             CanvasMode.CREATE_SKETCH_FIX,
             CanvasMode.CREATE_SKETCH_HORIZONTAL,
             CanvasMode.CREATE_SKETCH_VERTICAL,
             CanvasMode.CREATE_SKETCH_DISTANCE,
             CanvasMode.CREATE_SKETCH_COINCIDENT,
+            CanvasMode.CREATE_SKETCH_PARALLEL,
+            CanvasMode.CREATE_SKETCH_PERPENDICULAR,
+            CanvasMode.CREATE_SKETCH_EQUAL_LENGTH,
+            CanvasMode.CREATE_SKETCH_ANGLE,
+            CanvasMode.CREATE_SKETCH_MIDPOINT,
+            CanvasMode.CREATE_SKETCH_COLLINEAR,
+            CanvasMode.CREATE_SKETCH_SYMMETRIC,
+            CanvasMode.CREATE_SKETCH_ON_CIRCLE,
+            CanvasMode.CREATE_SKETCH_TANGENT,
+            CanvasMode.CREATE_SKETCH_CONCENTRIC,
         }:
             self._snap_preview_world = self._snap_world(self._hover_world, include_model=False)
         else:
@@ -903,12 +1007,17 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._dragging_slider_preview = None
             if preview is None:
                 return
-            self.app_service.update_property(slider_id, "origin_x", PropertyValueInput("expression", self._mm_expression(preview["origin_x"])))
-            self.app_service.update_property(slider_id, "origin_y", PropertyValueInput("expression", self._mm_expression(preview["origin_y"])))
-            self.app_service.update_property(slider_id, "angle", PropertyValueInput("expression", self._deg_expression(preview["angle_deg"])))
-            self.app_service.update_property(slider_id, "travel_min", PropertyValueInput("expression", self._mm_expression(preview["travel_min"])))
-            self.app_service.update_property(slider_id, "travel_max", PropertyValueInput("expression", self._mm_expression(preview["travel_max"])))
-            self.modelChanged.emit(f"Updated slider {self.app_service._find_entity(slider_id).name}")
+            self.app_service.update_slider_geometry(
+                slider_id,
+                origin_x=self._mm_expression(preview["origin_x"]),
+                origin_y=self._mm_expression(preview["origin_y"]),
+                angle=self._deg_expression(preview["angle_deg"]),
+                travel_min=self._mm_expression(preview["travel_min"]),
+                travel_max=self._mm_expression(preview["travel_max"]),
+            )
+            slider_entity = self.app_service.project.model.sliders
+            slider_name = next((s.name for s in slider_entity if s.id == slider_id), slider_id)
+            self.modelChanged.emit(f"Updated slider {slider_name}")
             self.update()
             return
         super().mouseReleaseEvent(event)
@@ -933,22 +1042,14 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._finalize_body_creation()
             return
         if event.key() == QtCore.Qt.Key.Key_Escape:
-            self._creation_points.clear()
-            self._joint_start_marker = None
-            self._slider_start_marker = None
-            self._driver_start_joint_id = None
-            self._hover_world = None
-            self._hovered_sketch_point_id = None
-            self._hovered_sketch_entity_id = None
-            self._drag_preview = None
-            self._dragging_marker = None
-            self._dragging_sketch_point = None
-            self._dragging_sketch_point_preview = None
-            self._snap_preview_world = None
+            if self._mode in _CONSTRAINT_SPEC:
+                self.modelChanged.emit("Constraint cancelled: Esc")
+            self._reset_tool_state()
             self._selected_entity_id = None
             self.selectionCleared.emit()
             if self._mode != CanvasMode.SELECT:
                 self._mode = CanvasMode.SELECT
+                self._set_cursor_for_mode(CanvasMode.SELECT)
                 self.modeChanged.emit(CanvasMode.SELECT)
             self.update()
             return
@@ -989,9 +1090,10 @@ class MechanismCanvas(QtWidgets.QWidget):
             slider_menu = menu.addMenu("Connect To Slider")
             for slider_item in self.app_service.project.model.sliders:
                 slider_actions[slider_menu.addAction(slider_item.name)] = slider_item.id
-            body = self.app_service._find_body(marker.body_id)
-            com_marker = body.com_marker()
-            toggle_com_action = menu.addAction("Hide CoM" if com_marker.visible else "Show CoM")
+            body = self.app_service.get_body(marker.body_id)
+            if body is not None:
+                com_marker = body.com_marker()
+                toggle_com_action = menu.addAction("Hide CoM" if com_marker.visible else "Show CoM")
         elif slider is not None:
             rename_action = menu.addAction("Rename Slider")
             delete_action = menu.addAction("Delete")
@@ -1046,7 +1148,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._add_marker_to_selected_body(world, fallback_body=marker.body_id if marker is not None else None)
             return
         if chosen is toggle_com_action:
-            body = self.app_service._find_body(marker.body_id) if marker is not None else self._selected_body()
+            body = self.app_service.get_body(marker.body_id) if marker is not None else self._selected_body()
             if body is not None:
                 com_marker = body.com_marker()
                 self.app_service.update_property(
@@ -1450,7 +1552,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                         point_ids=[entity.point_a_id, entity.point_b_id, entity.point_c_id],
                         visible=entity.visible,
                         construction=entity.construction,
-                        arc_center_mode=entity.arc_center_mode,
+                        
                     )
                 )
             elif isinstance(entity, SketchInfiniteLine):
@@ -1623,39 +1725,19 @@ class MechanismCanvas(QtWidgets.QWidget):
             elif entity.entity_type is SketchEntityType.ARC:
                 if not all(point_id in point_map for point_id in entity.point_ids):
                     continue
-                if entity.arc_center_mode:
-                    # center + start + end arc
-                    cpt = point_map[entity.point_ids[0]]
-                    spt = point_map[entity.point_ids[1]]
-                    ept = point_map[entity.point_ids[2]]
-                    radius = math.hypot(spt.x - cpt.x, spt.y - cpt.y)
-                    if radius < 1e-9:
-                        continue
-                    center = self._to_screen(cpt.x, cpt.y, transform)
-                    radius_px = abs(radius * transform[0])
-                    rect = QtCore.QRectF(
-                        center.x() - radius_px, center.y() - radius_px,
-                        2.0 * radius_px, 2.0 * radius_px,
-                    )
-                    start_deg = math.degrees(math.atan2(-(spt.y - cpt.y), spt.x - cpt.x))
-                    end_deg   = math.degrees(math.atan2(-(ept.y - cpt.y), ept.x - cpt.x))
-                    span = (end_deg - start_deg + 180.0) % 360.0 - 180.0
-                    painter.drawArc(rect, int(start_deg * 16), int(span * 16))
-                    geometry = ("arc", rect, math.radians(-start_deg), math.radians(-span))
-                else:
-                    arc_points = [point_map[point_id] for point_id in entity.point_ids]
-                    arc = self._arc_geometry(arc_points)
-                    if arc is None:
-                        continue
-                    center_x, center_y, radius, start_angle, span_angle = arc
-                    center = self._to_screen(center_x, center_y, transform)
-                    radius_px = abs(radius * transform[0])
-                    rect = QtCore.QRectF(
-                        center.x() - radius_px, center.y() - radius_px,
-                        2.0 * radius_px, 2.0 * radius_px,
-                    )
-                    painter.drawArc(rect, int(-math.degrees(start_angle) * 16), int(-math.degrees(span_angle) * 16))
-                    geometry = ("arc", rect, start_angle, span_angle)
+                arc_points = [point_map[point_id] for point_id in entity.point_ids]
+                arc = self._arc_geometry(arc_points)
+                if arc is None:
+                    continue
+                center_x, center_y, radius, start_angle, span_angle = arc
+                center = self._to_screen(center_x, center_y, transform)
+                radius_px = abs(radius * transform[0])
+                rect = QtCore.QRectF(
+                    center.x() - radius_px, center.y() - radius_px,
+                    2.0 * radius_px, 2.0 * radius_px,
+                )
+                painter.drawArc(rect, int(-math.degrees(start_angle) * 16), int(-math.degrees(span_angle) * 16))
+                geometry = ("arc", rect, start_angle, span_angle)
             elif entity.entity_type is SketchEntityType.INFINITE_LINE:
                 if not all(point_id in point_map for point_id in entity.point_ids):
                     continue
@@ -1950,9 +2032,8 @@ class MechanismCanvas(QtWidgets.QWidget):
         marker_map = {marker.entity_id: marker for marker in markers}
         slider_map = {slider.entity_id: slider for slider in sliders}
         for driver in project.model.drivers:
-            try:
-                joint = self.app_service._find_joint(driver.target_joint_id)
-            except ValueError:
+            joint = self.app_service.get_joint(driver.target_joint_id)
+            if joint is None:
                 continue
             position = self._joint_world_position(joint, marker_map, slider_map)
             if position is None:
@@ -2202,8 +2283,10 @@ class MechanismCanvas(QtWidgets.QWidget):
             created_id = self.app_service.create_sketch_line_segment(point_ids[0], point_ids[1])
             message = "Created sketch line segment"
         elif self._mode == CanvasMode.CREATE_SKETCH_CIRCLE:
-            p1 = self.app_service._find_sketch_point(point_ids[0])
-            p2 = self.app_service._find_sketch_point(point_ids[1])
+            p1 = self.app_service.get_sketch_point(point_ids[0])
+            p2 = self.app_service.get_sketch_point(point_ids[1])
+            if p1 is None or p2 is None:
+                raise ValueError("Sketch point not found for circle creation")
             x1 = self.app_service.expression_service.evaluate_property(p1.x, self.app_service.project.parameters).value
             y1 = self.app_service.expression_service.evaluate_property(p1.y, self.app_service.project.parameters).value
             x2 = self.app_service.expression_service.evaluate_property(p2.x, self.app_service.project.parameters).value
@@ -2215,7 +2298,9 @@ class MechanismCanvas(QtWidgets.QWidget):
             created_id = self.app_service.create_sketch_arc(point_ids[0], point_ids[1], point_ids[2])
             message = "Created sketch arc"
         elif self._mode == CanvasMode.CREATE_SKETCH_ARC_CENTER:
-            pts = [self.app_service._find_sketch_point(pid) for pid in point_ids[:3]]
+            pts = [self.app_service.get_sketch_point(pid) for pid in point_ids[:3]]
+            if any(p is None for p in pts):
+                raise ValueError("Sketch point not found for arc creation")
             coords = [
                 (self.app_service.expression_service.evaluate_property(p.x, self.app_service.project.parameters).value,
                  self.app_service.expression_service.evaluate_property(p.y, self.app_service.project.parameters).value)
@@ -2300,6 +2385,18 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._creation_points.append((clicked_sketch_point.x, clicked_sketch_point.y))
                 self._sensor_marker_ids.append(clicked_sketch_point.entity_id)
 
+        collected_pts = min(len(self._sensor_marker_ids), n_pts)
+        collected_ents = min(len(self._creation_entity_ids), n_ent)
+        if n_ent > 0:
+            self.modelChanged.emit(
+                f"{_CONSTRAINT_LABEL.get(self._mode, 'Constraint')}: "
+                f"{collected_pts}/{n_pts} points, {collected_ents}/{n_ent} curves"
+            )
+        else:
+            self.modelChanged.emit(
+                f"{_CONSTRAINT_LABEL.get(self._mode, 'Constraint')}: "
+                f"{collected_pts}/{n_pts} points"
+            )
         if len(self._sensor_marker_ids) >= n_pts and len(self._creation_entity_ids) >= n_ent:
             self._finalize_sketch_constraint_creation()
 
@@ -2495,9 +2592,16 @@ class MechanismCanvas(QtWidgets.QWidget):
             start = self._to_screen(self._joint_start_marker.x, self._joint_start_marker.y, transform)
             end = self._to_screen(self._hover_world[0], self._hover_world[1], transform)
             painter.drawLine(start, end)
-        if self._slider_start_marker is not None and self._hover_world is not None:
+        if self._slider_joint_start is not None and self._hover_world is not None:
             painter.setPen(QtGui.QPen(QtGui.QColor("#8d6cab"), 2.0, QtCore.Qt.PenStyle.DashLine))
-            start = self._to_screen(self._slider_start_marker.x, self._slider_start_marker.y, transform)
+            if isinstance(self._slider_joint_start, CanvasMarker):
+                start = self._to_screen(self._slider_joint_start.x, self._slider_joint_start.y, transform)
+            else:
+                start = self._to_screen(
+                    self._slider_joint_start.origin_x,
+                    self._slider_joint_start.origin_y,
+                    transform,
+                )
             end = self._to_screen(self._hover_world[0], self._hover_world[1], transform)
             painter.drawLine(start, end)
         if self._mode in {
@@ -2819,7 +2923,13 @@ class MechanismCanvas(QtWidgets.QWidget):
         self.modelChanged.emit(f"Created {name}")
         self.set_mode(CanvasMode.SELECT)
 
-    def _create_slider_joint(self, marker: CanvasMarker, slider: CanvasSlider) -> None:
+    def _create_slider_joint(
+        self,
+        marker: CanvasMarker,
+        slider: CanvasSlider,
+        *,
+        align: str = "marker_to_slider",
+    ) -> None:
         if not self._require_editing():
             return
         details = self._request_ground_or_slider_joint("SliderJoint")
@@ -2831,6 +2941,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             slider.entity_id,
             joint_type=joint_type,
             name=name,
+            align=align,
         )
         self.entitySelected.emit(joint_id)
         self.modelChanged.emit(f"Created {name}")
@@ -2856,21 +2967,17 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def _selected_body(self, fallback_body: str | None = None) -> Body | None:
         if fallback_body is not None:
-            return self.app_service._find_body(fallback_body)
+            return self.app_service.get_body(fallback_body)
         if self._selected_entity_id is None:
             return None
-        try:
-            entity = self.app_service._find_entity(self._selected_entity_id)
-        except ValueError:
+        entity = self.app_service.get_entity(self._selected_entity_id)
+        if entity is None:
             return None
         if isinstance(entity, Body):
             return entity
-        if isinstance(entity, CanvasMarker):  # pragma: no cover - defensive
-            return self.app_service._find_body(entity.body_id)
-        try:
-            return self.app_service._find_body_by_marker(self._selected_entity_id)
-        except ValueError:
-            return None
+        if hasattr(entity, "body_id"):
+            return self.app_service.get_body(entity.body_id)
+        return self.app_service.get_body_by_marker(self._selected_entity_id)
 
     def _mm_expression(self, value: float) -> str:
         return f"{value:.3f} mm"
@@ -2879,12 +2986,11 @@ class MechanismCanvas(QtWidgets.QWidget):
         return f"{value:.6f} deg"
 
     def _marker_label(self, marker_id: str) -> str:
-        try:
-            marker = self.app_service._find_entity(marker_id)
-            body = self.app_service._find_body_by_marker(marker_id)
+        marker = self.app_service.get_entity(marker_id)
+        body = self.app_service.get_body_by_marker(marker_id)
+        if marker is not None and body is not None:
             return f"{body.name}.{marker.name}"
-        except Exception:
-            return marker_id
+        return marker_id
 
     def _next_name(self, prefix: str, existing: list[str]) -> str:
         index = 1
@@ -2980,7 +3086,9 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _rename_entity_dialog(self, entity_id: str) -> None:
         if not self._require_editing():
             return
-        entity = self.app_service._find_entity(entity_id)
+        entity = self.app_service.get_entity(entity_id)
+        if entity is None:
+            return
         old_name = entity.name
         name, accepted = QtWidgets.QInputDialog.getText(self, "Rename", "Name:", text=entity.name)
         if not accepted or not name.strip():
@@ -2991,7 +3099,9 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _toggle_joint_type(self, joint_id: str) -> None:
         if not self._require_editing():
             return
-        joint = self.app_service._find_joint(joint_id)
+        joint = self.app_service.get_joint(joint_id)
+        if joint is None:
+            return
         target = JointType.RIGID.value if joint.type is JointType.REVOLUTE else JointType.REVOLUTE.value
         self.app_service.set_joint_type(joint_id, target)
         self.modelChanged.emit(f"Joint {joint.name} set to {target}")
@@ -2999,7 +3109,9 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _edit_driver_law_dialog(self, driver_id: str) -> None:
         if not self._require_editing():
             return
-        driver = self.app_service._find_entity(driver_id)
+        driver = self.app_service.get_entity(driver_id)
+        if driver is None or not hasattr(driver, "law"):
+            return
         name, accepted = QtWidgets.QInputDialog.getText(self, "Driver Law", "Law:", text=driver.law.expression)
         if not accepted or not name.strip():
             return
@@ -3041,14 +3153,15 @@ class MechanismCanvas(QtWidgets.QWidget):
                     pose_x + cos_a * assembled_marker.local_x - sin_a * assembled_marker.local_y,
                     pose_y + sin_a * assembled_marker.local_x + cos_a * assembled_marker.local_y,
                 )
-        try:
-            body = self.app_service._find_body(body_id)
-            marker = next(item for item in body.markers if item.id == marker_id)
-            x = self.app_service.expression_service.evaluate_property(marker.x, project.parameters).value
-            y = self.app_service.expression_service.evaluate_property(marker.y, project.parameters).value
-            return x, y
-        except Exception:
+        body = self.app_service.get_body(body_id)
+        if body is None:
             return None, None
+        marker = next((item for item in body.markers if item.id == marker_id), None)
+        if marker is None:
+            return None, None
+        x = self.app_service.expression_service.evaluate_property(marker.x, project.parameters).value
+        y = self.app_service.expression_service.evaluate_property(marker.y, project.parameters).value
+        return x, y
 
     def _slider_preview_for_handle(
         self,
@@ -3056,7 +3169,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         handle_kind: str,
         world: tuple[float, float],
     ) -> dict[str, float]:
-        slider = self.app_service._find_entity(slider_id)
+        slider = self.app_service.get_entity(slider_id)
         if not isinstance(slider, Slider):
             raise ValueError("Unknown slider for preview")
         project = self.app_service.project
@@ -3142,9 +3255,8 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _create_driver_for_joint(self, joint_id: str, driver_type: str) -> None:
         if not self._require_editing():
             return
-        try:
-            joint = self.app_service._find_joint(joint_id)
-        except ValueError:
+        joint = self.app_service.get_joint(joint_id)
+        if joint is None:
             self.modelChanged.emit("Invalid joint selected")
             return
         default_name = self._next_name(

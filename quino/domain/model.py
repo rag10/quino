@@ -192,7 +192,6 @@ class SketchArc:
     point_c_id: str
     visible: bool = True
     construction: bool = False
-    arc_center_mode: bool = False
     style: Style = field(default_factory=Style)
     metadata: Metadata = field(default_factory=Metadata)
 
@@ -217,7 +216,6 @@ class SketchConstraint:
     type: SketchConstraintType
     references: list[str]
     value: ScalarProperty | None = None
-    driving: bool = False
     entity_references: list[str] = field(default_factory=list)
     metadata: Metadata = field(default_factory=Metadata)
 

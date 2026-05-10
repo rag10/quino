@@ -38,13 +38,6 @@ class PropertyValueInput:
 
 
 @dataclass(slots=True)
-class SensorInput:
-    name: str
-    sensor_type: str
-    marker_ids: list[str]
-
-
-@dataclass(slots=True)
 class SketchPointInput:
     x: str
     y: str
@@ -86,4 +79,3 @@ class SketchConstraintInput:
     references: list[str]
     value: str | None = None
     name: str | None = None
-    driving: bool = False

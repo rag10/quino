@@ -1,27 +1,46 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 from quino.domain.model import Project, Sketch, SketchCircle, SketchArc, SketchConstraint, SketchPoint
+from quino.domain.sketch_constraints import CONSTRAINT_SPECS
 from quino.domain.types import SketchConstraintType
 from quino.services.expressions import ExpressionService
 from quino.services.units import UnitService
 
 
-@dataclass(slots=True)
+@dataclass
 class SketchSolveResult:
     success: bool
     positions: dict[str, tuple[float, float]]
     iterations: int
     max_error: float
     message: str | None = None
+    constraint_errors: dict[str, float] = field(default_factory=dict)
+    bad_constraints: list[str] = field(default_factory=list)
 
 
 class SketchSolver:
     def __init__(self, expression_service: ExpressionService, unit_service: UnitService) -> None:
         self.expression_service = expression_service
         self.unit_service = unit_service
+        self._handlers: dict[SketchConstraintType, Callable[..., float]] = {
+            SketchConstraintType.COINCIDENT: self._apply_coincident,
+            SketchConstraintType.HORIZONTAL: self._apply_horizontal,
+            SketchConstraintType.VERTICAL: self._apply_vertical,
+            SketchConstraintType.DISTANCE: self._apply_distance_handler,
+            SketchConstraintType.PARALLEL: self._apply_parallel,
+            SketchConstraintType.PERPENDICULAR: self._apply_perpendicular,
+            SketchConstraintType.EQUAL_LENGTH: self._apply_equal_length,
+            SketchConstraintType.ANGLE: self._apply_angle_handler,
+            SketchConstraintType.MIDPOINT: self._apply_midpoint,
+            SketchConstraintType.COLLINEAR: self._apply_collinear,
+            SketchConstraintType.SYMMETRIC: self._apply_symmetric,
+            SketchConstraintType.ON_CIRCLE: self._apply_on_circle_handler,
+            SketchConstraintType.TANGENT: self._apply_tangent_handler,
+        }
 
     def solve(
         self,
@@ -64,12 +83,25 @@ class SketchSolver:
             if max_error <= tolerance:
                 return SketchSolveResult(True, positions, iteration + 1, max_error, None)
 
+        # Build per-constraint diagnostics on failure
+        constraint_errors: dict[str, float] = {}
+        bad_constraints: list[str] = []
+        for constraint in sketch.constraints:
+            error = self._apply_constraint(project, sketch, constraint, positions, locked_axes, tolerance)
+            constraint_errors[constraint.id] = error
+            if math.isinf(error):
+                bad_constraints.append(constraint.id)
+        msg = f"Sketch solver did not converge (max error {max_error:.3g} mm)"
+        if bad_constraints:
+            msg += f"; {len(bad_constraints)} malformed constraint(s)"
         return SketchSolveResult(
             False,
             positions,
             max_iterations,
             max_error,
-            f"Sketch solver did not converge (max error {max_error:.3g} mm)",
+            msg,
+            constraint_errors=constraint_errors,
+            bad_constraints=bad_constraints,
         )
 
     # ------------------------------------------------------------------
@@ -92,62 +124,74 @@ class SketchSolver:
     ) -> float:
         refs = [pid for pid in constraint.references if pid in positions]
         t = constraint.type
-
         if t is SketchConstraintType.FIX or not refs:
             return 0.0
-        if t is SketchConstraintType.COINCIDENT and len(refs) == 2:
-            ex = self._apply_axis_pair(refs[0], refs[1], positions, locked_axes, 0, tolerance)
-            ey = self._apply_axis_pair(refs[0], refs[1], positions, locked_axes, 1, tolerance)
-            return ex + ey
-        if t is SketchConstraintType.HORIZONTAL and len(refs) == 2:
-            return self._apply_axis_pair(refs[0], refs[1], positions, locked_axes, 1, tolerance)
-        if t is SketchConstraintType.VERTICAL and len(refs) == 2:
-            return self._apply_axis_pair(refs[0], refs[1], positions, locked_axes, 0, tolerance)
-        if t is SketchConstraintType.DISTANCE and len(refs) == 2 and constraint.value is not None:
-            target = self.expression_service.evaluate_property(constraint.value, project.parameters).value
-            return self._apply_distance(refs[0], refs[1], target, positions, locked_axes, tolerance)
-        if t is SketchConstraintType.PARALLEL and len(refs) == 4:
-            return self._apply_parallel(refs, positions, locked_axes, tolerance)
-        if t is SketchConstraintType.PERPENDICULAR and len(refs) == 4:
-            return self._apply_perpendicular(refs, positions, locked_axes, tolerance)
-        if t is SketchConstraintType.EQUAL_LENGTH and len(refs) == 4:
-            return self._apply_equal_length(refs, positions, locked_axes, tolerance)
-        if t is SketchConstraintType.ANGLE and len(refs) == 3 and constraint.value is not None:
-            quantity = self.expression_service.evaluate_expression(
-                constraint.value.expression,
-                project.parameters,
-            )
-            target_rad = self.unit_service.convert(quantity, "rad")
-            return self._apply_angle(refs, target_rad, positions, locked_axes, tolerance)
-        if t is SketchConstraintType.MIDPOINT and len(refs) == 3:
-            return self._apply_midpoint(refs, positions, locked_axes, tolerance)
-        if t is SketchConstraintType.COLLINEAR and len(refs) == 3:
-            return self._apply_collinear(refs, positions, locked_axes, tolerance)
-        if t is SketchConstraintType.SYMMETRIC and len(refs) == 4:
-            return self._apply_symmetric(refs, positions, locked_axes, tolerance)
-        if t is SketchConstraintType.ON_CIRCLE and len(refs) == 1 and constraint.entity_references:
-            return self._apply_on_circle(
-                project,
-                refs,
-                constraint.entity_references,
-                sketch,
-                positions,
-                locked_axes,
-                tolerance,
-            )
-        if t is SketchConstraintType.TANGENT and len(refs) == 2 and constraint.entity_references and constraint.value is not None:
-            sign = self.expression_service.evaluate_property(constraint.value, project.parameters).value
-            return self._apply_tangent(
-                project,
-                refs,
-                constraint.entity_references,
-                sign,
-                sketch,
-                positions,
-                locked_axes,
-                tolerance,
-            )
-        return 0.0
+        spec = CONSTRAINT_SPECS.get(t)
+        if spec is None:
+            return float("inf")
+        if len(refs) != spec.points:
+            return float("inf")
+        if len(constraint.entity_references) != spec.entities:
+            return float("inf")
+        handler = self._handlers.get(t)
+        if handler is None:
+            return float("inf")
+        return handler(project, sketch, constraint, refs, positions, locked_axes, tolerance)
+
+    def _apply_coincident(self, project, sketch, constraint, refs, positions, locked_axes, tolerance):
+        ex = self._apply_axis_pair(refs[0], refs[1], positions, locked_axes, 0, tolerance)
+        ey = self._apply_axis_pair(refs[0], refs[1], positions, locked_axes, 1, tolerance)
+        return ex + ey
+
+    def _apply_horizontal(self, project, sketch, constraint, refs, positions, locked_axes, tolerance):
+        return self._apply_axis_pair(refs[0], refs[1], positions, locked_axes, 1, tolerance)
+
+    def _apply_vertical(self, project, sketch, constraint, refs, positions, locked_axes, tolerance):
+        return self._apply_axis_pair(refs[0], refs[1], positions, locked_axes, 0, tolerance)
+
+    def _apply_distance_handler(self, project, sketch, constraint, refs, positions, locked_axes, tolerance):
+        if constraint.value is None:
+            return 0.0
+        target = self.expression_service.evaluate_property(constraint.value, project.parameters).value
+        return self._apply_distance(refs[0], refs[1], target, positions, locked_axes, tolerance)
+
+    def _apply_angle_handler(self, project, sketch, constraint, refs, positions, locked_axes, tolerance):
+        if constraint.value is None:
+            return 0.0
+        quantity = self.expression_service.evaluate_expression(
+            constraint.value.expression,
+            project.parameters,
+        )
+        target_rad = self.unit_service.convert(quantity, "rad")
+        return self._apply_angle(project, sketch, constraint, refs, target_rad, positions, locked_axes, tolerance)
+
+    def _apply_on_circle_handler(self, project, sketch, constraint, refs, positions, locked_axes, tolerance):
+        if not constraint.entity_references:
+            return 0.0
+        return self._apply_on_circle(
+            project,
+            refs,
+            constraint.entity_references,
+            sketch,
+            positions,
+            locked_axes,
+            tolerance,
+        )
+
+    def _apply_tangent_handler(self, project, sketch, constraint, refs, positions, locked_axes, tolerance):
+        if not constraint.entity_references or constraint.value is None:
+            return 0.0
+        sign = self.expression_service.evaluate_property(constraint.value, project.parameters).value
+        return self._apply_tangent(
+            project,
+            refs,
+            constraint.entity_references,
+            sign,
+            sketch,
+            positions,
+            locked_axes,
+            tolerance,
+        )
 
     # ------------------------------------------------------------------
     # Existing helpers
@@ -222,6 +266,9 @@ class SketchSolver:
 
     def _apply_parallel(
         self,
+        project,
+        sketch,
+        constraint,
         refs: list[str],
         positions: dict[str, tuple[float, float]],
         locked_axes: dict[str, list[bool]],
@@ -250,6 +297,9 @@ class SketchSolver:
 
     def _apply_perpendicular(
         self,
+        project,
+        sketch,
+        constraint,
         refs: list[str],
         positions: dict[str, tuple[float, float]],
         locked_axes: dict[str, list[bool]],
@@ -289,6 +339,9 @@ class SketchSolver:
 
     def _apply_equal_length(
         self,
+        project,
+        sketch,
+        constraint,
         refs: list[str],
         positions: dict[str, tuple[float, float]],
         locked_axes: dict[str, list[bool]],
@@ -313,6 +366,9 @@ class SketchSolver:
 
     def _apply_angle(
         self,
+        project,
+        sketch,
+        constraint,
         refs: list[str],
         target_rad: float,
         positions: dict[str, tuple[float, float]],
@@ -367,6 +423,9 @@ class SketchSolver:
 
     def _apply_midpoint(
         self,
+        project,
+        sketch,
+        constraint,
         refs: list[str],
         positions: dict[str, tuple[float, float]],
         locked_axes: dict[str, list[bool]],
@@ -405,6 +464,9 @@ class SketchSolver:
 
     def _apply_collinear(
         self,
+        project,
+        sketch,
+        constraint,
         refs: list[str],
         positions: dict[str, tuple[float, float]],
         locked_axes: dict[str, list[bool]],
@@ -444,6 +506,9 @@ class SketchSolver:
 
     def _apply_symmetric(
         self,
+        project,
+        sketch,
+        constraint,
         refs: list[str],
         positions: dict[str, tuple[float, float]],
         locked_axes: dict[str, list[bool]],
@@ -676,32 +741,4 @@ class SketchSolver:
             angle -= 2.0 * math.pi
         return angle
 
-    def _apply_perpendicular(
-        self,
-        refs: list[str],
-        positions: dict[str, tuple[float, float]],
-        locked_axes: dict[str, list[bool]],
-        tolerance: float,
-    ) -> float:
-        """refs[0..1] = line 1, refs[2..3] = line 2. Force perpendicular directions."""
-        ax, ay = positions[refs[0]]
-        bx, by = positions[refs[1]]
-        cx, cy = positions[refs[2]]
-        dx, dy = positions[refs[3]]
-        d1x, d1y = bx - ax, by - ay
-        d2x, d2y = dx - cx, dy - cy
-        len1 = math.hypot(d1x, d1y)
-        len2 = math.hypot(d2x, d2y)
-        if len1 < 1e-12 or len2 < 1e-12:
-            return 0.0
-        phi1 = math.atan2(d1y, d1x)
-        phi2 = math.atan2(d2y, d2x)
-        delta = self._wrap_angle(phi2 - phi1)
-        target = math.pi * 0.5 if abs(delta - math.pi * 0.5) <= abs(delta + math.pi * 0.5) else -math.pi * 0.5
-        correction = self._wrap_angle(delta - target)
-        error = abs(math.cos(delta))
-        if error <= tolerance:
-            return error
-        self._rotate_line(refs[0], refs[1], 0.5 * correction, positions, locked_axes)
-        self._rotate_line(refs[2], refs[3], -0.5 * correction, positions, locked_axes)
-        return error
+

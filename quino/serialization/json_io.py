@@ -334,7 +334,6 @@ class JsonMapper:
             "type": constraint.type.value,
             "references": list(constraint.references),
             "value": self._scalar_to_dict(constraint.value) if constraint.value is not None else None,
-            "driving": constraint.driving,
             "entity_references": list(constraint.entity_references),
             "metadata": constraint.metadata.values,
         }
@@ -346,7 +345,6 @@ class JsonMapper:
             type=SketchConstraintType(data["type"]),
             references=list(data.get("references", [])),
             value=self._scalar_from_dict(data["value"]) if data.get("value") is not None else None,
-            driving=data.get("driving", False),
             entity_references=list(data.get("entity_references", [])),
             metadata=Metadata(data.get("metadata", {})),
         )
@@ -377,7 +375,6 @@ class JsonMapper:
             base["point_a_id"] = entity.point_a_id
             base["point_b_id"] = entity.point_b_id
             base["point_c_id"] = entity.point_c_id
-            base["arc_center_mode"] = entity.arc_center_mode
         elif isinstance(entity, SketchInfiniteLine):
             base["point_a_id"] = entity.point_a_id
             base["point_b_id"] = entity.point_b_id
@@ -420,7 +417,6 @@ class JsonMapper:
                 point_a_id=data["point_a_id"],
                 point_b_id=data["point_b_id"],
                 point_c_id=data["point_c_id"],
-                arc_center_mode=data.get("arc_center_mode", False),
                 **common,
             )
         return SketchInfiniteLine(

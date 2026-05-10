@@ -57,6 +57,33 @@ class ExudynAdapter(SolverAdapter):
         except Exception as exc:  # pragma: no cover - depends on external package/runtime
             dynamic_error = exc
             dynamic_traceback = self._format_exception(exc)
+            if self._has_translation_drivers(assembled):
+                try:
+                    exu = importlib.import_module("exudyn")
+                    fallback = self._run_with_exudyn(
+                        project,
+                        assembled,
+                        exu,
+                        solve_mode="dynamic",
+                        duration=duration,
+                        steps=steps,
+                        translation_driver_mode="servo",
+                    )
+                    fallback.warnings.append(
+                        f"Translation driver constraint fallback used: {dynamic_error}"
+                    )
+                    fallback.messages.append(
+                        "Translation driver constraint solve failed; compliant servo fallback used"
+                    )
+                    fallback.messages.append(dynamic_traceback)
+                    return fallback
+                except Exception as servo_exc:
+                    dynamic_error = (
+                        f"{dynamic_error}; translation servo fallback failed: {servo_exc}"
+                    )
+                    dynamic_traceback = "\n".join(
+                        [dynamic_traceback, "Solver phase: translation servo fallback", self._format_exception(servo_exc)]
+                    )
             if assembled.drivers:
                 try:
                     exu = importlib.import_module("exudyn")
@@ -106,6 +133,7 @@ class ExudynAdapter(SolverAdapter):
         solve_mode: str,
         duration: float,
         steps: int,
+        translation_driver_mode: str = "constraint",
     ) -> SimulationResult:
         item_interface = importlib.import_module("exudyn.itemInterface")
         sc = exu.SystemContainer()
@@ -115,7 +143,17 @@ class ExudynAdapter(SolverAdapter):
         for joint in assembled.joints:
             self._create_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, joint)
         for driver in assembled.drivers:
-            self._create_driver(mbs, item_interface, project, assembled, body_objects, node_numbers, ground_object, driver)
+            self._create_driver(
+                mbs,
+                item_interface,
+                project,
+                assembled,
+                body_objects,
+                node_numbers,
+                ground_object,
+                driver,
+                translation_driver_mode=translation_driver_mode,
+            )
         mbs.Assemble()
         time: list[float] = []
         frames: list[dict[str, float]] = []
@@ -232,33 +270,27 @@ class ExudynAdapter(SolverAdapter):
         a = joint.endpoint_a
         b = joint.endpoint_b
         if a.kind is JointEndpointKind.MARKER and b.kind is JointEndpointKind.MARKER:
-            self._create_marker_to_marker_joint(mbs, item_interface, assembled, body_objects, node_numbers, joint)
+            self._create_marker_to_marker_joint(mbs, item_interface, assembled, body_objects, node_numbers, a, b, joint.type)
             return
         if a.kind is JointEndpointKind.MARKER and b.kind is JointEndpointKind.GROUND:
-            self._create_marker_to_ground_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, joint)
+            self._create_marker_to_ground_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, a, joint.type)
             return
         if a.kind is JointEndpointKind.MARKER and b.kind is JointEndpointKind.SLIDER:
-            self._create_marker_to_slider_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, joint)
+            self._create_marker_to_slider_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, a, b, joint.type, joint.name)
             return
         if b.kind is JointEndpointKind.MARKER and a.kind is JointEndpointKind.GROUND:
-            swapped = joint
-            swapped.endpoint_a, swapped.endpoint_b = joint.endpoint_b, joint.endpoint_a
-            self._create_marker_to_ground_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, swapped)
-            swapped.endpoint_a, swapped.endpoint_b = joint.endpoint_a, joint.endpoint_b
+            self._create_marker_to_ground_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, b, joint.type)
             return
         if b.kind is JointEndpointKind.MARKER and a.kind is JointEndpointKind.SLIDER:
-            swapped = joint
-            swapped.endpoint_a, swapped.endpoint_b = joint.endpoint_b, joint.endpoint_a
-            self._create_marker_to_slider_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, swapped)
-            swapped.endpoint_a, swapped.endpoint_b = joint.endpoint_a, joint.endpoint_b
+            self._create_marker_to_slider_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, b, a, joint.type, joint.name)
             return
         raise ValueError(f"Unsupported joint topology for Exudyn adapter: {joint.name}")
 
-    def _create_marker_to_marker_joint(self, mbs, item_interface, assembled, body_objects, node_numbers, joint) -> None:
-        body_a = assembled.bodies[joint.endpoint_a.body_id]
-        body_b = assembled.bodies[joint.endpoint_b.body_id]
-        marker_a = body_a.markers[joint.endpoint_a.marker_id]
-        marker_b = body_b.markers[joint.endpoint_b.marker_id]
+    def _create_marker_to_marker_joint(self, mbs, item_interface, assembled, body_objects, node_numbers, endpoint_a, endpoint_b, joint_type) -> None:
+        body_a = assembled.bodies[endpoint_a.body_id]
+        body_b = assembled.bodies[endpoint_b.body_id]
+        marker_a = body_a.markers[endpoint_a.marker_id]
+        marker_b = body_b.markers[endpoint_b.marker_id]
         marker_number_a = mbs.AddMarker(
             item_interface.MarkerBodyRigid(
                 bodyNumber=body_objects[body_a.body_id],
@@ -272,7 +304,7 @@ class ExudynAdapter(SolverAdapter):
             )
         )
         mbs.AddObject(item_interface.ObjectJointRevolute2D(markerNumbers=[marker_number_a, marker_number_b]))
-        if joint.type is JointType.RIGID:
+        if joint_type is JointType.RIGID:
             mbs.CreateCoordinateConstraint(
                 bodyNumbers=[body_objects[body_a.body_id], body_objects[body_b.body_id]],
                 coordinates=[2, 2],
@@ -280,10 +312,10 @@ class ExudynAdapter(SolverAdapter):
             )
 
     def _create_marker_to_ground_joint(
-        self, mbs, item_interface, assembled, body_objects, node_numbers, ground_object, joint
+        self, mbs, item_interface, assembled, body_objects, node_numbers, ground_object, endpoint, joint_type
     ) -> None:
-        body = assembled.bodies[joint.endpoint_a.body_id]
-        marker = body.markers[joint.endpoint_a.marker_id]
+        body = assembled.bodies[endpoint.body_id]
+        marker = body.markers[endpoint.marker_id]
         ground_marker = mbs.AddMarker(
             item_interface.MarkerBodyRigid(
                 bodyNumber=ground_object,
@@ -297,7 +329,7 @@ class ExudynAdapter(SolverAdapter):
             )
         )
         mbs.AddObject(item_interface.ObjectJointRevolute2D(markerNumbers=[ground_marker, body_marker]))
-        if joint.type is JointType.RIGID:
+        if joint_type is JointType.RIGID:
             mbs.CreateCoordinateConstraint(
                 bodyNumbers=[ground_object, body_objects[body.body_id]],
                 coordinates=[None, 2],
@@ -305,11 +337,11 @@ class ExudynAdapter(SolverAdapter):
             )
 
     def _create_marker_to_slider_joint(
-        self, mbs, item_interface, assembled, body_objects, node_numbers, ground_object, joint
+        self, mbs, item_interface, assembled, body_objects, node_numbers, ground_object, endpoint_a, endpoint_b, joint_type, joint_name
     ) -> None:
-        body = assembled.bodies[joint.endpoint_a.body_id]
-        marker = body.markers[joint.endpoint_a.marker_id]
-        slider = assembled.sliders[joint.endpoint_b.slider_id]
+        body = assembled.bodies[endpoint_a.body_id]
+        marker = body.markers[endpoint_a.marker_id]
+        slider = assembled.sliders[endpoint_b.slider_id]
         normal_translation_marker = mbs.AddMarker(
             item_interface.MarkerBodiesRelativeTranslationCoordinate(
                 bodyNumbers=[ground_object, body_objects[body.body_id]],
@@ -323,12 +355,12 @@ class ExudynAdapter(SolverAdapter):
         zero_coordinate_marker = mbs.AddMarker(item_interface.MarkerNodeCoordinate(nodeNumber=ground_node, coordinate=0))
         mbs.AddObject(
             item_interface.CoordinateConstraint(
-                name=joint.name,
+                name=joint_name,
                 markerNumbers=[normal_translation_marker, zero_coordinate_marker],
                 offset=0.0,
             )
         )
-        if joint.type is JointType.RIGID:
+        if joint_type is JointType.RIGID:
             mbs.CreateCoordinateConstraint(
                 bodyNumbers=[ground_object, body_objects[body.body_id]],
                 coordinates=[None, 2],
@@ -382,13 +414,35 @@ class ExudynAdapter(SolverAdapter):
             )
         )
 
-    def _create_driver(self, mbs, item_interface, project: Project, assembled: AssembledMechanism, body_objects: dict[str, int], node_numbers: dict[str, int], ground_object: int, driver: AssembledDriver) -> None:
+    def _create_driver(
+        self,
+        mbs,
+        item_interface,
+        project: Project,
+        assembled: AssembledMechanism,
+        body_objects: dict[str, int],
+        node_numbers: dict[str, int],
+        ground_object: int,
+        driver: AssembledDriver,
+        *,
+        translation_driver_mode: str = "constraint",
+    ) -> None:
         joint = next(joint for joint in assembled.joints if joint.id == driver.target_joint_id)
         if driver.driver_type == DriverType.ROTATION.value:
             self._create_rotation_driver(mbs, item_interface, project, node_numbers, ground_object, driver, joint)
             return
         if driver.driver_type == DriverType.TRANSLATION.value:
-            self._create_translation_driver(mbs, item_interface, project, assembled, body_objects, ground_object, driver, joint)
+            self._create_translation_driver(
+                mbs,
+                item_interface,
+                project,
+                assembled,
+                body_objects,
+                ground_object,
+                driver,
+                joint,
+                mode=translation_driver_mode,
+            )
             return
         raise ValueError(f"Unsupported driver type: {driver.driver_type}")
 
@@ -404,12 +458,28 @@ class ExudynAdapter(SolverAdapter):
             )
         )
 
-    def _create_translation_driver(self, mbs, item_interface, project: Project, assembled: AssembledMechanism, body_objects: dict[str, int], ground_object: int, driver: AssembledDriver, joint) -> None:
+    def _create_translation_driver(
+        self,
+        mbs,
+        item_interface,
+        project: Project,
+        assembled: AssembledMechanism,
+        body_objects: dict[str, int],
+        ground_object: int,
+        driver: AssembledDriver,
+        joint,
+        *,
+        mode: str = "constraint",
+    ) -> None:
         marker_endpoint = joint.endpoint_a if joint.endpoint_a.kind is JointEndpointKind.MARKER else joint.endpoint_b
         slider_endpoint = joint.endpoint_a if joint.endpoint_a.kind is JointEndpointKind.SLIDER else joint.endpoint_b
         body = assembled.bodies[marker_endpoint.body_id]
         marker = body.markers[marker_endpoint.marker_id]
         slider = assembled.sliders[slider_endpoint.slider_id]
+        initial_coordinate = (
+            (marker.global_x - slider.origin_x) * slider.axis_x
+            + (marker.global_y - slider.origin_y) * slider.axis_y
+        )
         relative_translation_marker = mbs.AddMarker(
             item_interface.MarkerBodiesRelativeTranslationCoordinate(
                 bodyNumbers=[ground_object, body_objects[body.body_id]],
@@ -421,15 +491,46 @@ class ExudynAdapter(SolverAdapter):
         )
         ground_node = mbs.AddNode(item_interface.NodePointGround(referenceCoordinates=[0.0, 0.0, 0.0]))
         zero_coordinate_marker = mbs.AddMarker(item_interface.MarkerNodeCoordinate(nodeNumber=ground_node, coordinate=0))
+        if mode == "servo":
+            mbs.AddObject(
+                item_interface.ObjectConnectorCoordinateSpringDamper(
+                    name=driver.name,
+                    markerNumbers=[relative_translation_marker, zero_coordinate_marker],
+                    stiffness=1e5,
+                    damping=1e3,
+                    springForceUserFunction=self._make_servo_force_function(
+                        project,
+                        driver,
+                        Dimension.LENGTH,
+                        base_value=initial_coordinate,
+                    ),
+                )
+            )
+            return
         mbs.AddObject(
-            item_interface.ObjectConnectorCoordinateSpringDamper(
+            item_interface.CoordinateConstraint(
                 name=driver.name,
                 markerNumbers=[relative_translation_marker, zero_coordinate_marker],
-                stiffness=1e5,
-                damping=1e3,
-                springForceUserFunction=self._make_servo_force_function(project, driver, Dimension.LENGTH),
+                offset=0.0,
+                offsetUserFunction=self._make_offset_function(
+                    project,
+                    driver,
+                    Dimension.LENGTH,
+                    base_value=initial_coordinate,
+                    scale=-1.0,
+                ),
+                offsetUserFunction_t=self._make_offset_function_t(
+                    project,
+                    driver,
+                    Dimension.LENGTH,
+                    base_value=initial_coordinate,
+                    scale=-1.0,
+                ),
             )
         )
+
+    def _has_translation_drivers(self, assembled: AssembledMechanism) -> bool:
+        return any(driver.driver_type == DriverType.TRANSLATION.value for driver in assembled.drivers)
 
     def _rotation_coordinate_markers(self, mbs, item_interface, node_numbers: dict[str, int], ground_object: int, joint) -> list[int]:
         if joint.endpoint_a.kind is JointEndpointKind.MARKER and joint.endpoint_b.kind is JointEndpointKind.GROUND:
@@ -468,9 +569,16 @@ class ExudynAdapter(SolverAdapter):
             return [marker_a, marker_b]
         raise ValueError(f"Rotation driver requires a revolute joint between marker-ground or marker-marker: {joint.name}")
 
-    def _make_servo_force_function(self, project: Project, driver: AssembledDriver, expected_dimension: Dimension):
+    def _make_servo_force_function(
+        self,
+        project: Project,
+        driver: AssembledDriver,
+        expected_dimension: Dimension,
+        *,
+        base_value: float = 0.0,
+    ):
         def spring_force_fn(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):
-            target = self._evaluate_driver_value(project, driver, expected_dimension, float(t))
+            target = base_value + self._evaluate_driver_value(project, driver, expected_dimension, float(t))
             target_velocity = self._evaluate_driver_rate(project, driver, expected_dimension, float(t))
             return stiffness * (target - coordinate) + damping * (target_velocity - velocity)
 
@@ -496,14 +604,38 @@ class ExudynAdapter(SolverAdapter):
             - self._evaluate_driver_value(project, driver, expected_dimension, time_value - dt)
         ) / (2 * dt)
 
-    def _make_offset_function(self, project: Project, driver: AssembledDriver, expected_dimension: Dimension):
+    def _make_offset_function(
+        self,
+        project: Project,
+        driver: AssembledDriver,
+        expected_dimension: Dimension,
+        *,
+        base_value: float = 0.0,
+        scale: float = 1.0,
+    ):
         def offset_fn(mbs, t, itemNumber, lOffset):
-            return self._evaluate_driver_value(project, driver, expected_dimension, float(t))
+            return scale * (
+                base_value + self._evaluate_driver_value(project, driver, expected_dimension, float(t))
+            )
 
         return offset_fn
 
-    def _make_offset_function_t(self, project: Project, driver: AssembledDriver, expected_dimension: Dimension):
-        offset_fn = self._make_offset_function(project, driver, expected_dimension)
+    def _make_offset_function_t(
+        self,
+        project: Project,
+        driver: AssembledDriver,
+        expected_dimension: Dimension,
+        *,
+        base_value: float = 0.0,
+        scale: float = 1.0,
+    ):
+        offset_fn = self._make_offset_function(
+            project,
+            driver,
+            expected_dimension,
+            base_value=base_value,
+            scale=scale,
+        )
 
         def offset_fn_t(mbs, t, itemNumber, lOffset):
             dt = 1e-6
@@ -519,7 +651,10 @@ class ExudynAdapter(SolverAdapter):
             state[f"{body_id}.x"] = body.origin_x + float(coordinates[0])
             state[f"{body_id}.y"] = body.origin_y + float(coordinates[1])
             if len(coordinates) > 2:
-                state[f"{body_id}.angle"] = body.angle + float(coordinates[2])
+                state[f"{body_id}.angle"] = self._equivalent_angle_near(
+                    body.angle + float(coordinates[2]),
+                    body.angle,
+                )
         return state
 
     def _load_solution_frames(
@@ -560,7 +695,9 @@ class ExudynAdapter(SolverAdapter):
                 body = assembled.bodies[body_id]
                 frame[f"{body_id}.x"] = body.origin_x + float(row[start])
                 frame[f"{body_id}.y"] = body.origin_y + float(row[start + 1])
-                frame[f"{body_id}.angle"] = body.angle + float(row[start + 2])
+                raw_angle = body.angle + float(row[start + 2])
+                previous_angle = frames[-1].get(f"{body_id}.angle", body.angle) if frames else body.angle
+                frame[f"{body_id}.angle"] = self._equivalent_angle_near(raw_angle, previous_angle)
             if frame:
                 frames.append(frame)
         if not frames:
@@ -570,6 +707,10 @@ class ExudynAdapter(SolverAdapter):
         if project:
             self._record_sensor_data(project, assembled, body_order, time, frames)
         return time, frames
+
+    def _equivalent_angle_near(self, angle: float, reference: float) -> float:
+        two_pi = 2.0 * math.pi
+        return reference + math.atan2(math.sin(angle - reference), math.cos(angle - reference))
 
     def _record_sensor_data(
         self,

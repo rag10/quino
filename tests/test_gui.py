@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+
+import pytest
 from PySide6 import QtCore, QtTest, QtWidgets
 
 from quino.application.service import ApplicationService
@@ -139,6 +142,87 @@ def test_playback_controls_are_disabled_without_simulation() -> None:
     assert not window.action_play_pause.isEnabled()
     assert not window.action_stop.isEnabled()
     assert not window.timeline_slider.isEnabled()
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_save_uses_save_as_for_unsaved_project(monkeypatch, tmp_path) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    target = tmp_path / "demo"
+
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getSaveFileName",
+        lambda *args, **kwargs: (str(target), "QUINO Project (*.quino.json)"),
+    )
+
+    assert window._save_project() is True
+
+    assert window._current_project_path == tmp_path / "demo.quino.json"
+    assert not window._project_dirty
+    assert (tmp_path / "demo.quino.json").exists()
+    window.close()
+    qt_app.processEvents()
+
+
+def test_save_overwrites_current_project_without_prompting_for_path(monkeypatch, tmp_path) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    path = tmp_path / "project.quino.json"
+    window._save_project_to_path(path)
+    window.app_service.project.name = "Changed Name"
+    window._mark_project_dirty()
+
+    def fail_save_dialog(*args, **kwargs):
+        raise AssertionError("Save should not open Save As when a project path is known")
+
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", fail_save_dialog)
+
+    assert window._save_project() is True
+
+    data = json.loads(path.read_text())
+    assert data["project"]["name"] == "Changed Name"
+    assert not window._project_dirty
+    window.close()
+    qt_app.processEvents()
+
+
+def test_open_project_cancel_keeps_dirty_project(monkeypatch) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    original_project_id = window.app_service.project.id
+    window._mark_project_dirty()
+
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "warning",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Cancel,
+    )
+
+    def fail_open_dialog(*args, **kwargs):
+        raise AssertionError("Open dialog should not be shown after cancelling unsaved changes")
+
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getOpenFileName", fail_open_dialog)
+
+    window._open_project()
+
+    assert window.app_service.project.id == original_project_id
+    assert window._project_dirty
+    window.close()
+    qt_app.processEvents()
+
+
+def test_mode_selector_is_overlaid_on_canvas() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    assert window._mode_model_btn.parentWidget().objectName() == "modeSelectorOverlay"
+    assert window._mode_model_btn.parentWidget().parentWidget() is window._canvas_stack
+    assert window._mode_model_btn.parentWidget().pos() == QtCore.QPoint(12, 12)
 
     window.close()
     qt_app.processEvents()
@@ -439,6 +523,38 @@ def test_canvas_can_drag_slider_center_in_t0() -> None:
     slider = window.app_service._find_entity(slider_id)
     assert abs(_expr_value(slider.origin_x.expression) - 200.0) < 0.5
     assert abs(_expr_value(slider.origin_y.expression) - 20.0) < 0.5
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_canvas_connect_slider_accepts_slider_first_order(monkeypatch) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+    app = window.app_service
+    app.new_project("SliderFirst")
+    body_id = app.create_body("Mass", [MarkerInput("50 mm", "20 mm", "P")])
+    slider_id = app.create_slider_from_points("Guide", "0 mm", "0 mm", "100 mm", "0 mm")
+    marker_id = next(marker.id for marker in app.get_body(body_id).markers if marker.name == "P")
+    monkeypatch.setattr(window.canvas, "_request_ground_or_slider_joint", lambda prefix: (f"{prefix}1", "revolute"))
+    window.refresh_all()
+
+    window.action_slider_connect_tool.trigger()
+    pos_slider = window.canvas.screen_position_for_entity(slider_id)
+    pos_marker = window.canvas.screen_position_for_entity(marker_id)
+    assert pos_slider is not None and pos_marker is not None
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=pos_slider)
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=pos_marker)
+    qt_app.processEvents()
+
+    marker = app.get_entity(marker_id)
+    slider = app.get_entity(slider_id)
+    assert _expr_value(marker.x.expression) == pytest.approx(50.0, abs=0.5)
+    assert _expr_value(marker.y.expression) == pytest.approx(0.0, abs=0.5)
+    assert _expr_value(slider.origin_y.expression) == pytest.approx(0.0, abs=0.5)
+    assert not any(message.code == "slider_joint_gap" for message in app.validate_model().messages)
 
     window.close()
     qt_app.processEvents()
@@ -798,6 +914,32 @@ def test_canvas_can_create_sketch_constraints_and_solve_on_drag() -> None:
     point_a = window.app_service._find_sketch_point(p1)
     point_b = window.app_service._find_sketch_point(p2)
     assert point_a.y.expression == point_b.y.expression
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_sketch_mode_renders_dimmed_model() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    # Create both sketch and model elements
+    window.app_service.create_sketch()
+    window.app_service.create_sketch_point("10 mm", "10 mm", "SP1")
+    window.app_service.create_body("Body1", [MarkerInput("0 mm", "0 mm", "M1")])
+    window.refresh_all()
+
+    # Switch to sketch mode — paintEvent should not crash with dimmed model layer
+    window.canvas.set_interaction_mode("sketch")
+    window.canvas.update()
+    qt_app.processEvents()
+
+    # Switch back to model mode — paintEvent should render normally
+    window.canvas.set_interaction_mode("model")
+    window.canvas.update()
+    qt_app.processEvents()
 
     window.close()
     qt_app.processEvents()

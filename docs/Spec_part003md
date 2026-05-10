@@ -70,4 +70,14 @@ Lo primero vamso a hacer un commit y push y crear una nueva rama para poder volv
 
 Cuando se esté en modo sketch, no se podrán seleccionar los elementos del modelo, que quedarán en un segundo plano. Cuando se seleccione el modo modelo, será al contrario, los elementos del sketch no se podrán seleccionar. ¿Cómo podríamos implemetnarlo?
 
+--------------------------------------
 
+
+Para distinguirlos visualmente, Los iconos de sketch los vamos a poner en tonos grises. Los botones de cinemática los vamos a poner en tonos azules y los de dinámca en tonos anaranjados.
+
+Vamso a revisar lso nombres en los botones para qeu nos desborden. Más cortos, por ejemplo sketch line pondríamos solo Line y vamos a redistribuir los botones en grupos más consistentes.
+
+------------------------------------------------
+
+CoM
+Parámetros

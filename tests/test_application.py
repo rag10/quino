@@ -143,8 +143,40 @@ def test_move_marker_translates_connected_slider_origin() -> None:
     app.move_marker(marker_p, "50 mm", "20 mm")
 
     slider = app._find_entity(slider_id)
-    assert _mm(app, slider.origin_x.expression) == pytest.approx(90.0)
+    assert _mm(app, slider.origin_x.expression) == pytest.approx(50.0)
     assert _mm(app, slider.origin_y.expression) == pytest.approx(20.0)
+
+
+def test_connect_marker_to_slider_moves_marker_to_slider_center() -> None:
+    app = make_app()
+    body_id = app.create_body("Rod", [MarkerInput("25 mm", "20 mm", "P")])
+    slider_id = app.create_slider_from_points("Guide", "0 mm", "0 mm", "100 mm", "0 mm")
+    marker_id = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "P")
+
+    app.connect_marker_to_slider(marker_id, slider_id, name="Slider_P")
+
+    marker = app._find_entity(marker_id)
+    report = app.validate_model()
+    assert _mm(app, marker.x.expression) == pytest.approx(50.0)
+    assert _mm(app, marker.y.expression) == pytest.approx(0.0)
+    assert not any(message.code == "slider_joint_gap" for message in report.messages)
+
+
+def test_connect_slider_to_marker_alias_still_moves_marker_to_slider_center() -> None:
+    app = make_app()
+    body_id = app.create_body("Rod", [MarkerInput("50 mm", "20 mm", "P")])
+    slider_id = app.create_slider_from_points("Guide", "0 mm", "0 mm", "100 mm", "0 mm")
+    marker_id = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "P")
+
+    app.connect_marker_to_slider(marker_id, slider_id, name="Slider_P", align="slider_to_marker")
+
+    slider = app._find_entity(slider_id)
+    marker = app._find_entity(marker_id)
+    report = app.validate_model()
+    assert _mm(app, marker.x.expression) == pytest.approx(50.0)
+    assert _mm(app, marker.y.expression) == pytest.approx(0.0)
+    assert _mm(app, slider.origin_y.expression) == pytest.approx(0.0)
+    assert not any(message.code == "slider_joint_gap" for message in report.messages)
 
 
 def test_moving_slider_origin_translates_connected_marker() -> None:
@@ -159,7 +191,7 @@ def test_moving_slider_origin_translates_connected_marker() -> None:
 
     marker = app._find_entity(marker_p)
     report = app.validate_model()
-    assert _mm(app, marker.x.expression) == pytest.approx(50.0)
+    assert _mm(app, marker.x.expression) == pytest.approx(90.0)
     assert _mm(app, marker.y.expression) == pytest.approx(10.0)
     assert not any(message.code == "slider_joint_gap" for message in report.messages)
 
@@ -176,7 +208,7 @@ def test_rotating_slider_keeps_connected_marker_on_guide() -> None:
     marker = app._find_entity(marker_p)
     report = app.validate_model()
     assert _mm(app, marker.x.expression) == pytest.approx(0.0)
-    assert _mm(app, marker.y.expression) == pytest.approx(10.0)
+    assert _mm(app, marker.y.expression) == pytest.approx(0.0)
     assert not any(message.code == "slider_joint_gap" for message in report.messages)
 
 
@@ -343,7 +375,12 @@ def test_validate_model_reports_slider_joint_geometry_gap() -> None:
     body_id = app.create_body("Mass1", [MarkerInput("0 mm", "10 mm", "P")])
     slider_id = app.create_slider_from_points("Guide", "0 mm", "0 mm", "100 mm", "0 mm")
     marker_id = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "P")
-    app.connect_marker_to_slider(marker_id, slider_id, name="BrokenSliderJoint")
+    app.create_joint(
+        "BrokenSliderJoint",
+        "revolute",
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body_id, marker_id=marker_id),
+        JointEndpointInput(JointEndpointKind.SLIDER, slider_id=slider_id),
+    )
 
     report = app.validate_model()
 
@@ -386,6 +423,20 @@ def test_validate_model_reports_unreachable_slider_crank_motion() -> None:
     report = app.validate_model(duration=1.0, steps=20)
 
     assert any(message.code == "kinematic_reach" for message in report.messages)
+
+
+def test_validate_model_reports_translation_driver_outside_slider_travel() -> None:
+    app = ApplicationService()
+    app.new_project("Translation Travel")
+    body_id = app.create_body("Mass", [MarkerInput("0 mm", "0 mm", "P")])
+    marker_id = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "P")
+    slider_id = app.create_slider("Guide", SliderInput("0 mm", "0 mm", "0 deg", "-5 mm", "5 mm"))
+    joint_id = app.connect_marker_to_slider(marker_id, slider_id, name="Slider_P")
+    app.create_driver("SliderDrive", DriverType.TRANSLATION.value, joint_id, "10 mm * t / 1 s", "mm")
+
+    report = app.validate_model(duration=1.0, steps=20)
+
+    assert any(message.code == "kinematic_travel" for message in report.messages)
 
 
 def test_run_simulation_attempts_solver_after_unreachable_preflight() -> None:
@@ -680,3 +731,218 @@ def test_sketch_solver_handles_tangent_constraint() -> None:
     by = float(point_b.y.expression.split()[0])
     distance = abs((by - ay) * 0.0 - (bx - ax) * 10.0 + bx * ay - by * ax) / math.hypot(by - ay, bx - ax)
     assert abs(distance - 5.0) < 1e-2
+
+
+
+def test_update_slider_geometry_is_atomic() -> None:
+    app = make_app()
+    body_id = app.create_body(
+        "Rod",
+        [MarkerInput("0 mm", "0 mm", "A"), MarkerInput("40 mm", "0 mm", "P")],
+    )
+    slider_id = app.create_slider_from_points("Guide", "40 mm", "0 mm", "120 mm", "0 mm")
+    marker_p = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "P")
+    app.connect_marker_to_slider(marker_p, slider_id, name="Slider_P")
+
+    app.update_slider_geometry(
+        slider_id,
+        origin_x="50 mm",
+        origin_y="20 mm",
+        angle="45 deg",
+        travel_min="-30 mm",
+        travel_max="30 mm",
+    )
+
+    slider = app._find_entity(slider_id)
+    assert _mm(app, slider.origin_x.expression) == pytest.approx(50.0)
+    assert _mm(app, slider.origin_y.expression) == pytest.approx(20.0)
+    assert abs(float(slider.angle.expression.split()[0]) - 45.0) < 1e-6
+    assert _mm(app, slider.travel_min.expression) == pytest.approx(-30.0)
+    assert _mm(app, slider.travel_max.expression) == pytest.approx(30.0)
+
+    # Undo must revert all changes in one step
+    app.undo()
+    slider = app._find_entity(slider_id)
+    assert _mm(app, slider.origin_x.expression) == pytest.approx(80.0)
+    assert _mm(app, slider.origin_y.expression) == pytest.approx(0.0)
+    assert abs(float(slider.angle.expression.split()[0]) - 0.0) < 1e-6
+    assert _mm(app, slider.travel_min.expression) == pytest.approx(-40.0)
+    assert _mm(app, slider.travel_max.expression) == pytest.approx(40.0)
+
+
+def test_create_joint_rejects_missing_body() -> None:
+    app = make_app()
+    body = app.create_body("Link", [MarkerInput("0 mm", "0 mm", "A")])
+    marker_a = next(m.id for m in app._find_body(body).markers if m.name == "A")
+    count_before = len(app.project.model.joints)
+    with pytest.raises(ValueError, match="Body not found"):
+        app.create_joint(
+            "J1",
+            "revolute",
+            JointEndpointInput(JointEndpointKind.MARKER, body_id="no_such_body", marker_id=marker_a),
+            JointEndpointInput(JointEndpointKind.GROUND),
+        )
+    assert len(app.project.model.joints) == count_before
+
+
+def test_create_joint_rejects_missing_marker_in_body() -> None:
+    app = make_app()
+    body1 = app.create_body("Link1", [MarkerInput("0 mm", "0 mm", "A")])
+    body2 = app.create_body("Link2", [MarkerInput("10 mm", "0 mm", "B")])
+    marker_a = next(m.id for m in app._find_body(body1).markers if m.name == "A")
+    marker_b = next(m.id for m in app._find_body(body2).markers if m.name == "B")
+    count_before = len(app.project.model.joints)
+    with pytest.raises(ValueError, match="Marker not found"):
+        app.create_joint(
+            "J1",
+            "revolute",
+            JointEndpointInput(JointEndpointKind.MARKER, body_id=body1, marker_id=marker_b),
+            JointEndpointInput(JointEndpointKind.GROUND),
+        )
+    assert len(app.project.model.joints) == count_before
+
+
+def test_create_joint_rejects_missing_slider() -> None:
+    app = make_app()
+    body = app.create_body("Link", [MarkerInput("0 mm", "0 mm", "A")])
+    marker_a = next(m.id for m in app._find_body(body).markers if m.name == "A")
+    count_before = len(app.project.model.joints)
+    with pytest.raises(ValueError, match="Slider not found"):
+        app.create_joint(
+            "J1",
+            "revolute",
+            JointEndpointInput(JointEndpointKind.MARKER, body_id=body, marker_id=marker_a),
+            JointEndpointInput(JointEndpointKind.SLIDER, slider_id="no_such_slider"),
+        )
+    assert len(app.project.model.joints) == count_before
+
+
+def test_sync_id_service_includes_sensors() -> None:
+    import tempfile, os, json
+    app = make_app()
+    body = app.create_body("Link", [MarkerInput("0 mm", "0 mm", "A")])
+    marker_a = next(m.id for m in app._find_body(body).markers if m.name == "A")
+    sensor1_id = app.create_sensor("S1", "point", [marker_a])
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "test.quino.json")
+        app.save_project(path)
+
+        app2 = ApplicationService()
+        app2.load_project(path)
+        sensor2_id = app2.create_sensor("S2", "point", [marker_a])
+
+    assert sensor1_id != sensor2_id
+    assert sensor2_id not in {s.id for s in app2.project.model.sensors if s.name == "S1"}
+
+
+
+def test_create_sketch_constraint_validates_entity_reference_type() -> None:
+    app = make_app()
+    p1 = app.create_sketch_point("0 mm", "0 mm", "A")
+    p2 = app.create_sketch_point("10 mm", "0 mm", "B")
+    line_id = app.create_sketch_line_segment(p1, p2)
+    with pytest.raises(ValueError, match="On-circle constraint requires a circle entity reference"):
+        app.create_sketch_constraint(
+            "on_circle",
+            [p1],
+            entity_references=[line_id],
+        )
+    with pytest.raises(ValueError, match="Tangent constraint requires a circle entity reference"):
+        app.create_sketch_constraint(
+            "tangent",
+            [p1, p2],
+            entity_references=[line_id],
+        )
+
+
+def test_create_sketch_tangent_rejects_invalid_sign() -> None:
+    app = make_app()
+    p1 = app.create_sketch_point("0 mm", "0 mm", "A")
+    p2 = app.create_sketch_point("10 mm", "0 mm", "B")
+    center = app.create_sketch_point("5 mm", "5 mm", "O")
+    circle_id = app.create_sketch_circle(center, "3 mm", "C1")
+    with pytest.raises(ValueError, match=r"Tangent sign must be \+1 or -1"):
+        app.create_sketch_constraint(
+            "tangent",
+            [p1, p2],
+            value="0.5",
+            entity_references=[circle_id],
+        )
+
+
+def test_delete_circle_cascade_removes_on_circle_constraints() -> None:
+    app = make_app()
+    center = app.create_sketch_point("0 mm", "0 mm", "O")
+    probe = app.create_sketch_point("5 mm", "0 mm", "P")
+    circle_id = app.create_sketch_circle(center, "5 mm", "C1")
+    constraint_id = app.create_sketch_constraint(
+        "on_circle",
+        [probe],
+        entity_references=[circle_id],
+    )
+    app.delete_sketch_entity(circle_id)
+    remaining_constraint_ids = {c.id for c in app.project.sketch.constraints}
+    assert constraint_id not in remaining_constraint_ids
+
+
+
+def test_sensor_outputs_not_persisted() -> None:
+    import tempfile, os, json
+    app = make_app()
+    body = app.create_body("Link", [MarkerInput("0 mm", "0 mm", "A")])
+    marker_a = next(m.id for m in app._find_body(body).markers if m.name == "A")
+    sensor_id = app.create_sensor("S1", "point", [marker_a])
+    app.project.sensor_outputs[sensor_id] = app.project.sensor_outputs.get("dummy", type("obj", (), {"data": []})())
+    app.project.sensor_outputs[sensor_id].data = [(0.0, 1.0, 2.0)]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "test.quino.json")
+        app.save_project(path)
+        with open(path) as f:
+            data = json.load(f)
+        assert "sensor_outputs" not in data
+        app2 = ApplicationService()
+        app2.load_project(path)
+        assert sensor_id not in app2.project.sensor_outputs
+
+
+
+def test_assemble_does_not_swap_joint_endpoints() -> None:
+    app = make_app()
+    body = app.create_body("Link", [MarkerInput("0 mm", "0 mm", "A"), MarkerInput("10 mm", "0 mm", "B")])
+    marker_a = next(m.id for m in app._find_body(body).markers if m.name == "A")
+    marker_b = next(m.id for m in app._find_body(body).markers if m.name == "B")
+    joint_id = app.create_joint(
+        "J1",
+        "revolute",
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body, marker_id=marker_a),
+        JointEndpointInput(JointEndpointKind.GROUND),
+    )
+    ground_joint = app._find_entity(joint_id)
+    assert ground_joint.endpoint_a.kind is JointEndpointKind.MARKER
+    assert ground_joint.endpoint_a.marker_id == marker_a
+    assert ground_joint.endpoint_b.kind is JointEndpointKind.GROUND
+
+    # Assemble should not mutate endpoints
+    assembled = app.simulation_runner.adapter.assembler.assemble(app.project)
+    assert ground_joint.endpoint_a.kind is JointEndpointKind.MARKER
+    assert ground_joint.endpoint_a.marker_id == marker_a
+    assert ground_joint.endpoint_b.kind is JointEndpointKind.GROUND
+
+
+def test_sketch_edit_does_not_discard_simulation() -> None:
+    app = make_app()
+    app.create_sketch()
+    p1 = app.create_sketch_point("0 mm", "0 mm", "A")
+    p2 = app.create_sketch_point("10 mm", "0 mm", "B")
+    app.create_sketch_line_segment(p1, p2)
+
+    # Mock a simulation result by setting internal state
+    from quino.domain.model import SimulationResult
+    result = SimulationResult(success=True, time=[0.0, 1.0], frames=[{}, {}])
+    # We can't easily test the GUI guard, but we can verify that solve_sketch
+    # does not clear sensor_outputs or any model state.
+    app.project.sensor_outputs["dummy"] = type("obj", (), {"data": [(0.0,)]})()
+    app.solve_sketch()
+    assert "dummy" in app.project.sensor_outputs

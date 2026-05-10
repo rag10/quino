@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import copy
 import math
+import re
 from pathlib import Path
 
 from quino.domain.inputs import JointEndpointInput, MarkerInput, PropertyValueInput, SliderInput
+from quino.domain.sketch_constraints import CONSTRAINT_SPECS
 from quino.domain.model import (
     Body,
     Driver,
@@ -56,6 +58,13 @@ from quino.solver_adapters.exudyn_adapter import ExudynAdapter
 class ApplicationService:
     schema_version = "0.1.0"
 
+    _STYLE_FIELD_TYPES: dict[str, type] = {
+        "color": str,
+        "visible": bool,
+        "line_width": float,
+        "marker_size": float,
+    }
+
     def __init__(self) -> None:
         self.id_service = IdService()
         self.unit_service = UnitService()
@@ -65,10 +74,14 @@ class ApplicationService:
         self.project: Project | None = None
         self._undo_stack: list[Project] = []
         self._redo_stack: list[Project] = []
+        self._in_operation = False
+        self._entity_index: dict[str, object] | None = None
+        self._sketch_solve_cache: tuple[str, SketchSolveResult] | None = None
         self.sketch_solver = SketchSolver(self.expression_service, self.unit_service)
         self.simulation_runner = SimulationRunner(ExudynAdapter(self.expression_service))
 
     def new_project(self, name: str) -> Project:
+        self.id_service = IdService()
         self.project = Project(
             id=self.id_service.new("proj"),
             name=name,
@@ -87,6 +100,9 @@ class ApplicationService:
         self._sync_id_service()
         self._undo_stack.clear()
         self._redo_stack.clear()
+        if self.project is not None and self.project.sketch is not None:
+            self.project.sketch.solve_error = None
+            self._apply_sketch_constraints(set())
         return self.project
 
     def save_project(self, path: str) -> None:
@@ -263,22 +279,21 @@ class ApplicationService:
     ) -> str:
         """Create an arc defined by center + start + end points (arc_center_mode=True)."""
         sketch = self._require_sketch(create_if_missing=True)
-        self._snapshot()
-        center_id = self.create_sketch_point(self._mm_expression(cx), self._mm_expression(cy))
-        start_id = self.create_sketch_point(self._mm_expression(sx), self._mm_expression(sy))
-        end_id = self.create_sketch_point(self._mm_expression(ex), self._mm_expression(ey))
-        entity = SketchArc(
-            id=self.id_service.new("skarc"),
-            name=name or self._next_sketch_name("Arc"),
-            type=SketchEntityType.ARC,
-            point_a_id=center_id,
-            point_b_id=start_id,
-            point_c_id=end_id,
-            arc_center_mode=True,
-        )
-        self._validate_sketch_entity_name(entity.name)
-        sketch.entities.append(entity)
-        self._apply_sketch_constraints(set())
+        with self._operation():
+            center_id = self.create_sketch_point(self._mm_expression(cx), self._mm_expression(cy))
+            start_id = self.create_sketch_point(self._mm_expression(sx), self._mm_expression(sy))
+            end_id = self.create_sketch_point(self._mm_expression(ex), self._mm_expression(ey))
+            entity = SketchArc(
+                id=self.id_service.new("skarc"),
+                name=name or self._next_sketch_name("Arc"),
+                type=SketchEntityType.ARC,
+                point_a_id=center_id,
+                point_b_id=start_id,
+                point_c_id=end_id,
+            )
+            self._validate_sketch_entity_name(entity.name)
+            sketch.entities.append(entity)
+            self._apply_sketch_constraints(set())
         return entity.id
 
     def create_sketch_infinite_line(
@@ -310,7 +325,6 @@ class ApplicationService:
         references: list[str],
         value: str | None = None,
         name: str | None = None,
-        driving: bool = False,
         entity_references: list[str] | None = None,
     ) -> str:
         project = self._require_project()
@@ -336,6 +350,12 @@ class ApplicationService:
                 raise ValueError("Angle constraint value cannot be zero")
         elif constraint_enum is SketchConstraintType.TANGENT:
             sign_str = value if value is not None else "1"
+            try:
+                sign_val = float(sign_str.strip())
+            except Exception:
+                raise ValueError("Tangent sign must be +1 or -1")
+            if sign_val not in (1.0, -1.0):
+                raise ValueError("Tangent sign must be +1 or -1")
             scalar_value = self._scalar(sign_str, "unitless", Dimension.UNITLESS)
         elif value is not None:
             raise ValueError(f"{constraint_enum.value} constraint does not take a value")
@@ -345,7 +365,6 @@ class ApplicationService:
             type=constraint_enum,
             references=normalized_refs,
             value=scalar_value,
-            driving=driving,
             entity_references=normalized_entity_refs,
         )
         self._validate_sketch_constraint_name(constraint.name)
@@ -364,12 +383,6 @@ class ApplicationService:
             self._validate_sketch_constraint_name(value.value, constraint_id=constraint_id)
             self._snapshot()
             constraint.name = value.value
-            return
-        if property_path == "driving":
-            if value.kind != "boolean" or not isinstance(value.value, bool):
-                raise ValueError("Constraint driving flag requires a boolean input")
-            self._snapshot()
-            constraint.driving = value.value
             return
         if property_path == "value":
             if constraint.type not in {SketchConstraintType.DISTANCE, SketchConstraintType.ANGLE}:
@@ -431,11 +444,8 @@ class ApplicationService:
             setattr(entity, property_path, value.value)
             return
         if property_path.startswith("style."):
-            if value.kind == "boolean" or value.kind == "expression":
-                self._snapshot()
-                setattr(entity.style, property_path.split(".", 1)[1], value.value)
-                return
-            raise ValueError("Unsupported sketch style update")
+            self._apply_style_update(entity, property_path, value)
+            return
         project = self._require_project()
         if isinstance(entity, SketchPoint) and property_path in {"x", "y"}:
             if value.kind != "expression" or not isinstance(value.value, str):
@@ -510,6 +520,11 @@ class ApplicationService:
             ]
             self._apply_sketch_constraints(set())
             return
+        sketch.constraints = [
+            constraint
+            for constraint in sketch.constraints
+            if entity_id not in constraint.entity_references
+        ]
         sketch.entities = [item for item in sketch.entities if item.id != entity_id]
         self._apply_sketch_constraints(set())
 
@@ -650,8 +665,8 @@ class ApplicationService:
     ) -> str:
         project = self._require_project()
         self.validation_service.ensure_unique_name(project.model.joints, name)
-        self._validate_endpoint_input(endpoint_a)
-        self._validate_endpoint_input(endpoint_b)
+        self._validate_endpoint_input(endpoint_a, project)
+        self._validate_endpoint_input(endpoint_b, project)
         joint = Joint(
             id=self.id_service.new("joint"),
             name=name,
@@ -726,21 +741,95 @@ class ApplicationService:
         )
 
     def connect_marker_to_slider(
-        self, marker_id: str, slider_id: str, joint_type: str = "revolute", name: str | None = None
+        self,
+        marker_id: str,
+        slider_id: str,
+        joint_type: str = "revolute",
+        name: str | None = None,
+        align: str = "marker_to_slider",
     ) -> str:
         body = self._find_body_by_marker(marker_id)
-        return self.create_joint(
-            name=name or f"{marker_id}_{slider_id}",
-            joint_type=joint_type,
-            endpoint_a=JointEndpointInput(JointEndpointKind.MARKER, body_id=body.id, marker_id=marker_id),
-            endpoint_b=JointEndpointInput(JointEndpointKind.SLIDER, slider_id=slider_id),
+        marker = self._find_entity(marker_id)
+        slider = self._find_entity(slider_id)
+        if not isinstance(marker, Marker):
+            raise ValueError("connect_marker_to_slider requires a marker")
+        if not isinstance(slider, Slider):
+            raise ValueError("connect_marker_to_slider requires a slider")
+        if align not in {"marker_to_slider", "slider_to_marker", "none"}:
+            raise ValueError("align must be marker_to_slider, slider_to_marker, or none")
+        joint_name = name or f"{marker_id}_{slider_id}"
+        joint_enum = JointType(joint_type)
+        endpoint_a = JointEndpointInput(JointEndpointKind.MARKER, body_id=body.id, marker_id=marker_id)
+        endpoint_b = JointEndpointInput(JointEndpointKind.SLIDER, slider_id=slider_id)
+        candidate = Joint(
+            id="__candidate__",
+            name=joint_name,
+            type=joint_enum,
+            endpoint_a=self._make_endpoint(endpoint_a),
+            endpoint_b=self._make_endpoint(endpoint_b),
         )
+        project = self._require_project()
+        self.validation_service.ensure_unique_name(project.model.joints, joint_name)
+        self._validate_endpoint_input(endpoint_a, project)
+        self._validate_endpoint_input(endpoint_b, project)
+        self._ensure_joint_not_duplicate(candidate)
+
+        with self._operation():
+            if align != "none":
+                target_x, target_y = self._slider_center_mm(slider)
+                self.move_marker(marker_id, self._mm_expression(target_x), self._mm_expression(target_y))
+            return self.create_joint(
+                name=joint_name,
+                joint_type=joint_enum.value,
+                endpoint_a=endpoint_a,
+                endpoint_b=endpoint_b,
+            )
 
     def rename_entity(self, entity_id: str, new_name: str) -> None:
         entity = self._find_entity(entity_id)
         self._validate_entity_name(entity, new_name)
         self._snapshot()
         self._rename_entity_no_snapshot(entity, new_name)
+
+    def set_sketch_visible(self, visible: bool) -> None:
+        project = self._require_project()
+        if project.sketch is None:
+            return
+        if project.sketch.visible == visible:
+            return
+        self._snapshot()
+        project.sketch.visible = visible
+
+    def update_parameter_definition(
+        self,
+        parameter_id: str,
+        name: str,
+        expression: str,
+        unit: str,
+        description: str = "",
+    ) -> None:
+        project = self._require_project()
+        parameter = self._find_entity(parameter_id)
+        if not isinstance(parameter, Parameter):
+            raise ValueError("update_parameter_definition requires a Parameter")
+        if parameter.name != name:
+            self.validation_service.ensure_unique_name(
+                [p for p in project.parameters if p.id != parameter_id], name
+            )
+        self._validate_parameter_definition(expression, unit)
+        changed = (
+            parameter.name != name
+            or parameter.expression != expression
+            or parameter.unit != unit
+            or parameter.description != description
+        )
+        if not changed:
+            return
+        self._snapshot()
+        parameter.name = name
+        parameter.expression = expression
+        parameter.unit = unit
+        parameter.description = description
 
     def move_marker(self, marker_id: str, x_expression: str, y_expression: str) -> None:
         marker = self._find_entity(marker_id)
@@ -820,15 +909,8 @@ class ApplicationService:
             setattr(entity, property_path, None)
             return
         if property_path.startswith("style."):
-            if value.kind == "boolean":
-                self._snapshot()
-                setattr(entity.style, property_path.split(".", 1)[1], value.value)
-                return
-            if value.kind == "expression":
-                self._snapshot()
-                setattr(entity.style, property_path.split(".", 1)[1], value.value)
-                return
-            raise ValueError("Unsupported style update")
+            self._apply_style_update(entity, property_path, value)
+            return
         if property_path == "law":
             if not isinstance(entity, Driver):
                 raise ValueError("law only applies to Driver")
@@ -976,6 +1058,7 @@ class ApplicationService:
         if self.project is not None:
             self._redo_stack.append(copy.deepcopy(self.project))
         self.project = self._undo_stack.pop()
+        self._entity_index = None
         return True
 
     def redo(self) -> bool:
@@ -984,6 +1067,7 @@ class ApplicationService:
         if self.project is not None:
             self._undo_stack.append(copy.deepcopy(self.project))
         self.project = self._redo_stack.pop()
+        self._entity_index = None
         return True
 
     def _require_project(self) -> Project:
@@ -992,9 +1076,26 @@ class ApplicationService:
         return self.project
 
     def _snapshot(self) -> None:
-        if self.project is not None:
+        if self.project is not None and not self._in_operation:
             self._undo_stack.append(copy.deepcopy(self.project))
             self._redo_stack.clear()
+            self._entity_index = None
+            self._sketch_solve_cache = None
+
+    def _operation(self):
+        """Context manager that takes a single snapshot for the whole operation."""
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _ctx():
+            self._snapshot()
+            self._in_operation = True
+            try:
+                yield
+            finally:
+                self._in_operation = False
+
+        return _ctx()
 
     def _make_marker(self, body_id: str, marker_input: MarkerInput, is_first: bool) -> Marker:
         marker_name = marker_input.name or ("A" if is_first else self.id_service.new("mk"))
@@ -1009,18 +1110,17 @@ class ApplicationService:
 
     def _make_com_marker(self, body: Body) -> Marker:
         structural = body.structural_markers()
-        if body.type is BodyType.BAR and len(structural) == 2:
-            x_expr = f"({structural[0].x.expression}+{structural[1].x.expression})/2"
-            y_expr = f"({structural[0].y.expression}+{structural[1].y.expression})/2"
-        else:
-            x_expr = "(" + "+".join(marker.x.expression for marker in structural) + f")/{len(structural)}"
-            y_expr = "(" + "+".join(marker.y.expression for marker in structural) + f")/{len(structural)}"
+        project = self._require_project()
+        x_vals = [self.expression_service.evaluate_property(m.x, project.parameters).value for m in structural]
+        y_vals = [self.expression_service.evaluate_property(m.y, project.parameters).value for m in structural]
+        x_avg = sum(x_vals) / len(x_vals) if x_vals else 0.0
+        y_avg = sum(y_vals) / len(y_vals) if y_vals else 0.0
         return Marker(
             id=self.id_service.new("marker"),
             name="CoM",
             type=MarkerType.COM,
-            x=self._scalar(x_expr, "mm", Dimension.LENGTH),
-            y=self._scalar(y_expr, "mm", Dimension.LENGTH),
+            x=self._scalar(self._mm_expression(x_avg), "mm", Dimension.LENGTH),
+            y=self._scalar(self._mm_expression(y_avg), "mm", Dimension.LENGTH),
             visible=False,
         )
 
@@ -1029,6 +1129,20 @@ class ApplicationService:
 
     def _mm_expression(self, value: float) -> str:
         return f"{value:.6g} mm"
+
+    def _is_literal_expression(self, expression: str) -> bool:
+        """Return True if expression is a plain number with optional unit (no parameters)."""
+        cleaned = expression.strip()
+        # Strip known unit suffixes
+        for unit in ("mm", "m", "deg", "rad", "s"):
+            if cleaned.endswith(unit):
+                cleaned = cleaned[: -len(unit)].strip()
+                break
+        try:
+            float(cleaned)
+            return True
+        except ValueError:
+            return False
 
     def _make_endpoint(self, endpoint: JointEndpointInput) -> JointEndpoint:
         return JointEndpoint(
@@ -1066,17 +1180,15 @@ class ApplicationService:
                 return joint
         raise ValueError(f"Unknown joint: {joint_id}")
 
-    def _find_entity(self, entity_id: str) -> object:
+    def _build_entity_index(self) -> dict[str, object]:
         project = self._require_project()
+        index: dict[str, object] = {}
         if project.sketch is not None:
-            if project.sketch.id == entity_id:
-                return project.sketch
+            index[project.sketch.id] = project.sketch
             for entity in project.sketch.entities:
-                if entity.id == entity_id:
-                    return entity
+                index[entity.id] = entity
             for constraint in project.sketch.constraints:
-                if constraint.id == entity_id:
-                    return constraint
+                index[constraint.id] = constraint
         for collection in (
             project.model.bodies,
             project.model.joints,
@@ -1086,13 +1198,55 @@ class ApplicationService:
             project.parameters,
         ):
             for entity in collection:
-                if entity.id == entity_id:
-                    return entity
+                index[entity.id] = entity
         for body in project.model.bodies:
             for marker in body.markers:
-                if marker.id == entity_id:
-                    return marker
+                index[marker.id] = marker
+        return index
+
+    def _find_entity(self, entity_id: str) -> object:
+        if self._entity_index is None:
+            self._entity_index = self._build_entity_index()
+        entity = self._entity_index.get(entity_id)
+        if entity is not None:
+            return entity
         raise ValueError(f"Unknown entity: {entity_id}")
+
+    # Public read-only query API -------------------------------------------------
+    def get_entity(self, entity_id: str) -> object | None:
+        """Return any entity by id, or None if not found."""
+        try:
+            return self._find_entity(entity_id)
+        except ValueError:
+            return None
+
+    def get_body_by_marker(self, marker_id: str) -> Body | None:
+        """Return the Body that owns the given marker, or None."""
+        try:
+            return self._find_body_by_marker(marker_id)
+        except ValueError:
+            return None
+
+    def get_sketch_point(self, point_id: str) -> SketchPoint | None:
+        """Return a sketch point by id, or None."""
+        try:
+            return self._find_sketch_point(point_id)
+        except ValueError:
+            return None
+
+    def get_joint(self, joint_id: str) -> Joint | None:
+        """Return a joint by id, or None."""
+        try:
+            return self._find_joint(joint_id)
+        except ValueError:
+            return None
+
+    def get_body(self, body_id: str) -> Body | None:
+        """Return a body by id, or None."""
+        try:
+            return self._find_body(body_id)
+        except ValueError:
+            return None
 
     def _build_validated_scalar_property(self, entity: object, property_path: str, expression: str) -> ScalarProperty:
         dimension_map = {
@@ -1104,7 +1258,7 @@ class ApplicationService:
             "travel_max": Dimension.LENGTH,
             "angle": Dimension.ANGLE,
             "mass": Dimension.MASS,
-            "inertia": Dimension.INERTIA,
+            "inertia": Dimension.UNITLESS,
             "law": getattr(entity, "law", None).expected_dimension if isinstance(entity, Driver) else None,
         }
         if property_path not in dimension_map:
@@ -1128,6 +1282,25 @@ class ApplicationService:
 
     def _rename_entity_no_snapshot(self, entity: object, new_name: str) -> None:
         entity.name = new_name
+
+    def _apply_style_update(self, entity: object, property_path: str, value: PropertyValueInput) -> None:
+        field = property_path.split(".", 1)[1]
+        expected_type = self._STYLE_FIELD_TYPES.get(field)
+        if expected_type is None:
+            raise ValueError(f"Unknown style field: {field}")
+        if expected_type is bool and value.kind != "boolean":
+            raise ValueError(f"Style field '{field}' requires a boolean value")
+        if expected_type is str and value.kind != "expression":
+            raise ValueError(f"Style field '{field}' requires a string/expression value")
+        if expected_type is float and value.kind != "expression":
+            raise ValueError(f"Style field '{field}' requires a numeric expression")
+        if expected_type is float:
+            try:
+                float(value.value)
+            except Exception:
+                raise ValueError(f"Style field '{field}' requires a numeric value")
+        self._snapshot()
+        setattr(entity.style, field, value.value)
 
     def _validate_entity_name(self, entity: object, new_name: str) -> None:
         project = self._require_project()
@@ -1250,34 +1423,23 @@ class ApplicationService:
     ) -> None:
         for point_id in references:
             self._ensure_sketch_point_exists(point_id)
-        expected_pts = {
-            SketchConstraintType.FIX: 1,
-            SketchConstraintType.HORIZONTAL: 2,
-            SketchConstraintType.VERTICAL: 2,
-            SketchConstraintType.DISTANCE: 2,
-            SketchConstraintType.COINCIDENT: 2,
-            SketchConstraintType.PARALLEL: 4,
-            SketchConstraintType.PERPENDICULAR: 4,
-            SketchConstraintType.EQUAL_LENGTH: 4,
-            SketchConstraintType.ANGLE: 3,
-            SketchConstraintType.MIDPOINT: 3,
-            SketchConstraintType.COLLINEAR: 3,
-            SketchConstraintType.SYMMETRIC: 4,
-            SketchConstraintType.ON_CIRCLE: 1,
-            SketchConstraintType.TANGENT: 2,
-        }.get(constraint_type, 2)
+        spec = CONSTRAINT_SPECS.get(constraint_type)
+        expected_pts = spec.points if spec is not None else 2
         if len(references) != expected_pts:
             raise ValueError(f"{constraint_type.value} constraint requires {expected_pts} point reference(s)")
         if len(set(references)) != len(references):
             raise ValueError("Constraint references must be distinct")
-        # Validate entity references for constraints that need them
-        expected_ents = {
-            SketchConstraintType.ON_CIRCLE: 1,
-            SketchConstraintType.TANGENT: 1,
-        }.get(constraint_type, 0)
+        expected_ents = spec.entities if spec is not None else 0
         actual_ents = len(entity_references) if entity_references else 0
         if actual_ents != expected_ents:
             raise ValueError(f"{constraint_type.value} constraint requires {expected_ents} entity reference(s)")
+        if entity_references:
+            for entity_id in entity_references:
+                entity = self._find_sketch_entity(entity_id)
+                if constraint_type is SketchConstraintType.ON_CIRCLE and not isinstance(entity, SketchCircle):
+                    raise ValueError("On-circle constraint requires a circle entity reference")
+                if constraint_type is SketchConstraintType.TANGENT and not isinstance(entity, SketchCircle):
+                    raise ValueError("Tangent constraint requires a circle entity reference")
 
     def _current_sketch_angle_expression(
         self, vertex_id: str, arm1_id: str, arm2_id: str
@@ -1320,6 +1482,17 @@ class ApplicationService:
         by = self.expression_service.evaluate_property(point_b.y, project.parameters).value
         return self._mm_expression(math.hypot(bx - ax, by - ay))
 
+    def _sketch_signature(self, sketch: Sketch) -> str:
+        import hashlib
+        data = ""
+        for point in sketch.points():
+            data += f"{point.id}:{point.x.expression}:{point.y.expression};"
+        for entity in sketch.entities:
+            data += f"{entity.id}:{entity.type.value};"
+        for constraint in sketch.constraints:
+            data += f"{constraint.id}:{constraint.type.value}:{','.join(constraint.references)}:{','.join(constraint.entity_references)};"
+        return hashlib.md5(data.encode()).hexdigest()
+
     def _apply_sketch_constraints(
         self,
         locked_point_ids: set[str],
@@ -1332,13 +1505,36 @@ class ApplicationService:
         if not project.sketch.constraints:
             project.sketch.solve_error = None
             return SketchSolveResult(True, {}, 0, 0.0, None)
-        result = self.sketch_solver.solve(project, locked_point_ids=locked_point_ids)
+        sig = self._sketch_signature(project.sketch)
+        if self._sketch_solve_cache is not None and self._sketch_solve_cache[0] == sig:
+            result = self._sketch_solve_cache[1]
+        else:
+            result = self.sketch_solver.solve(project, locked_point_ids=locked_point_ids)
+            self._sketch_solve_cache = (sig, result)
         if result.success:
             project.sketch.solve_error = None
             for point_id, (x, y) in result.positions.items():
                 point = self._find_sketch_point(point_id)
-                point.x = self._scalar(self._mm_expression(x), "mm", Dimension.LENGTH)
-                point.y = self._scalar(self._mm_expression(y), "mm", Dimension.LENGTH)
+                old_x = self.expression_service.evaluate_property(point.x, project.parameters).value
+                old_y = self.expression_service.evaluate_property(point.y, project.parameters).value
+                dx = x - old_x
+                dy = y - old_y
+                if abs(dx) > 1e-9:
+                    if self._is_literal_expression(point.x.expression):
+                        point.x = self._scalar(self._mm_expression(x), "mm", Dimension.LENGTH)
+                    else:
+                        base_x = self._strip_offset(point.x.expression)
+                        base_val_x = self.expression_service.evaluate_expression(base_x, project.parameters).value
+                        total_dx = x - base_val_x
+                        point.x = self._scalar(self._offset_expression(base_x, total_dx, "mm"), "mm", Dimension.LENGTH)
+                if abs(dy) > 1e-9:
+                    if self._is_literal_expression(point.y.expression):
+                        point.y = self._scalar(self._mm_expression(y), "mm", Dimension.LENGTH)
+                    else:
+                        base_y = self._strip_offset(point.y.expression)
+                        base_val_y = self.expression_service.evaluate_expression(base_y, project.parameters).value
+                        total_dy = y - base_val_y
+                        point.y = self._scalar(self._offset_expression(base_y, total_dy, "mm"), "mm", Dimension.LENGTH)
         else:
             project.sketch.solve_error = result.message or "Solver did not converge"
         return result
@@ -1390,14 +1586,35 @@ class ApplicationService:
         quantity = self.expression_service.evaluate_expression(expression, parameter_map)
         self.unit_service.convert(quantity, unit)
 
-    def _validate_endpoint_input(self, endpoint: JointEndpointInput) -> None:
+    def _validate_endpoint_input(self, endpoint: JointEndpointInput, project: Project) -> None:
         if endpoint.kind is JointEndpointKind.MARKER:
             if endpoint.body_id is None or endpoint.marker_id is None:
                 raise ValueError("Marker endpoints require body_id and marker_id")
+            body = None
+            for b in project.model.bodies:
+                if b.id == endpoint.body_id:
+                    body = b
+                    break
+            if body is None:
+                raise ValueError(f"Body not found: {endpoint.body_id}")
+            marker = None
+            for m in body.markers:
+                if m.id == endpoint.marker_id:
+                    marker = m
+                    break
+            if marker is None:
+                raise ValueError(f"Marker not found: {endpoint.marker_id} in body {endpoint.body_id}")
             return
         if endpoint.kind is JointEndpointKind.SLIDER:
             if endpoint.slider_id is None:
                 raise ValueError("Slider endpoints require slider_id")
+            slider = None
+            for s in project.model.sliders:
+                if s.id == endpoint.slider_id:
+                    slider = s
+                    break
+            if slider is None:
+                raise ValueError(f"Slider not found: {endpoint.slider_id}")
             return
         if endpoint.kind is JointEndpointKind.GROUND:
             return
@@ -1424,6 +1641,8 @@ class ApplicationService:
             self.id_service.observe(joint.id)
         for driver in project.model.drivers:
             self.id_service.observe(driver.id)
+        for sensor in project.model.sensors:
+            self.id_service.observe(sensor.id)
 
     def _ensure_joint_not_duplicate(self, candidate: Joint) -> None:
         project = self._require_project()
@@ -1434,6 +1653,16 @@ class ApplicationService:
 
     def _joint_has_slider(self, joint: Joint) -> bool:
         return joint.endpoint_a.kind is JointEndpointKind.SLIDER or joint.endpoint_b.kind is JointEndpointKind.SLIDER
+
+    def _marker_slider_endpoints(self, joint: Joint) -> tuple[JointEndpoint | None, JointEndpoint | None]:
+        marker_endpoint = None
+        slider_endpoint = None
+        for endpoint in (joint.endpoint_a, joint.endpoint_b):
+            if endpoint.kind is JointEndpointKind.MARKER:
+                marker_endpoint = endpoint
+            elif endpoint.kind is JointEndpointKind.SLIDER:
+                slider_endpoint = endpoint
+        return marker_endpoint, slider_endpoint
 
     def _joints_for_marker(self, marker_id: str) -> list[Joint]:
         project = self._require_project()
@@ -1450,47 +1679,40 @@ class ApplicationService:
         delta_x_mm: float,
         delta_y_mm: float,
     ) -> None:
-        # BFS over joint graph: collect all markers/sliders co-located with marker_id
-        project = self._require_project()
-        all_joints = project.model.joints
+        # Direct-only: move immediate counterparts of marker_id, no BFS transitives
         moved_marker_ids: set[str] = {marker_id}
         moved_slider_ids: set[str] = set()
-        frontier: list[str] = [marker_id]
-        while frontier:
-            current_id = frontier.pop()
-            for joint in all_joints:
-                ep_a, ep_b = joint.endpoint_a, joint.endpoint_b
-                # Find the counterpart of current_id in this joint
-                counterpart_marker_id: str | None = None
-                counterpart_slider_id: str | None = None
-                if ep_a.kind is JointEndpointKind.MARKER and ep_a.marker_id == current_id:
-                    if ep_b.kind is JointEndpointKind.MARKER:
-                        counterpart_marker_id = ep_b.marker_id
-                    elif ep_b.kind is JointEndpointKind.SLIDER:
-                        counterpart_slider_id = ep_b.slider_id
-                elif ep_b.kind is JointEndpointKind.MARKER and ep_b.marker_id == current_id:
-                    if ep_a.kind is JointEndpointKind.MARKER:
-                        counterpart_marker_id = ep_a.marker_id
-                    elif ep_a.kind is JointEndpointKind.SLIDER:
-                        counterpart_slider_id = ep_a.slider_id
-                else:
-                    continue
-                if counterpart_marker_id and counterpart_marker_id not in moved_marker_ids:
-                    linked_marker = self._find_entity(counterpart_marker_id)
-                    if isinstance(linked_marker, Marker):
-                        self._translate_marker_expression(linked_marker, delta_x_mm, delta_y_mm)
-                        moved_marker_ids.add(counterpart_marker_id)
-                        frontier.append(counterpart_marker_id)
-                if counterpart_slider_id and counterpart_slider_id not in moved_slider_ids:
-                    linked_slider = self._find_entity(counterpart_slider_id)
-                    if isinstance(linked_slider, Slider):
-                        self._translate_slider_expression(
-                            linked_slider,
-                            delta_x_mm,
-                            delta_y_mm,
-                            moved_marker_ids=moved_marker_ids,
-                        )
-                        moved_slider_ids.add(counterpart_slider_id)
+        for joint in joints:
+            ep_a, ep_b = joint.endpoint_a, joint.endpoint_b
+            counterpart_marker_id: str | None = None
+            counterpart_slider_id: str | None = None
+            if ep_a.kind is JointEndpointKind.MARKER and ep_a.marker_id == marker_id:
+                if ep_b.kind is JointEndpointKind.MARKER:
+                    counterpart_marker_id = ep_b.marker_id
+                elif ep_b.kind is JointEndpointKind.SLIDER:
+                    counterpart_slider_id = ep_b.slider_id
+            elif ep_b.kind is JointEndpointKind.MARKER and ep_b.marker_id == marker_id:
+                if ep_a.kind is JointEndpointKind.MARKER:
+                    counterpart_marker_id = ep_a.marker_id
+                elif ep_a.kind is JointEndpointKind.SLIDER:
+                    counterpart_slider_id = ep_a.slider_id
+            else:
+                continue
+            if counterpart_marker_id and counterpart_marker_id not in moved_marker_ids:
+                linked_marker = self._find_entity(counterpart_marker_id)
+                if isinstance(linked_marker, Marker):
+                    self._translate_marker_expression(linked_marker, delta_x_mm, delta_y_mm)
+                    moved_marker_ids.add(counterpart_marker_id)
+            if counterpart_slider_id and counterpart_slider_id not in moved_slider_ids:
+                linked_slider = self._find_entity(counterpart_slider_id)
+                if isinstance(linked_slider, Slider):
+                    self._translate_slider_expression(
+                        linked_slider,
+                        delta_x_mm,
+                        delta_y_mm,
+                        moved_marker_ids=moved_marker_ids,
+                    )
+                    moved_slider_ids.add(counterpart_slider_id)
 
     def _move_slider_origin(self, slider_id: str, x_expression: str, y_expression: str) -> None:
         slider = self._find_entity(slider_id)
@@ -1569,6 +1791,95 @@ class ApplicationService:
         for marker, marker_x, marker_y in marker_targets:
             self._set_marker_absolute_mm(marker, marker_x, marker_y)
 
+    def update_slider_geometry(
+        self,
+        slider_id: str,
+        origin_x: str | None = None,
+        origin_y: str | None = None,
+        angle: str | None = None,
+        travel_min: str | None = None,
+        travel_max: str | None = None,
+    ) -> None:
+        """Atomically update all slider geometry properties in a single snapshot."""
+        slider = self._find_entity(slider_id)
+        if not isinstance(slider, Slider):
+            raise ValueError("update_slider_geometry requires a slider entity")
+
+        old_ox = self._evaluate_scalar_as(slider.origin_x, "mm")
+        old_oy = self._evaluate_scalar_as(slider.origin_y, "mm")
+        old_angle = self._evaluate_scalar_as(slider.angle, "rad")
+        old_axis = (math.cos(old_angle), math.sin(old_angle))
+
+        new_ox = self._evaluate_scalar_as(
+            ScalarProperty(expression=origin_x, unit=slider.origin_x.unit, expected_dimension=Dimension.LENGTH), "mm"
+        ) if origin_x is not None else old_ox
+        new_oy = self._evaluate_scalar_as(
+            ScalarProperty(expression=origin_y, unit=slider.origin_y.unit, expected_dimension=Dimension.LENGTH), "mm"
+        ) if origin_y is not None else old_oy
+        new_angle = self._evaluate_scalar_as(
+            ScalarProperty(expression=angle, unit=slider.angle.unit, expected_dimension=Dimension.ANGLE), "rad"
+        ) if angle is not None else old_angle
+        new_axis = (math.cos(new_angle), math.sin(new_angle))
+
+        changed = (
+            (origin_x is not None and slider.origin_x.expression != origin_x)
+            or (origin_y is not None and slider.origin_y.expression != origin_y)
+            or (angle is not None and slider.angle.expression != angle)
+            or (travel_min is not None and (
+                (slider.travel_min is None and travel_min != "")
+                or (slider.travel_min is not None and slider.travel_min.expression != travel_min)
+            ))
+            or (travel_max is not None and (
+                (slider.travel_max is None and travel_max != "")
+                or (slider.travel_max is not None and slider.travel_max.expression != travel_max)
+            ))
+        )
+
+        linked_markers = self._markers_linked_to_slider(slider.id)
+        marker_targets: list[tuple[Marker, float, float]] = []
+        for marker in linked_markers:
+            mx = self._evaluate_scalar_as(marker.x, "mm")
+            my = self._evaluate_scalar_as(marker.y, "mm")
+            slider_coordinate = (mx - old_ox) * old_axis[0] + (my - old_oy) * old_axis[1]
+            marker_targets.append((
+                marker,
+                new_ox + slider_coordinate * new_axis[0],
+                new_oy + slider_coordinate * new_axis[1],
+            ))
+
+        if not changed and not marker_targets:
+            return
+
+        self._snapshot()
+        if origin_x is not None:
+            slider.origin_x = ScalarProperty(
+                expression=origin_x, unit=slider.origin_x.unit, expected_dimension=Dimension.LENGTH
+            )
+        if origin_y is not None:
+            slider.origin_y = ScalarProperty(
+                expression=origin_y, unit=slider.origin_y.unit, expected_dimension=Dimension.LENGTH
+            )
+        if angle is not None:
+            slider.angle = ScalarProperty(
+                expression=angle, unit=slider.angle.unit, expected_dimension=Dimension.ANGLE
+            )
+        if travel_min is not None:
+            if travel_min == "" or travel_min.lower() == "none":
+                slider.travel_min = None
+            else:
+                slider.travel_min = ScalarProperty(
+                    expression=travel_min, unit="mm", expected_dimension=Dimension.LENGTH
+                )
+        if travel_max is not None:
+            if travel_max == "" or travel_max.lower() == "none":
+                slider.travel_max = None
+            else:
+                slider.travel_max = ScalarProperty(
+                    expression=travel_max, unit="mm", expected_dimension=Dimension.LENGTH
+                )
+        for marker, marker_x, marker_y in marker_targets:
+            self._set_marker_absolute_mm(marker, marker_x, marker_y)
+
     def _translate_slider_expression(
         self,
         slider: Slider,
@@ -1644,6 +1955,9 @@ class ApplicationService:
         marker.x.expression = f"{x_mm:.6f} mm"
         marker.y.expression = f"{y_mm:.6f} mm"
 
+    def _slider_center_mm(self, slider: Slider) -> tuple[float, float]:
+        return self._evaluate_scalar_as(slider.origin_x, "mm"), self._evaluate_scalar_as(slider.origin_y, "mm")
+
     def _evaluate_scalar_as(self, scalar: ScalarProperty, unit: str) -> float:
         result = self.expression_service.evaluate_property(
             scalar,
@@ -1659,6 +1973,15 @@ class ApplicationService:
             return expression
         sign = "+" if delta >= 0 else "-"
         return f"({expression}) {sign} {abs(delta):.6f} {unit}"
+
+    _OFFSET_RE = re.compile(r'^\((.*)\)\s+([+-])\s+([\d.]+)\s+(mm|m|deg|rad)$')
+
+    def _strip_offset(self, expression: str) -> str:
+        """Undo the outermost offset wrapper added by _offset_expression."""
+        match = self._OFFSET_RE.match(expression.strip())
+        if not match:
+            return expression.strip()
+        return match.group(1).strip()
 
     def _validate_joint_geometry(self, project: Project, report: ValidationReport) -> None:
         try:
@@ -1765,6 +2088,7 @@ class ApplicationService:
         except Exception:
             return
         sample_times = self._simulation_sample_times(duration, steps)
+        self._validate_translation_driver_travel(project, report, assembled, sample_times)
         reported: set[tuple[str, str, str]] = set()
         for driver in project.model.drivers:
             if driver.type is not DriverType.ROTATION:
@@ -1855,6 +2179,84 @@ class ApplicationService:
                             )
 
         self._validate_rotational_loop_reach(project, report, assembled, sample_times)
+
+    def _validate_translation_driver_travel(
+        self,
+        project: Project,
+        report: ValidationReport,
+        assembled,
+        sample_times: list[float],
+    ) -> None:
+        reported: set[str] = set()
+        for driver in project.model.drivers:
+            if driver.type is not DriverType.TRANSLATION:
+                continue
+            try:
+                joint = self._find_joint(driver.target_joint_id)
+            except ValueError:
+                continue
+            marker_endpoint, slider_endpoint = self._marker_slider_endpoints(joint)
+            if (
+                marker_endpoint is None
+                or slider_endpoint is None
+                or marker_endpoint.body_id is None
+                or marker_endpoint.marker_id is None
+                or slider_endpoint.slider_id is None
+            ):
+                continue
+            body = assembled.bodies.get(marker_endpoint.body_id)
+            slider = assembled.sliders.get(slider_endpoint.slider_id)
+            if body is None or slider is None:
+                continue
+            marker = body.markers.get(marker_endpoint.marker_id)
+            if marker is None:
+                continue
+            initial_coordinate = (
+                (marker.global_x - slider.origin_x) * slider.axis_x
+                + (marker.global_y - slider.origin_y) * slider.axis_y
+            )
+            for time_value in sample_times:
+                try:
+                    target_coordinate = initial_coordinate + self._driver_value_at(
+                        driver,
+                        project,
+                        time_value,
+                        "mm",
+                    )
+                except Exception:
+                    break
+                if slider.travel_min is not None and target_coordinate < slider.travel_min - 1e-6:
+                    if driver.id not in reported:
+                        reported.add(driver.id)
+                        report.messages.append(
+                            ValidationMessage(
+                                "warning",
+                                "kinematic_travel",
+                                (
+                                    f"Driver {driver.name} requests slider {slider.name} coordinate "
+                                    f"{target_coordinate:.6g} mm at t={time_value:.3g}s, below "
+                                    f"travel_min {slider.travel_min:.6g} mm"
+                                ),
+                                joint.id,
+                            )
+                        )
+                    break
+                if slider.travel_max is not None and target_coordinate > slider.travel_max + 1e-6:
+                    if driver.id not in reported:
+                        reported.add(driver.id)
+                        report.messages.append(
+                            ValidationMessage(
+                                "warning",
+                                "kinematic_travel",
+                                (
+                                    f"Driver {driver.name} requests slider {slider.name} coordinate "
+                                    f"{target_coordinate:.6g} mm at t={time_value:.3g}s, above "
+                                    f"travel_max {slider.travel_max:.6g} mm"
+                                ),
+                                joint.id,
+                            )
+                        )
+                    break
 
     def _validate_rotational_loop_reach(
         self,

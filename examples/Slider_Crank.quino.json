@@ -1,0 +1,530 @@
+{
+  "schema_version": "0.1.0",
+  "project": {
+    "id": "proj_001",
+    "name": "Slider Crank with Sketch",
+    "metadata": {}
+  },
+  "parameters": [],
+  "sketch": {
+    "id": "sketch_001",
+    "name": "Main Sketch",
+    "visible": true,
+    "style": {
+      "color": "#9aa0a6",
+      "visible": true,
+      "line_width": 1.0,
+      "marker_size": 4.0
+    },
+    "entities": [
+      {
+        "id": "skpt_001",
+        "name": "A_sk",
+        "type": "point",
+        "visible": true,
+        "construction": false,
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {},
+        "x": {
+          "expression": "0 mm",
+          "unit": "mm",
+          "expected_dimension": "length"
+        },
+        "y": {
+          "expression": "0 mm",
+          "unit": "mm",
+          "expected_dimension": "length"
+        }
+      },
+      {
+        "id": "skpt_002",
+        "name": "B_sk",
+        "type": "point",
+        "visible": true,
+        "construction": false,
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {},
+        "x": {
+          "expression": "50 mm",
+          "unit": "mm",
+          "expected_dimension": "length"
+        },
+        "y": {
+          "expression": "0 mm",
+          "unit": "mm",
+          "expected_dimension": "length"
+        }
+      },
+      {
+        "id": "skpt_003",
+        "name": "P_sk",
+        "type": "point",
+        "visible": true,
+        "construction": false,
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {},
+        "x": {
+          "expression": "150 mm",
+          "unit": "mm",
+          "expected_dimension": "length"
+        },
+        "y": {
+          "expression": "0 mm",
+          "unit": "mm",
+          "expected_dimension": "length"
+        }
+      },
+      {
+        "id": "skline_001",
+        "name": "CrankSeg",
+        "type": "line_segment",
+        "visible": true,
+        "construction": false,
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {},
+        "start_point_id": "skpt_001",
+        "end_point_id": "skpt_002"
+      },
+      {
+        "id": "skline_002",
+        "name": "RodSeg",
+        "type": "line_segment",
+        "visible": true,
+        "construction": false,
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {},
+        "start_point_id": "skpt_002",
+        "end_point_id": "skpt_003"
+      },
+      {
+        "id": "skinf_001",
+        "name": "GuideAxis",
+        "type": "infinite_line",
+        "visible": true,
+        "construction": false,
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {},
+        "point_a_id": "skpt_001",
+        "point_b_id": "skpt_003"
+      }
+    ],
+    "constraints": [
+      {
+        "id": "skcon_001",
+        "name": "FixA",
+        "type": "fix",
+        "references": [
+          "skpt_001"
+        ],
+        "value": null,
+        "entity_references": [],
+        "metadata": {}
+      },
+      {
+        "id": "skcon_002",
+        "name": "HGuide",
+        "type": "horizontal",
+        "references": [
+          "skpt_001",
+          "skpt_003"
+        ],
+        "value": null,
+        "entity_references": [],
+        "metadata": {}
+      },
+      {
+        "id": "skcon_003",
+        "name": "CrankLen",
+        "type": "distance",
+        "references": [
+          "skpt_001",
+          "skpt_002"
+        ],
+        "value": {
+          "expression": "50 mm",
+          "unit": "mm",
+          "expected_dimension": "length"
+        },
+        "entity_references": [],
+        "metadata": {}
+      },
+      {
+        "id": "skcon_004",
+        "name": "RodLen",
+        "type": "distance",
+        "references": [
+          "skpt_002",
+          "skpt_003"
+        ],
+        "value": {
+          "expression": "100 mm",
+          "unit": "mm",
+          "expected_dimension": "length"
+        },
+        "entity_references": [],
+        "metadata": {}
+      }
+    ],
+    "metadata": {}
+  },
+  "model": {
+    "bodies": [
+      {
+        "id": "body_001",
+        "name": "Crank",
+        "type": "bar",
+        "markers": [
+          {
+            "id": "marker_001",
+            "name": "A",
+            "type": "structural",
+            "x": {
+              "expression": "0 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "y": {
+              "expression": "0 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "visible": true,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "marker_002",
+            "name": "B",
+            "type": "structural",
+            "x": {
+              "expression": "50 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "y": {
+              "expression": "0 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "visible": true,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "marker_003",
+            "name": "CoM",
+            "type": "com",
+            "x": {
+              "expression": "25 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "y": {
+              "expression": "0 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "visible": false,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          }
+        ],
+        "edge_order": [
+          "marker_001",
+          "marker_002"
+        ],
+        "closed_shape": false,
+        "mass": null,
+        "inertia": null,
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {}
+      },
+      {
+        "id": "body_002",
+        "name": "Rod",
+        "type": "bar",
+        "markers": [
+          {
+            "id": "marker_004",
+            "name": "B",
+            "type": "structural",
+            "x": {
+              "expression": "50 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "y": {
+              "expression": "0 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "visible": true,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "marker_005",
+            "name": "P",
+            "type": "structural",
+            "x": {
+              "expression": "150 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "y": {
+              "expression": "0 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "visible": true,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "marker_006",
+            "name": "CoM",
+            "type": "com",
+            "x": {
+              "expression": "100 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "y": {
+              "expression": "0 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "visible": false,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          }
+        ],
+        "edge_order": [
+          "marker_004",
+          "marker_005"
+        ],
+        "closed_shape": false,
+        "mass": null,
+        "inertia": null,
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {}
+      }
+    ],
+    "sliders": [
+      {
+        "id": "slider_001",
+        "name": "Guide",
+        "origin_x": {
+          "expression": "150 mm",
+          "unit": "mm",
+          "expected_dimension": "length"
+        },
+        "origin_y": {
+          "expression": "0 mm",
+          "unit": "mm",
+          "expected_dimension": "length"
+        },
+        "angle": {
+          "expression": "0 deg",
+          "unit": "deg",
+          "expected_dimension": "angle"
+        },
+        "travel_min": {
+          "expression": "-60 mm",
+          "unit": "mm",
+          "expected_dimension": "length"
+        },
+        "travel_max": {
+          "expression": "60 mm",
+          "unit": "mm",
+          "expected_dimension": "length"
+        },
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {}
+      }
+    ],
+    "joints": [
+      {
+        "id": "joint_001",
+        "name": "Ground_A",
+        "type": "revolute",
+        "endpoint_a": {
+          "kind": "marker",
+          "body_id": "body_001",
+          "marker_id": "marker_001"
+        },
+        "endpoint_b": {
+          "kind": "ground"
+        },
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {}
+      },
+      {
+        "id": "joint_002",
+        "name": "Joint_B",
+        "type": "revolute",
+        "endpoint_a": {
+          "kind": "marker",
+          "body_id": "body_001",
+          "marker_id": "marker_002"
+        },
+        "endpoint_b": {
+          "kind": "marker",
+          "body_id": "body_002",
+          "marker_id": "marker_004"
+        },
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {}
+      },
+      {
+        "id": "joint_003",
+        "name": "Slider_P",
+        "type": "revolute",
+        "endpoint_a": {
+          "kind": "marker",
+          "body_id": "body_002",
+          "marker_id": "marker_005"
+        },
+        "endpoint_b": {
+          "kind": "slider",
+          "slider_id": "slider_001"
+        },
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {}
+      }
+    ],
+    "drivers": [
+      {
+        "id": "driver_001",
+        "name": "CrankDrive",
+        "type": "rotation",
+        "target_joint_id": "joint_001",
+        "law": {
+          "expression": "360 deg * t / 1 s",
+          "unit": "deg",
+          "expected_dimension": "angle"
+        },
+        "metadata": {}
+      }
+    ],
+    "sensors": [
+      {
+        "id": "sensor_001",
+        "name": "PistonSensor",
+        "type": "point",
+        "marker_ids": [
+          "marker_005"
+        ],
+        "metadata": {}
+      },
+      {
+        "id": "sensor_002",
+        "name": "Point Sensor1",
+        "type": "point",
+        "marker_ids": [
+          "marker_004"
+        ],
+        "metadata": {}
+      }
+    ]
+  },
+  "view_state": {
+    "zoom": 3.0,
+    "pan_x": 105.0,
+    "pan_y": 0.0,
+    "show_grid": true,
+    "show_markers": true,
+    "show_com": false,
+    "show_sliders": true
+  }
+}

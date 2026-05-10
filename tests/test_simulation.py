@@ -5,6 +5,8 @@ import math
 from pathlib import Path
 import types
 
+import pytest
+
 from quino import (
     ApplicationService,
     DriverType,
@@ -230,11 +232,56 @@ def test_slider_crank_uses_prismatic_joint_in_fake_exudyn(monkeypatch) -> None:
     assert result.success is True
     assert any(obj["kind"] == "CoordinateConstraint" for obj in fake_sc.mbs.objects)
     assert any(obj["kind"] == "ObjectConnectorCoordinateSpringDamperExt" for obj in fake_sc.mbs.objects)
-    assert any(obj["kind"] == "ObjectConnectorCoordinateSpringDamper" for obj in fake_sc.mbs.objects)
+    assert any(
+        obj["kind"] == "CoordinateConstraint" and obj.get("name") == "SliderDrive"
+        for obj in fake_sc.mbs.objects
+    )
     assert fake_sc.mbs.assembled is True
     assert getattr(fake_sc.mbs, "solved_dynamic", False) is True
     assert result.frames
     assert result.time
+
+
+def test_translation_driver_is_relative_to_initial_slider_coordinate(monkeypatch) -> None:
+    fake_sc = _FakeSystemContainer()
+    fake_exu = types.SimpleNamespace(
+        SystemContainer=lambda: fake_sc,
+        OutputVariableType=types.SimpleNamespace(Coordinates="Coordinates"),
+    )
+    fake_exu.SimulationSettings = lambda: types.SimpleNamespace(
+        timeIntegration=types.SimpleNamespace(numberOfSteps=0, endTime=0.0),
+        staticSolver=types.SimpleNamespace(numberOfLoadSteps=0),
+        solutionSettings=types.SimpleNamespace(writeSolutionToFile=True),
+    )
+    fake_item_interface = _FakeItemInterface()
+
+    def fake_import_module(name: str):
+        if name == "exudyn":
+            return fake_exu
+        if name == "exudyn.itemInterface":
+            return fake_item_interface
+        raise ImportError(name)
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object() if name == "exudyn" else None)
+    monkeypatch.setattr(importlib, "import_module", fake_import_module)
+
+    app = ApplicationService()
+    app.new_project("TranslationDriveOffset")
+    body_id = app.create_body("Mass", [MarkerInput("150 mm", "0 mm", "P")])
+    slider_id = app.create_slider("Guide", SliderInput("100 mm", "0 mm", "0 deg", "-100 mm", "100 mm"))
+    marker_id = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "P")
+    joint_id = app.connect_marker_to_slider(marker_id, slider_id, name="Slider_P", align="none")
+    app.create_driver("SliderDrive", DriverType.TRANSLATION.value, joint_id, "10 mm * t / 1 s", "mm")
+
+    result = app.run_kinematic_simulation()
+
+    driver_constraint = next(
+        obj for obj in fake_sc.mbs.objects
+        if obj["kind"] == "CoordinateConstraint" and obj.get("name") == "SliderDrive"
+    )
+    assert result.success is True
+    assert driver_constraint["offsetUserFunction"](None, 0.0, 0, 0.0) == pytest.approx(-50.0)
+    assert driver_constraint["offsetUserFunction"](None, 1.0, 0, 0.0) == pytest.approx(-60.0)
 
 
 def test_exudyn_adapter_returns_partial_frames_when_dynamic_solve_fails(monkeypatch) -> None:
@@ -334,6 +381,61 @@ def test_slider_crank_runs_with_real_exudyn_if_available() -> None:
     assert result.frames
     assert result.time
     assert len(result.time) == len(result.frames)
+
+
+def test_umbrella_mechanism_slider_driver_runs_without_erratic_jump_if_available() -> None:
+    import importlib.util
+
+    if importlib.util.find_spec("exudyn") is None:
+        return
+    example_path = Path("examples/Umbrella_Mechanism.quino.json")
+    if not example_path.exists():
+        return
+
+    app = ApplicationService()
+    app.load_project(str(example_path))
+
+    result = app.run_kinematic_simulation(duration=1.0, steps=100)
+
+    assert result.success is True
+    assert len(result.frames) == len(result.time)
+    assert result.time[-1] == pytest.approx(1.0)
+    assembled = app.simulation_runner.adapter.assembler.assemble(app.project)
+    slider = next(iter(assembled.sliders.values()))
+    slider_joint = next(
+        joint
+        for joint in app.project.model.joints
+        if any(endpoint.kind is JointEndpointKind.SLIDER for endpoint in (joint.endpoint_a, joint.endpoint_b))
+    )
+    marker_endpoint = next(
+        endpoint
+        for endpoint in (slider_joint.endpoint_a, slider_joint.endpoint_b)
+        if endpoint.kind is JointEndpointKind.MARKER
+    )
+    driver = next(driver for driver in app.project.model.drivers if driver.target_joint_id == slider_joint.id)
+    marker = assembled.bodies[marker_endpoint.body_id].markers[marker_endpoint.marker_id]
+    initial_coordinate = (
+        (marker.global_x - slider.origin_x) * slider.axis_x
+        + (marker.global_y - slider.origin_y) * slider.axis_y
+    )
+    max_coordinate_error = 0.0
+    max_angle = 0.0
+    for t, frame in zip(result.time, result.frames):
+        px, py = _marker_world(assembled, frame, marker_endpoint.body_id, marker_endpoint.marker_id)
+        coordinate = (px - slider.origin_x) * slider.axis_x + (py - slider.origin_y) * slider.axis_y
+        target = initial_coordinate + app.unit_service.convert(
+            app.expression_service.evaluate_expression(
+                driver.law.expression,
+                app.project.parameters,
+                variables={"t": app.unit_service.quantity(t, "s")},
+            ),
+            "mm",
+        )
+        max_coordinate_error = max(max_coordinate_error, abs(coordinate - target))
+        for body in assembled.bodies:
+            max_angle = max(max_angle, abs(frame[f"{body}.angle"]))
+    assert max_coordinate_error < 1e-4
+    assert max_angle < 10.0
 
 
 def test_four_bar_with_rotation_driver_runs_with_real_exudyn_if_available() -> None:
