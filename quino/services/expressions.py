@@ -20,7 +20,7 @@ class EvaluationResult:
 class ExpressionService:
     _number_unit_pattern = re.compile(
         r"(?P<num>(?<![A-Za-z_])[-+]?\d+(?:[\.,]\d+)?)\s*"
-        r"(?P<unit>unitless|deg|rad|kg|mm|m|s)\b"
+        r"(?P<unit>kgmm2|kgm2|unitless|deg|rad|kg|mm|m|s)\b"
     )
 
     def __init__(self, unit_service: UnitService) -> None:
@@ -64,6 +64,9 @@ class ExpressionService:
         env["sin"] = self._sin
         env["cos"] = self._cos
         env["abs"] = self._abs
+        env["sqrt"] = self._sqrt
+        env["tan"] = self._tan
+        env["pow"] = self._pow
         return env
 
     def _prepare(self, expression: str) -> str:
@@ -137,6 +140,26 @@ class ExpressionService:
 
     def _abs(self, value: Quantity) -> Quantity:
         return Quantity(abs(value.value_si), dict(value.dimensions))
+
+    def _sqrt(self, value: Quantity) -> Quantity:
+        if value.value_si < 0:
+            raise ValueError("sqrt requires a non-negative value")
+        halved = {dim: exp // 2 for dim, exp in value.dimensions.items() if exp % 2 == 0}
+        if len(halved) != len(value.dimensions):
+            raise ValueError("sqrt requires all dimension exponents to be even")
+        return Quantity(math.sqrt(value.value_si), halved)
+
+    def _tan(self, value: Quantity) -> Quantity:
+        if not value.is_pure(Dimension.ANGLE):
+            raise ValueError("tan expects an angle")
+        return Quantity(math.tan(value.value_si), {})
+
+    def _pow(self, base: Quantity, exponent: Quantity) -> Quantity:
+        if not exponent.is_unitless():
+            raise ValueError("pow exponent must be unitless")
+        if not base.is_unitless():
+            raise ValueError("pow base must be unitless")
+        return Quantity(base.value_si ** exponent.value_si, {})
 
     def _combine_dimensions(
         self,
