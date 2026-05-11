@@ -63,7 +63,12 @@ class TestMathFunctions:
         assert q.is_unitless()
         assert q.value_si == pytest.approx(8.0)
 
-    def test_pow_rejects_non_unitless_exponent(self):
+    def test_pow_rejects_dimensioned_base(self):
         svc = _svc()
-        with pytest.raises(ValueError, match="unitless"):
+        with pytest.raises(ValueError, match="pow base"):
             svc.evaluate_expression("pow(2 mm, 3 unitless)", [])
+
+    def test_pow_rejects_dimensioned_exponent(self):
+        svc = _svc()
+        with pytest.raises(ValueError, match="pow exponent"):
+            svc.evaluate_expression("pow(2 unitless, 3 mm)", [])

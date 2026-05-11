@@ -157,6 +157,8 @@ class ExpressionService:
     def _pow(self, base: Quantity, exponent: Quantity) -> Quantity:
         if not exponent.is_unitless():
             raise ValueError("pow exponent must be unitless")
+        # Deliberate restriction: pow(4 mm^2, 0.5) is mathematically valid but
+        # use sqrt() for dimensioned square roots instead.
         if not base.is_unitless():
             raise ValueError("pow base must be unitless")
         return Quantity(base.value_si ** exponent.value_si, {})
