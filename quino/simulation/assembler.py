@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 
-from quino.domain.model import Body, Driver, Joint, Marker, Project, Slider
+from quino.domain.model import Body, Driver, GravityLoad, Joint, Marker, Project, Slider
 from quino.domain.types import MarkerType
 from quino.services.expressions import ExpressionService
 
@@ -68,6 +68,7 @@ class AssembledMechanism:
     sliders: dict[str, AssembledSlider]
     joints: list[Joint]
     drivers: list[AssembledDriver]
+    gravity: GravityLoad
     warnings: list[str] = field(default_factory=list)
 
 
@@ -84,6 +85,7 @@ class MechanismAssembler:
             sliders=sliders,
             joints=list(project.model.joints),
             drivers=drivers,
+            gravity=project.model.gravity,
             warnings=[],
         )
 
