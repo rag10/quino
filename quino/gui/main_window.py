@@ -12,6 +12,7 @@ from quino.domain.model import (
     Body,
     Driver,
     Expression,
+    GravityLoad,
     Joint,
     Marker,
     Parameter,
@@ -402,6 +403,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_toggle_grid.triggered.connect(self._on_toggle_grid)
         self.action_toggle_grid.setToolTip("Show/hide grid")
 
+        self.action_toggle_gravity = QtWidgets.QAction("Gravity", self)
+        self.action_toggle_gravity.setCheckable(True)
+        self.action_toggle_gravity.setChecked(True)
+        self.action_toggle_gravity.setToolTip("Enable gravity (LoadMassProportional)")
+        self.action_toggle_gravity.triggered.connect(self._on_toggle_gravity)
+
         self.action_preferences = QtGui.QAction(get_icon("preferences", color_base), "Preferences", self)
         self.action_preferences.triggered.connect(self._show_preferences_dialog)
         self.action_preferences.setToolTip("Open preferences dialog")
@@ -705,6 +712,10 @@ class MainWindow(QtWidgets.QMainWindow):
         ], "Sensors")
         self._add_toolbar_sep(t)
 
+        self._add_toolbar_block(t, [
+            [self.action_toggle_gravity],
+        ], "Loads")
+
         self._model_toolbar.setVisible(True)
 
     def _build_sim_toolbar(self) -> None:
@@ -787,6 +798,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._populate_parameters(project)
         self._populate_inspector()
         self.action_toggle_sketch_visible.setChecked(project.sketch.visible if project.sketch is not None else False)
+        self.action_toggle_gravity.setChecked(project.model.gravity.enabled)
         self.canvas.set_selection(self._selected_entity_id)
         self._update_interaction_state()
         self._update_status_message()
@@ -1109,6 +1121,17 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_toggle_grid(self) -> None:
         self.canvas.set_show_grid(self.action_toggle_grid.isChecked())
 
+    def _on_toggle_gravity(self, checked: bool) -> None:
+        if not self._editing_allowed():
+            self.action_toggle_gravity.setChecked(not checked)
+            return
+        if not self._prepare_for_model_edit():
+            self.action_toggle_gravity.setChecked(not checked)
+            return
+        self.app_service.toggle_gravity(checked)
+        self._mark_project_dirty()
+        self.refresh_all()
+
     def _show_preferences_dialog(self) -> None:
         dialog = QtWidgets.QDialog(self)
         dialog.setWindowTitle("Preferences")
@@ -1340,17 +1363,20 @@ class MainWindow(QtWidgets.QMainWindow):
         "circle": "sketch-circle",
         "arc": "sketch-arc",
         "infinite_line": "sketch-infinite-line",
+        "gravity": "load-gravity",
     }
     _SECTION_ICON: dict[str, str] = {
         "Bodies": "body", "Sliders": "slider", "Joints": "revolute",
         "Drivers": "rotate-driver", "Sensors": "sensor-point",
         "Sketch": "sketch-point",
         "Constraints": "constraint-distance",
+        "Loads": "load-gravity",
     }
     _SECTION_COLOR: dict[str, str] = {
         "Bodies": "#2f6f9f", "Sliders": "#2f6f9f", "Joints": "#2f6f9f",
         "Drivers": "#c7781d", "Sensors": "#c7781d",
         "Sketch": "#7a7f87",
+        "Loads": "#7a5a8f",
     }
 
     def _populate_tree(self, project: Project) -> None:
@@ -1376,9 +1402,10 @@ class MainWindow(QtWidgets.QMainWindow):
         joints_root = _root("Joints", len(project.model.joints))
         drivers_root = _root("Drivers", len(project.model.drivers))
         sensors_root = _root("Sensors", len(project.model.sensors))
+        loads_root = _root("Loads", 1)
         sketch_count = (len(project.sketch.entities) + len(project.sketch.constraints)) if project.sketch is not None else 0
         sketch_root = _root("Sketch", sketch_count)
-        self.tree.addTopLevelItems([sketch_root, bodies_root, sliders_root, joints_root, drivers_root, sensors_root])
+        self.tree.addTopLevelItems([sketch_root, bodies_root, sliders_root, joints_root, drivers_root, sensors_root, loads_root])
 
         if project.sketch is not None:
             groups = {
@@ -1426,6 +1453,11 @@ class MainWindow(QtWidgets.QMainWindow):
             drivers_root.addChild(self._entity_item(driver.name, driver.type.value, driver.id))
         for sensor in project.model.sensors:
             sensors_root.addChild(self._entity_item(sensor.name, sensor.type.value, sensor.id))
+
+        gravity = project.model.gravity
+        gravity_label = "Gravity (ON)" if gravity.enabled else "Gravity (OFF)"
+        gravity_item = self._entity_item(gravity_label, "gravity", "__gravity__")
+        loads_root.addChild(gravity_item)
 
         self.tree.expandAll()
 
@@ -1750,6 +1782,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return "constraint"
         if isinstance(entity, SketchPoint):
             return "point"
+        if isinstance(entity, GravityLoad):
+            return "gravity"
         return ""
 
     def _entity_default_icon(self, entity: object) -> str:
@@ -1877,6 +1911,11 @@ class MainWindow(QtWidgets.QMainWindow):
             prop("type", "", entity.type.value, "readonly", entity.type.value)
             if entity.value is not None:
                 prop("value", "value", entity.value.expression, "expression", self._evaluate_scalar(entity.value))
+
+        elif isinstance(entity, GravityLoad):
+            prop("magnitude", "magnitude", str(entity.magnitude), "expression", str(entity.magnitude))
+            prop("direction_x", "direction_x", str(entity.direction_x), "expression", str(entity.direction_x))
+            prop("direction_y", "direction_y", str(entity.direction_y), "expression", str(entity.direction_y))
 
         return rows
 
