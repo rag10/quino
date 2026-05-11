@@ -33,6 +33,8 @@ class Quantity:
     def is_pure(self, dimension: Dimension) -> bool:
         if dimension is Dimension.UNITLESS:
             return not self.dimensions
+        if dimension is Dimension.INERTIA:
+            return self.dimensions == {Dimension.MASS: 1, Dimension.LENGTH: 2}
         return self.dimensions == {dimension: 1}
 
 
@@ -45,6 +47,18 @@ class UnitService:
         "kg": (Dimension.MASS, 1.0),
         "s": (Dimension.TIME, 1.0),
         "unitless": (Dimension.UNITLESS, 1.0),
+        "kgmm2": (Dimension.INERTIA, 1e-6),
+        "kgm2": (Dimension.INERTIA, 1.0),
+    }
+
+    # Maps each Dimension to its SI base-dimension exponents
+    _UNIT_DIMS: dict[Dimension, dict[Dimension, int]] = {
+        Dimension.LENGTH: {Dimension.LENGTH: 1},
+        Dimension.ANGLE: {Dimension.ANGLE: 1},
+        Dimension.MASS: {Dimension.MASS: 1},
+        Dimension.TIME: {Dimension.TIME: 1},
+        Dimension.INERTIA: {Dimension.MASS: 1, Dimension.LENGTH: 2},
+        Dimension.UNITLESS: {},
     }
 
     def is_known(self, unit: str) -> bool:
@@ -65,15 +79,11 @@ class UnitService:
 
     def quantity(self, value: float, unit: str) -> Quantity:
         dimension = self.dimension(unit)
-        dimensions = {} if dimension is Dimension.UNITLESS else {dimension: 1}
-        return Quantity(value * self.factor(unit), dimensions)
+        return Quantity(value * self.factor(unit), dict(self._UNIT_DIMS[dimension]))
 
     def convert(self, quantity: Quantity, unit: str) -> float:
         target_dimension = self.dimension(unit)
-        if target_dimension is Dimension.UNITLESS:
-            expected = {}
-        else:
-            expected = {target_dimension: 1}
+        expected = self._UNIT_DIMS[target_dimension]
         if quantity.dimensions != expected:
             raise ValueError("Incompatible dimensions")
         return quantity.to(self.factor(unit))
