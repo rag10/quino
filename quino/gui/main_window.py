@@ -31,6 +31,22 @@ from quino.gui.canvas import CanvasMode, MechanismCanvas
 from quino.viewer.plot_window import PlotWindow
 
 
+_PROPERTY_DIMENSION_HINTS: dict[str, str] = {
+    "x": "length (e.g. 50 mm)",
+    "y": "length (e.g. 50 mm)",
+    "origin_x": "length (e.g. 50 mm)",
+    "origin_y": "length (e.g. 50 mm)",
+    "travel_min": "length (e.g. 50 mm)",
+    "travel_max": "length (e.g. 50 mm)",
+    "angle": "angle (e.g. 90 deg)",
+    "mass": "mass (e.g. 1.5 kg)",
+    "inertia": "inertia (e.g. 250 kgmm2)",
+    "radius": "length (e.g. 25 mm)",
+    "value": "see constraint type",
+    "law": "angle or length (e.g. 90 deg * t / 1 s)",
+}
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, app_service: ApplicationService | None = None) -> None:
         super().__init__()
@@ -1562,6 +1578,9 @@ class MainWindow(QtWidgets.QMainWindow):
             for row_index, (label, path, value, kind, evaluated, _) in enumerate(prop_rows):
                 label_item = QtWidgets.QTableWidgetItem(label)
                 label_item.setFlags(label_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
+                hint = _PROPERTY_DIMENSION_HINTS.get(path)
+                if hint:
+                    label_item.setToolTip(hint)
                 self.inspector.setItem(row_index, 0, label_item)
 
                 evaluated_item = QtWidgets.QTableWidgetItem(evaluated)
@@ -1890,7 +1909,11 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return f"{quantity.value:.6g} {scalar.unit}"
         except Exception as exc:
-            return f"ERROR: {exc}"
+            msg = str(exc)
+            if "but got unitless" in msg:
+                unit_hint = scalar.unit if hasattr(scalar, "unit") else "mm"
+                return f"Missing unit — e.g. 1 {unit_hint}"
+            return f"ERROR: {msg}"
 
     def _evaluate_parameter(self, parameter: Parameter) -> str:
         try:
