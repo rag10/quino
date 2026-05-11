@@ -7,6 +7,7 @@ from quino.domain.model import (
     Body,
     Driver,
     Expression,
+    GravityLoad,
     Joint,
     JointEndpoint,
     Marker,
@@ -60,6 +61,12 @@ class JsonMapper:
                 "joints": [self._joint_to_dict(joint) for joint in project.model.joints],
                 "drivers": [self._driver_to_dict(driver) for driver in project.model.drivers],
                 "sensors": [self._sensor_to_dict(sensor) for sensor in project.model.sensors],
+                "gravity": {
+                    "enabled": project.model.gravity.enabled,
+                    "magnitude": project.model.gravity.magnitude,
+                    "direction_x": project.model.gravity.direction_x,
+                    "direction_y": project.model.gravity.direction_y,
+                },
             },
             "view_state": {
                 "zoom": project.view_state.zoom,
@@ -87,6 +94,7 @@ class JsonMapper:
                 joints=[self._joint_from_dict(item) for item in model_block.get("joints", [])],
                 drivers=[self._driver_from_dict(item) for item in model_block.get("drivers", [])],
                 sensors=[self._sensor_from_dict(item) for item in model_block.get("sensors", [])],
+                gravity=GravityLoad(**model_block.get("gravity", {})),
             ),
             view_state=ViewState(**data.get("view_state", {})),
             metadata=Metadata(project_block.get("metadata", {})),
