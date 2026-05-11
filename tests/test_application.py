@@ -1201,3 +1201,32 @@ def test_body_inertia_default_unit_is_kgmm2() -> None:
     body = app._find_body(body_id)
     app.update_property(body.id, "inertia", PropertyValueInput("expression", "500 kgmm2"))
     assert body.inertia.unit == "kgmm2"
+
+
+def test_legacy_unitless_inertia_still_loads_and_assembles() -> None:
+    """Existing project files store inertia as unitless; they must still load and simulate."""
+    from quino.domain.model import ScalarProperty
+    from quino.domain.types import Dimension
+    from quino.simulation.assembler import MechanismAssembler
+
+    app = make_app()
+    body_id = app.create_body("Block", [MarkerInput("0 mm", "0 mm", "P")])
+    body = app._find_body(body_id)
+
+    # Simulate a legacy ScalarProperty as it would be loaded from old JSON
+    legacy_inertia = ScalarProperty(
+        expression="500",
+        unit="unitless",
+        expected_dimension=Dimension.UNITLESS,
+    )
+    body.inertia = legacy_inertia
+
+    # Must evaluate without error
+    result = app.expression_service.evaluate_property(body.inertia, app.project.parameters)
+    assert result.value == pytest.approx(500.0)
+    assert result.unit == "unitless"
+
+    # Must assemble without error (assembler uses inertia value directly)
+    assembler = MechanismAssembler(app.expression_service)
+    assembled = assembler.assemble(app.project)
+    assert assembled.bodies  # at least one body assembled

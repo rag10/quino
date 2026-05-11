@@ -28,6 +28,7 @@ from quino.domain.model import (
     Slider,
 )
 from quino.gui.canvas import CanvasMode, MechanismCanvas
+from quino.services.expressions import DimensionMismatchError
 from quino.viewer.plot_window import PlotWindow
 
 
@@ -1908,12 +1909,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 variables=variables,
             )
             return f"{quantity.value:.6g} {scalar.unit}"
+        except DimensionMismatchError as exc:
+            if exc.suggested_unit:
+                return f"Missing unit — e.g. 1 {exc.suggested_unit}"
+            return f"ERROR: {exc}"
         except Exception as exc:
-            msg = str(exc)
-            if "but got unitless" in msg:
-                unit_hint = scalar.unit if hasattr(scalar, "unit") else "mm"
-                return f"Missing unit — e.g. 1 {unit_hint}"
-            return f"ERROR: {msg}"
+            return f"ERROR: {exc}"
 
     def _evaluate_parameter(self, parameter: Parameter) -> str:
         try:

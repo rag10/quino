@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 import math
 
 from quino.domain.model import Body, Driver, Joint, Marker, Project, Slider
-from quino.domain.types import Dimension, MarkerType
+from quino.domain.types import MarkerType
 from quino.services.expressions import ExpressionService
 
 
@@ -116,11 +116,19 @@ class MechanismAssembler:
                 visible=marker.visible,
             )
         com_marker = next(marker for marker in transformed_markers.values() if marker.marker_type == MarkerType.COM.value)
-        mass = self._eval_optional(project, body.mass, default=1.0, expected=Dimension.MASS)
-        inertia = self._eval_optional(project, body.inertia, default=max(mass * 0.01, 1e-6), expected=Dimension.INERTIA)
+        mass = self._eval_optional(project, body.mass, default=0.0)
+        if mass is None:
+            mass = 0.0
+        if mass == 0.0:
+            inertia_default = 0.0
+        else:
+            inertia_default = max(mass * 0.01, 1e-6)
+        inertia = self._eval_optional(project, body.inertia, default=inertia_default)
+        if inertia is None:
+            inertia = inertia_default
         warnings: list[str] = []
         if body.mass is None:
-            warnings.append(f"Body {body.name}: undefined mass, defaulting to 1.0 kg for Exudyn assembly")
+            warnings.append(f"Body {body.name}: undefined mass, defaulting to 0.0 kg (massless / kinematic) for Exudyn assembly")
         if body.inertia is None:
             warnings.append(
                 f"Body {body.name}: undefined inertia, defaulting to {inertia:.6g} for Exudyn assembly"
@@ -157,8 +165,8 @@ class MechanismAssembler:
             axis_y=math.sin(angle),
             normal_x=-math.sin(angle),
             normal_y=math.cos(angle),
-            travel_min=self._eval_optional(project, slider.travel_min, default=None, expected=Dimension.LENGTH),
-            travel_max=self._eval_optional(project, slider.travel_max, default=None, expected=Dimension.LENGTH),
+            travel_min=self._eval_optional(project, slider.travel_min, default=None),
+            travel_max=self._eval_optional(project, slider.travel_max, default=None),
         )
 
     def _eval_marker(self, project: Project, marker: Marker) -> AssembledMarker:
@@ -175,7 +183,7 @@ class MechanismAssembler:
             visible=marker.visible,
         )
 
-    def _eval_optional(self, project: Project, prop, default: float | None, expected: Dimension) -> float | None:
+    def _eval_optional(self, project: Project, prop, default: float | None) -> float | None:
         if prop is None:
             return default
         return self.expression_service.evaluate_property(prop, project.parameters).value

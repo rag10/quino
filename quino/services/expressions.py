@@ -10,6 +10,14 @@ from quino.domain.types import Dimension
 from quino.services.units import Quantity, UnitService
 
 
+class DimensionMismatchError(ValueError):
+    def __init__(self, expected: str, got: str, suggested_unit: str | None = None) -> None:
+        super().__init__(f"Expected {expected} but got {got}")
+        self.expected = expected
+        self.got = got
+        self.suggested_unit = suggested_unit
+
+
 @dataclass(slots=True)
 class EvaluationResult:
     value: float
@@ -35,8 +43,10 @@ class ExpressionService:
     ) -> EvaluationResult:
         quantity = self.evaluate_expression(prop.expression, parameters, seen=seen, variables=variables)
         if not quantity.is_pure(prop.expected_dimension):
-            raise ValueError(
-                f"Expected {prop.expected_dimension.value} but got {quantity.dimension_text}"
+            raise DimensionMismatchError(
+                prop.expected_dimension.value,
+                quantity.dimension_text,
+                suggested_unit=prop.unit if quantity.is_unitless() else None,
             )
         value = self.unit_service.convert(quantity, prop.unit)
         return EvaluationResult(value=value, unit=prop.unit, dimension=prop.expected_dimension)
