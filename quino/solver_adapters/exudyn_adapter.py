@@ -168,7 +168,8 @@ class ExudynAdapter(SolverAdapter):
         for body in assembled.bodies.values():
             warnings.extend(body.warnings)
             messages.extend(f"Body warning: {warning}" for warning in body.warnings)
-        if assembled.drivers:
+        has_dynamic_bodies = any(body.mass > 0 for body in assembled.bodies.values())
+        if assembled.drivers or has_dynamic_bodies:
             if solve_mode == "dynamic":
                 simulation_settings = exu.SimulationSettings()
                 simulation_settings.timeIntegration.numberOfSteps = steps
@@ -266,6 +267,19 @@ class ExudynAdapter(SolverAdapter):
                     physicsCenterOfMass=[body.com_local_x, body.com_local_y],
                 )
             )
+            if body.mass > 0 and assembled.gravity.enabled:
+                g = assembled.gravity
+                gravity_marker = mbs.AddMarker(
+                    item_interface.MarkerBodyMass(
+                        bodyNumber=body_object,
+                    )
+                )
+                mbs.AddLoad(
+                    item_interface.LoadMassProportional(
+                        markerNumber=gravity_marker,
+                        loadVector=[g.magnitude * g.direction_x, g.magnitude * g.direction_y, 0.0],
+                    )
+                )
             node_numbers[body.body_id] = node
             body_objects[body.body_id] = body_object
             body_order.append(body.body_id)
