@@ -83,7 +83,7 @@ class UnitService:
 
     def convert(self, quantity: Quantity, unit: str) -> float:
         target_dimension = self.dimension(unit)
-        expected = self._UNIT_DIMS[target_dimension]
+        expected = self._UNIT_DIMS[target_dimension]  # read-only comparison, no copy needed
         if quantity.dimensions != expected:
             raise ValueError("Incompatible dimensions")
         return quantity.to(self.factor(unit))
