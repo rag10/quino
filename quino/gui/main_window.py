@@ -403,7 +403,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_toggle_grid.triggered.connect(self._on_toggle_grid)
         self.action_toggle_grid.setToolTip("Show/hide grid")
 
-        self.action_toggle_gravity = QtWidgets.QAction("Gravity", self)
+        self.action_toggle_gravity = QtGui.QAction(get_icon("load-gravity", color_base), "Gravity", self)
         self.action_toggle_gravity.setCheckable(True)
         self.action_toggle_gravity.setChecked(True)
         self.action_toggle_gravity.setToolTip("Enable gravity (LoadMassProportional)")

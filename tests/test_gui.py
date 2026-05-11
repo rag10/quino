@@ -30,7 +30,7 @@ def test_main_window_loads_examples_and_runs_validation() -> None:
 
     assert window.app_service.project is not None
     assert window.app_service.project.name == "Four Bar"
-    assert window.tree.topLevelItemCount() == 6
+    assert window.tree.topLevelItemCount() == 7
     assert "Bodies: 3" in window.canvas_summary.toPlainText()
     assert window.canvas is not None
     assert not window.canvas.grab().isNull()
