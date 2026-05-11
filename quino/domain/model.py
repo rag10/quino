@@ -282,12 +282,21 @@ class SketchAnalysis:
 
 
 @dataclass(slots=True)
+class GravityLoad:
+    enabled: bool = True
+    magnitude: float = 9.81
+    direction_x: float = 0.0
+    direction_y: float = -1.0
+
+
+@dataclass(slots=True)
 class Model:
     bodies: list[Body] = field(default_factory=list)
     sliders: list[Slider] = field(default_factory=list)
     joints: list[Joint] = field(default_factory=list)
     drivers: list[Driver] = field(default_factory=list)
     sensors: list[Sensor] = field(default_factory=list)
+    gravity: GravityLoad = field(default_factory=GravityLoad)
 
 
 @dataclass(slots=True)
