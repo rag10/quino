@@ -14,6 +14,7 @@ from quino import (
     SliderInput,
 )
 from quino.domain.model import SimulationResult, SketchLineSegment
+from quino.domain.types import Dimension
 
 
 def make_app() -> ApplicationService:
@@ -1172,3 +1173,31 @@ def test_arc_endpoint_points_are_visible_midpoint_hidden() -> None:
     assert pt_center.visible is True, "Arc center point must be visible"
     assert pt_start.visible is True, "Arc start point must be visible"
     assert pt_end.visible is True, "Arc end point must be visible"
+
+
+def test_body_inertia_accepts_kgmm2_expression() -> None:
+    app = make_app()
+    body_id = app.create_body("Block", [MarkerInput("0 mm", "0 mm", "P")])
+    body = app._find_body(body_id)
+    app.update_property(body.id, "inertia", PropertyValueInput("expression", "250 kgmm2"))
+    assert body.inertia is not None
+    assert body.inertia.expected_dimension is Dimension.INERTIA
+    result = app.expression_service.evaluate_property(body.inertia, app.project.parameters)
+    assert result.value == pytest.approx(250.0)
+    assert result.unit == "kgmm2"
+
+
+def test_body_inertia_rejects_plain_length_expression() -> None:
+    app = make_app()
+    body_id = app.create_body("Block", [MarkerInput("0 mm", "0 mm", "P")])
+    body = app._find_body(body_id)
+    with pytest.raises(ValueError):
+        app.update_property(body.id, "inertia", PropertyValueInput("expression", "50 mm"))
+
+
+def test_body_inertia_default_unit_is_kgmm2() -> None:
+    app = make_app()
+    body_id = app.create_body("Block", [MarkerInput("0 mm", "0 mm", "P")])
+    body = app._find_body(body_id)
+    app.update_property(body.id, "inertia", PropertyValueInput("expression", "500 kgmm2"))
+    assert body.inertia.unit == "kgmm2"

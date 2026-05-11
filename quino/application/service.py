@@ -1395,7 +1395,7 @@ class ApplicationService:
             "travel_max": Dimension.LENGTH,
             "angle": Dimension.ANGLE,
             "mass": Dimension.MASS,
-            "inertia": Dimension.UNITLESS,
+            "inertia": Dimension.INERTIA,
             "law": getattr(entity, "law", None).expected_dimension if isinstance(entity, Driver) else None,
         }
         if property_path not in dimension_map:
@@ -1403,7 +1403,7 @@ class ApplicationService:
         current = getattr(entity, property_path)
         unit = "deg" if property_path == "angle" else "kg" if property_path == "mass" else "mm"
         if property_path == "inertia":
-            unit = "unitless"
+            unit = "kgmm2"
         if current is not None and isinstance(current, ScalarProperty):
             unit = current.unit
         scalar = ScalarProperty(expression=expression, unit=unit, expected_dimension=dimension_map[property_path])
