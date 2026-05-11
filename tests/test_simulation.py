@@ -13,6 +13,7 @@ from quino import (
     JointEndpointInput,
     JointEndpointKind,
     MarkerInput,
+    PropertyValueInput,
     SliderInput,
 )
 from quino.application.examples import build_slider_crank_example
@@ -47,6 +48,10 @@ class _FakeItemInterface:
     @staticmethod
     def MarkerBodyRigid(**kwargs):
         return {"kind": "MarkerBodyRigid", **kwargs}
+
+    @staticmethod
+    def MarkerBodyMass(**kwargs):
+        return {"kind": "MarkerBodyMass", **kwargs}
 
     @staticmethod
     def ObjectJointRevolute2D(**kwargs):
@@ -84,6 +89,10 @@ class _FakeItemInterface:
     def ObjectConnectorCoordinateSpringDamper(**kwargs):
         return {"kind": "ObjectConnectorCoordinateSpringDamper", **kwargs}
 
+    @staticmethod
+    def LoadMassProportional(**kwargs):
+        return {"kind": "LoadMassProportional", **kwargs}
+
 
 class _FakeMbs:
     def __init__(self) -> None:
@@ -111,6 +120,11 @@ class _FakeMbs:
 
     def Assemble(self):
         self.assembled = True
+
+    def AddLoad(self, item):
+        self.loads = getattr(self, "loads", [])
+        self.loads.append(item)
+        return len(self.loads) - 1
 
     def SolveDynamic(self, simulationSettings=None):
         self.solved_dynamic = True
@@ -615,3 +629,80 @@ def test_application_service_export_exudyn_script_raises_for_non_exudyn() -> Non
     app.simulation_runner = SimulationRunner(FakeAdapter())
     with pytest.raises(RuntimeError, match="only supported for the Exudyn"):
         app.export_exudyn_script()
+
+
+def test_assembler_defaults_mass_and_inertia_to_zero() -> None:
+    app = ApplicationService()
+    app.new_project("Massless")
+    body_id = app.create_bar("Link", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    app.connect_marker_to_ground(next(m.id for m in app._find_body(body_id).markers if m.name == "A"))
+
+    assembled = app.simulation_runner.adapter.assembler.assemble(app.project)
+    body = assembled.bodies[body_id]
+    assert body.mass == pytest.approx(0.0)
+    assert body.inertia == pytest.approx(0.0)
+
+
+def test_assembler_inertia_defaults_to_mass_based_when_mass_is_set() -> None:
+    app = ApplicationService()
+    app.new_project("InertiaDefault")
+    body_id = app.create_bar("Link", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    app.update_property(body_id, "mass", PropertyValueInput("expression", "2 kg"))
+    app.connect_marker_to_ground(next(m.id for m in app._find_body(body_id).markers if m.name == "A"))
+
+    assembled = app.simulation_runner.adapter.assembler.assemble(app.project)
+    body = assembled.bodies[body_id]
+    assert body.mass == pytest.approx(2.0)
+    assert body.inertia == pytest.approx(max(2.0 * 0.01, 1e-6))
+
+
+def test_dynamic_simulation_runs_without_drivers_when_bodies_have_mass(monkeypatch) -> None:
+    fake_sc = _FakeSystemContainer()
+    fake_exu = types.SimpleNamespace(
+        SystemContainer=lambda: fake_sc,
+        OutputVariableType=types.SimpleNamespace(Coordinates="Coordinates"),
+    )
+    fake_exu.SimulationSettings = lambda: types.SimpleNamespace(
+        timeIntegration=types.SimpleNamespace(numberOfSteps=0, endTime=0.0),
+        staticSolver=types.SimpleNamespace(numberOfLoadSteps=0),
+        solutionSettings=types.SimpleNamespace(writeSolutionToFile=True),
+    )
+    fake_item_interface = _FakeItemInterface()
+
+    def fake_import_module(name: str):
+        if name == "exudyn":
+            return fake_exu
+        if name == "exudyn.itemInterface":
+            return fake_item_interface
+        raise ImportError(name)
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object() if name == "exudyn" else None)
+    monkeypatch.setattr(importlib, "import_module", fake_import_module)
+
+    app = ApplicationService()
+    app.new_project("Pendulum")
+    arm = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    app.update_property(arm, "mass", PropertyValueInput("expression", "1 kg"))
+    app.connect_marker_to_ground(next(m.id for m in app._find_body(arm).markers if m.name == "A"))
+
+    result = app.run_kinematic_simulation()
+
+    assert result.success is True
+    assert getattr(fake_sc.mbs, "solved_dynamic", False) is True
+    assert any(
+        load.get("loadVector") == [0.0, -9.81, 0.0]
+        for load in getattr(fake_sc.mbs, "loads", [])
+    )
+
+
+def test_exudyn_script_includes_gravity() -> None:
+    app = ApplicationService()
+    build_slider_crank_example(app)
+    # Add mass to one body so gravity loads are generated
+    for body in app.project.model.bodies:
+        app.update_property(body.id, "mass", PropertyValueInput("expression", "1 kg"))
+    adapter = ExudynAdapter(app.expression_service)
+    script = adapter.export_script(app.project, duration=1.0, steps=10)
+
+    assert "LoadMassProportional" in script
+    assert "[0.0, -9.81, 0.0]" in script

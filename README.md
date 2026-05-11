@@ -219,10 +219,6 @@ Inspired by:
 - [SAM Mechanism Designer](https://www.artas.nl/)
 - [PMKS+](https://pmksprogram.com/)
 
-## Authors
-
-- Rubén Antón — rubenantonguijarro@gmail.com
-
 ---
 
 **Status**: V1 Beta — Core functionality complete, GUI polished, ready for mechanism design workflows.

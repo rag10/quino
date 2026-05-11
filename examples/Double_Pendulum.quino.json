@@ -1,0 +1,258 @@
+{
+  "schema_version": "0.1.0",
+  "project": {
+    "id": "proj_001",
+    "name": "Double Pendulum",
+    "metadata": {}
+  },
+  "parameters": [],
+  "sketch": null,
+  "model": {
+    "bodies": [
+      {
+        "id": "body_001",
+        "name": "Arm1",
+        "type": "bar",
+        "markers": [
+          {
+            "id": "marker_001",
+            "name": "A",
+            "type": "structural",
+            "x": {
+              "expression": "0 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "y": {
+              "expression": "0 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "visible": true,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "marker_002",
+            "name": "B",
+            "type": "structural",
+            "x": {
+              "expression": "70.71 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "y": {
+              "expression": "70.71 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "visible": true,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "marker_003",
+            "name": "CoM",
+            "type": "com",
+            "x": {
+              "expression": "35.355 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "y": {
+              "expression": "35.355 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "visible": true,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          }
+        ],
+        "edge_order": [
+          "marker_001",
+          "marker_002"
+        ],
+        "closed_shape": false,
+        "mass": {
+          "expression": "1 kg",
+          "unit": "kg",
+          "expected_dimension": "mass"
+        },
+        "inertia": null,
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {}
+      },
+      {
+        "id": "body_002",
+        "name": "Arm2",
+        "type": "bar",
+        "markers": [
+          {
+            "id": "marker_004",
+            "name": "B",
+            "type": "structural",
+            "x": {
+              "expression": "70.71 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "y": {
+              "expression": "70.71 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "visible": true,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "marker_005",
+            "name": "C",
+            "type": "structural",
+            "x": {
+              "expression": "141.42 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "y": {
+              "expression": "141.42 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "visible": true,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "marker_006",
+            "name": "CoM",
+            "type": "com",
+            "x": {
+              "expression": "106.065 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "y": {
+              "expression": "106.065 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "visible": true,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          }
+        ],
+        "edge_order": [
+          "marker_004",
+          "marker_005"
+        ],
+        "closed_shape": false,
+        "mass": {
+          "expression": "0.5 kg",
+          "unit": "kg",
+          "expected_dimension": "mass"
+        },
+        "inertia": null,
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {}
+      }
+    ],
+    "sliders": [],
+    "joints": [
+      {
+        "id": "joint_001",
+        "name": "Ground_A",
+        "type": "revolute",
+        "endpoint_a": {
+          "kind": "marker",
+          "body_id": "body_001",
+          "marker_id": "marker_001"
+        },
+        "endpoint_b": {
+          "kind": "ground"
+        },
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {}
+      },
+      {
+        "id": "joint_002",
+        "name": "Joint_B",
+        "type": "revolute",
+        "endpoint_a": {
+          "kind": "marker",
+          "body_id": "body_001",
+          "marker_id": "marker_002"
+        },
+        "endpoint_b": {
+          "kind": "marker",
+          "body_id": "body_002",
+          "marker_id": "marker_004"
+        },
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {}
+      }
+    ],
+    "drivers": [],
+    "sensors": []
+  },
+  "view_state": {
+    "zoom": 1.0,
+    "pan_x": 0.0,
+    "pan_y": 0.0,
+    "show_grid": true,
+    "show_markers": true,
+    "show_com": false,
+    "show_sliders": true
+  }
+}

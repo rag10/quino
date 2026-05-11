@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from quino.application.examples import build_four_bar_example, build_slider_crank_example
+from quino.application.examples import build_double_pendulum_example, build_four_bar_example, build_slider_crank_example
 from quino.application.service import ApplicationService
 
 
@@ -32,6 +32,12 @@ class ExampleRegistry:
             kind="builder",
             source=build_slider_crank_example,
         ),
+        ExampleEntry(
+            name="Double Pendulum",
+            description="Double pendulum falling under gravity (no driver)",
+            kind="builder",
+            source=build_double_pendulum_example,
+        ),
     ]
 
     def __init__(self, examples_dir: str | Path | None = None) -> None:
@@ -42,10 +48,14 @@ class ExampleRegistry:
         path = Path(directory)
         if not path.exists():
             return
+        existing_names = {entry.name for entry in self._examples}
         for json_file in sorted(path.glob("*.quino.json")):
+            name = (json_file.stem[: -len(".quino")] if json_file.stem.endswith(".quino") else json_file.stem).replace("_", " ")
+            if name in existing_names:
+                continue
             self._examples.append(
                 ExampleEntry(
-                    name=(json_file.stem[: -len(".quino")] if json_file.stem.endswith(".quino") else json_file.stem).replace("_", " "),
+                    name=name,
                     description=f"Open example from {json_file.name}",
                     kind="json",
                     source=str(json_file),

@@ -219,7 +219,7 @@ def build_umbrella_mechanism(app: ApplicationService) -> None:
         "RunnerDrive",
         DriverType.TRANSLATION.value,
         runner_joint,
-        "60 mm * sin(360 deg * t / 4 s)",
+        "50 mm * sin(360 deg * t / 4 s)",
         "mm",
     )
 

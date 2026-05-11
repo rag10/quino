@@ -128,6 +128,16 @@ def _generate_bodies(project: Project, assembled: AssembledMechanism) -> list[st
             f"physicsCenterOfMass=[{body.com_local_x}, {body.com_local_y}], "
             f"visualization=item_interface.VObjectRigidBody2D(graphicsData=graphics_{b})))"
         )
+        if body.mass > 0 and assembled.gravity.enabled:
+            g = assembled.gravity
+            lines.append(
+                f"gm_{b} = mbs.AddMarker(item_interface.MarkerBodyMass("
+                f"bodyNumber=body_{b}))"
+            )
+            lines.append(
+                f"mbs.AddLoad(item_interface.LoadMassProportional("
+                f"markerNumber=gm_{b}, loadVector=[{g.magnitude * g.direction_x}, {g.magnitude * g.direction_y}, 0.0]))"
+            )
     lines.append("")
     return lines
 
@@ -412,6 +422,11 @@ def generate_exudyn_script(
     lines.extend(_generate_bodies(project, assembled))
     lines.extend(_generate_joints(assembled))
     lines.extend(_generate_drivers(assembled))
+    if assembled.gravity.enabled:
+        g = assembled.gravity
+        lines.append(f"mbs.SetGravity([{g.magnitude * g.direction_x}, {g.magnitude * g.direction_y}, 0])")
+    else:
+        lines.append("mbs.SetGravity([0, 0, 0])")
     lines.append("mbs.Assemble()")
     lines.append("")
     lines.append("# --- Solve ---")

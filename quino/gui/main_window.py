@@ -59,6 +59,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._suspend_property_updates = False
         self._suspend_parameter_updates = False
         self._suspend_tree_injection = False
+        self._suspend_simulation_config_updates = False
         self._last_simulation_result: SimulationResult | None = None
         self._last_simulation_state: dict[str, float] | None = None
         self._last_dof_info: str = ""
@@ -164,25 +165,48 @@ class MainWindow(QtWidgets.QMainWindow):
         self.timeline_label = QtWidgets.QLabel("0 / 0")
         self.timeline_label.setMinimumWidth(80)
         controls_layout.addWidget(self.timeline_label)
+        controls_layout.addSpacing(12)
+        controls_layout.addWidget(QtWidgets.QLabel("Speed:"))
+        self.playback_speed_spin = QtWidgets.QDoubleSpinBox()
+        self.playback_speed_spin.setRange(0.01, 100.0)
+        self.playback_speed_spin.setDecimals(2)
+        self.playback_speed_spin.setValue(1.0)
+        self.playback_speed_spin.setSuffix(" x")
+        self.playback_speed_spin.setMaximumWidth(80)
+        controls_layout.addWidget(self.playback_speed_spin)
         playback_group_layout.addLayout(controls_layout)
 
         config_layout = QtWidgets.QHBoxLayout()
         config_layout.addWidget(QtWidgets.QLabel("Duration:"))
         self.duration_spin = QtWidgets.QDoubleSpinBox()
-        self.duration_spin.setRange(0.1, 60.0)
+        self.duration_spin.setRange(0.001, 999999.0)
+        self.duration_spin.setDecimals(3)
         self.duration_spin.setValue(1.0)
         self.duration_spin.setSuffix(" s")
         self.duration_spin.setMaximumWidth(100)
         config_layout.addWidget(self.duration_spin)
         config_layout.addSpacing(20)
-        config_layout.addWidget(QtWidgets.QLabel("Steps:"))
+        config_layout.addWidget(QtWidgets.QLabel("Frames:"))
         self.steps_spin = QtWidgets.QSpinBox()
-        self.steps_spin.setRange(1, 2000)
+        self.steps_spin.setRange(1, 99999999)
         self.steps_spin.setValue(100)
         self.steps_spin.setMaximumWidth(100)
         config_layout.addWidget(self.steps_spin)
+        config_layout.addSpacing(20)
+        config_layout.addWidget(QtWidgets.QLabel("Δt:"))
+        self.dt_spin = QtWidgets.QDoubleSpinBox()
+        self.dt_spin.setRange(1e-9, 999999.0)
+        self.dt_spin.setDecimals(6)
+        self.dt_spin.setValue(0.01)
+        self.dt_spin.setSuffix(" s")
+        self.dt_spin.setMaximumWidth(100)
+        config_layout.addWidget(self.dt_spin)
         config_layout.addStretch()
         playback_group_layout.addLayout(config_layout)
+
+        self.duration_spin.valueChanged.connect(self._on_duration_changed)
+        self.steps_spin.valueChanged.connect(self._on_steps_changed)
+        self.dt_spin.valueChanged.connect(self._on_dt_changed)
 
         playback_layout.addWidget(playback_group)
         center_panel.addWidget(playback_widget)
@@ -968,10 +992,17 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._last_simulation_result is None or not self._last_simulation_result.frames:
             self.stop_playback()
             return
-        if self._current_frame_index >= len(self._last_simulation_result.frames) - 1:
+        n_frames = len(self._last_simulation_result.frames)
+        if self._current_frame_index >= n_frames - 1:
             self.stop_playback()
             return
-        self._current_frame_index += 1
+        duration = self.duration_spin.value()
+        steps = self.steps_spin.value()
+        sim_dt = duration / steps if steps > 0 else 0.04
+        playback_speed = self.playback_speed_spin.value()
+        # Timer fires every 40 ms (~25 FPS); compute how many sim frames to skip
+        step_jump = max(1, round(playback_speed * 0.04 / sim_dt))
+        self._current_frame_index = min(self._current_frame_index + step_jump, n_frames - 1)
         self._apply_current_frame()
         self._update_timeline_controls()
 
@@ -979,6 +1010,49 @@ class MainWindow(QtWidgets.QMainWindow):
         self._current_frame_index = value
         self._apply_current_frame()
         self._update_timeline_controls()
+
+    def _on_duration_changed(self) -> None:
+        if self._suspend_simulation_config_updates:
+            return
+        duration = self.duration_spin.value()
+        dt = self.dt_spin.value()
+        if dt > 0:
+            steps = max(1, round(duration / dt))
+            self._suspend_simulation_config_updates = True
+            try:
+                self.steps_spin.setValue(steps)
+                actual_dt = duration / steps
+                self.dt_spin.setValue(actual_dt)
+            finally:
+                self._suspend_simulation_config_updates = False
+
+    def _on_steps_changed(self) -> None:
+        if self._suspend_simulation_config_updates:
+            return
+        duration = self.duration_spin.value()
+        steps = self.steps_spin.value()
+        if steps > 0:
+            dt = duration / steps
+            self._suspend_simulation_config_updates = True
+            try:
+                self.dt_spin.setValue(dt)
+            finally:
+                self._suspend_simulation_config_updates = False
+
+    def _on_dt_changed(self) -> None:
+        if self._suspend_simulation_config_updates:
+            return
+        duration = self.duration_spin.value()
+        dt = self.dt_spin.value()
+        if dt > 0:
+            steps = max(1, round(duration / dt))
+            self._suspend_simulation_config_updates = True
+            try:
+                self.steps_spin.setValue(steps)
+                actual_dt = duration / steps
+                self.dt_spin.setValue(actual_dt)
+            finally:
+                self._suspend_simulation_config_updates = False
 
     def _apply_current_frame(self) -> None:
         frame = None

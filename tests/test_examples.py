@@ -99,3 +99,15 @@ def test_umbrella_mechanism_json_loads_and_roundtrips() -> None:
         app2.load_project(out)
         assert app2.project.name == "Umbrella Mechanism"
         assert len(app2.project.model.bodies) == 2
+
+
+def test_example_registry_skips_json_with_duplicate_name(tmp_path) -> None:
+    from quino.application.example_registry import ExampleRegistry
+
+    # Create a JSON file with the same name as a builtin example
+    json_file = tmp_path / "Four Bar.quino.json"
+    json_file.write_text("{}")
+
+    registry = ExampleRegistry(examples_dir=tmp_path)
+    names = [e.name for e in registry.list_examples()]
+    assert names.count("Four Bar") == 1

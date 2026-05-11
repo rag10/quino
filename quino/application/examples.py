@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from quino.application.service import ApplicationService
-from quino.domain.inputs import JointEndpointInput, MarkerInput, SliderInput
+from quino.domain.inputs import JointEndpointInput, MarkerInput, PropertyValueInput, SliderInput
 from quino.domain.types import DriverType, JointEndpointKind
 
 
@@ -116,4 +116,43 @@ def build_slider_crank_example(app: ApplicationService) -> ExampleBuildResult:
         joint_ids=[ground_a, joint_b, slider_p],
         slider_ids=[slider],
         driver_ids=[driver],
+    )
+
+
+def build_double_pendulum_example(app: ApplicationService) -> ExampleBuildResult:
+    app.new_project("Double Pendulum")
+    arm1 = app.create_bar(
+        "Arm1",
+        MarkerInput("0 mm", "0 mm", "A"),
+        MarkerInput("70.71 mm", "70.71 mm", "B"),
+    )
+    arm2 = app.create_bar(
+        "Arm2",
+        MarkerInput("70.71 mm", "70.71 mm", "B"),
+        MarkerInput("141.42 mm", "141.42 mm", "C"),
+    )
+
+    app.update_property(arm1, "mass", PropertyValueInput("expression", "1 kg"))
+    app.update_property(arm2, "mass", PropertyValueInput("expression", "0.5 kg"))
+
+    def mid(body_id: str, marker_name: str) -> str:
+        body = app.get_body(body_id)
+        if body is None:
+            raise ValueError(f"Body not found: {body_id}")
+        return next(marker.id for marker in body.markers if marker.name == marker_name)
+
+    ground_a = app.connect_marker_to_ground(mid(arm1, "A"), name="Ground_A")
+    joint_b = app.create_joint(
+        "Joint_B",
+        "revolute",
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=arm1, marker_id=mid(arm1, "B")),
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=arm2, marker_id=mid(arm2, "B")),
+    )
+
+    return ExampleBuildResult(
+        project_name=app.project.name,
+        body_ids=[arm1, arm2],
+        joint_ids=[ground_a, joint_b],
+        slider_ids=[],
+        driver_ids=[],
     )

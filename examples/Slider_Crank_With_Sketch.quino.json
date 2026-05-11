@@ -2,7 +2,7 @@
   "schema_version": "0.1.0",
   "project": {
     "id": "proj_001",
-    "name": "Umbrella Mechanism",
+    "name": "Slider Crank with Sketch",
     "metadata": {}
   },
   "parameters": [],
@@ -19,7 +19,7 @@
     "entities": {
       "skpt_001": {
         "id": "skpt_001",
-        "name": "Top",
+        "name": "A_sk",
         "type": "point",
         "visible": true,
         "construction": false,
@@ -32,17 +32,17 @@
         },
         "metadata": {},
         "x": {
-          "text": "0.000 mm",
+          "text": "0 mm",
           "unit": "mm"
         },
         "y": {
-          "text": "200.000 mm",
+          "text": "0 mm",
           "unit": "mm"
         }
       },
       "skpt_002": {
         "id": "skpt_002",
-        "name": "Runner",
+        "name": "B_sk",
         "type": "point",
         "visible": true,
         "construction": false,
@@ -55,17 +55,17 @@
         },
         "metadata": {},
         "x": {
-          "text": "0 mm",
+          "text": "50 mm",
           "unit": "mm"
         },
         "y": {
-          "text": "52.553 mm",
+          "text": "0 mm",
           "unit": "mm"
         }
       },
       "skpt_003": {
         "id": "skpt_003",
-        "name": "RibTip",
+        "name": "P_sk",
         "type": "point",
         "visible": true,
         "construction": false,
@@ -78,53 +78,7 @@
         },
         "metadata": {},
         "x": {
-          "text": "103.244 mm",
-          "unit": "mm"
-        },
-        "y": {
-          "text": "52.5527 mm",
-          "unit": "mm"
-        }
-      },
-      "skpt_004": {
-        "id": "skpt_004",
-        "name": "RibMid",
-        "type": "point",
-        "visible": true,
-        "construction": false,
-        "selectable": true,
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {},
-        "x": {
-          "text": "51.6221 mm",
-          "unit": "mm"
-        },
-        "y": {
-          "text": "126.277 mm",
-          "unit": "mm"
-        }
-      },
-      "skpt_005": {
-        "id": "skpt_005",
-        "name": "ShaftBase",
-        "type": "point",
-        "visible": true,
-        "construction": false,
-        "selectable": true,
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {},
-        "x": {
-          "text": "0 mm",
+          "text": "150 mm",
           "unit": "mm"
         },
         "y": {
@@ -134,7 +88,7 @@
       },
       "skline_001": {
         "id": "skline_001",
-        "name": "RibLine",
+        "name": "CrankSeg",
         "type": "line_segment",
         "visible": true,
         "construction": false,
@@ -147,11 +101,11 @@
         },
         "metadata": {},
         "start_point_id": "skpt_001",
-        "end_point_id": "skpt_003"
+        "end_point_id": "skpt_002"
       },
       "skline_002": {
         "id": "skline_002",
-        "name": "StretcherLine",
+        "name": "RodSeg",
         "type": "line_segment",
         "visible": true,
         "construction": false,
@@ -164,11 +118,11 @@
         },
         "metadata": {},
         "start_point_id": "skpt_002",
-        "end_point_id": "skpt_004"
+        "end_point_id": "skpt_003"
       },
       "skinf_001": {
         "id": "skinf_001",
-        "name": "ShaftAxis",
+        "name": "GuideAxis",
         "type": "infinite_line",
         "visible": true,
         "construction": false,
@@ -180,14 +134,14 @@
           "marker_size": 6.0
         },
         "metadata": {},
-        "point_a_id": "skpt_005",
-        "point_b_id": "skpt_001"
+        "point_a_id": "skpt_001",
+        "point_b_id": "skpt_003"
       }
     },
     "constraints": {
       "skcon_001": {
         "id": "skcon_001",
-        "name": "FixHub",
+        "name": "FixA",
         "type": "fix",
         "references": [
           "skpt_001"
@@ -200,10 +154,11 @@
       },
       "skcon_002": {
         "id": "skcon_002",
-        "name": "FixBase",
-        "type": "fix",
+        "name": "HGuide",
+        "type": "horizontal",
         "references": [
-          "skpt_005"
+          "skpt_001",
+          "skpt_003"
         ],
         "value": null,
         "entity_references": [],
@@ -213,57 +168,14 @@
       },
       "skcon_003": {
         "id": "skcon_003",
-        "name": "ShaftV",
-        "type": "vertical",
-        "references": [
-          "skpt_005",
-          "skpt_001"
-        ],
-        "value": null,
-        "entity_references": [],
-        "enabled": true,
-        "driving": true,
-        "metadata": {}
-      },
-      "skcon_004": {
-        "id": "skcon_004",
-        "name": "RunnerOnShaft",
-        "type": "vertical",
-        "references": [
-          "skpt_005",
-          "skpt_002"
-        ],
-        "value": null,
-        "entity_references": [],
-        "enabled": true,
-        "driving": true,
-        "metadata": {}
-      },
-      "skcon_005": {
-        "id": "skcon_005",
-        "name": "RibMidIsHalf",
-        "type": "midpoint",
-        "references": [
-          "skpt_004",
-          "skpt_001",
-          "skpt_003"
-        ],
-        "value": null,
-        "entity_references": [],
-        "enabled": true,
-        "driving": true,
-        "metadata": {}
-      },
-      "skcon_006": {
-        "id": "skcon_006",
-        "name": "RibLen",
+        "name": "CrankLen",
         "type": "distance",
         "references": [
           "skpt_001",
-          "skpt_003"
+          "skpt_002"
         ],
         "value": {
-          "expression": "180.0 mm",
+          "expression": "50 mm",
           "unit": "mm",
           "expected_dimension": "length"
         },
@@ -272,16 +184,16 @@
         "driving": true,
         "metadata": {}
       },
-      "skcon_007": {
-        "id": "skcon_007",
-        "name": "StretcherLen",
+      "skcon_004": {
+        "id": "skcon_004",
+        "name": "RodLen",
         "type": "distance",
         "references": [
           "skpt_002",
-          "skpt_004"
+          "skpt_003"
         ],
         "value": {
-          "expression": "90.0 mm",
+          "expression": "100 mm",
           "unit": "mm",
           "expected_dimension": "length"
         },
@@ -298,20 +210,20 @@
     "bodies": [
       {
         "id": "body_001",
-        "name": "Rib",
-        "type": "body",
+        "name": "Crank",
+        "type": "bar",
         "markers": [
           {
             "id": "marker_001",
-            "name": "T",
+            "name": "A",
             "type": "structural",
             "x": {
-              "expression": "0.000 mm",
+              "expression": "0 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
             "y": {
-              "expression": "200.000 mm",
+              "expression": "0 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -326,38 +238,15 @@
           },
           {
             "id": "marker_002",
-            "name": "K",
+            "name": "B",
             "type": "structural",
             "x": {
-              "expression": "103.244 mm",
+              "expression": "50 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
             "y": {
-              "expression": "52.553 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          },
-          {
-            "id": "marker_004",
-            "name": "M",
-            "type": "structural",
-            "x": {
-              "expression": "51.622 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "126.276 mm",
+              "expression": "0 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -375,12 +264,12 @@
             "name": "CoM",
             "type": "com",
             "x": {
-              "expression": "51.622 mm",
+              "expression": "25 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
             "y": {
-              "expression": "126.276 mm",
+              "expression": "0 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -396,10 +285,9 @@
         ],
         "edge_order": [
           "marker_001",
-          "marker_002",
-          "marker_004"
+          "marker_002"
         ],
-        "closed_shape": true,
+        "closed_shape": false,
         "mass": null,
         "inertia": null,
         "style": {
@@ -412,20 +300,43 @@
       },
       {
         "id": "body_002",
-        "name": "Stretcher",
+        "name": "Rod",
         "type": "bar",
         "markers": [
           {
-            "id": "marker_005",
-            "name": "R",
+            "id": "marker_004",
+            "name": "B",
             "type": "structural",
             "x": {
-              "expression": "0 mm",
+              "expression": "50 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
             "y": {
-              "expression": "100 mm",
+              "expression": "0 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "visible": true,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "marker_005",
+            "name": "P",
+            "type": "structural",
+            "x": {
+              "expression": "150 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "y": {
+              "expression": "0 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -440,38 +351,15 @@
           },
           {
             "id": "marker_006",
-            "name": "M",
-            "type": "structural",
-            "x": {
-              "expression": "51.622 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "126.276 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          },
-          {
-            "id": "marker_007",
             "name": "CoM",
             "type": "com",
             "x": {
-              "expression": "25.811 mm",
+              "expression": "100 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
             "y": {
-              "expression": "89.4145 mm",
+              "expression": "0 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -486,8 +374,8 @@
           }
         ],
         "edge_order": [
-          "marker_005",
-          "marker_006"
+          "marker_004",
+          "marker_005"
         ],
         "closed_shape": false,
         "mass": null,
@@ -504,29 +392,29 @@
     "sliders": [
       {
         "id": "slider_001",
-        "name": "Shaft",
+        "name": "Guide",
         "origin_x": {
-          "expression": "0 mm",
+          "expression": "150 mm",
           "unit": "mm",
           "expected_dimension": "length"
         },
         "origin_y": {
-          "expression": "100 mm",
+          "expression": "0 mm",
           "unit": "mm",
           "expected_dimension": "length"
         },
         "angle": {
-          "expression": "90 deg",
+          "expression": "0 deg",
           "unit": "deg",
           "expected_dimension": "angle"
         },
         "travel_min": {
-          "expression": "-100 mm",
+          "expression": "-60 mm",
           "unit": "mm",
           "expected_dimension": "length"
         },
         "travel_max": {
-          "expression": "80 mm",
+          "expression": "60 mm",
           "unit": "mm",
           "expected_dimension": "length"
         },
@@ -542,7 +430,7 @@
     "joints": [
       {
         "id": "joint_001",
-        "name": "Ground_Top",
+        "name": "Ground_A",
         "type": "revolute",
         "endpoint_a": {
           "kind": "marker",
@@ -562,7 +450,29 @@
       },
       {
         "id": "joint_002",
-        "name": "Runner_Slide",
+        "name": "Joint_B",
+        "type": "revolute",
+        "endpoint_a": {
+          "kind": "marker",
+          "body_id": "body_001",
+          "marker_id": "marker_002"
+        },
+        "endpoint_b": {
+          "kind": "marker",
+          "body_id": "body_002",
+          "marker_id": "marker_004"
+        },
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {}
+      },
+      {
+        "id": "joint_003",
+        "name": "Slider_P",
         "type": "revolute",
         "endpoint_a": {
           "kind": "marker",
@@ -580,40 +490,18 @@
           "marker_size": 6.0
         },
         "metadata": {}
-      },
-      {
-        "id": "joint_003",
-        "name": "Stretcher_Mid",
-        "type": "revolute",
-        "endpoint_a": {
-          "kind": "marker",
-          "body_id": "body_002",
-          "marker_id": "marker_006"
-        },
-        "endpoint_b": {
-          "kind": "marker",
-          "body_id": "body_001",
-          "marker_id": "marker_004"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {}
       }
     ],
     "drivers": [
       {
         "id": "driver_001",
-        "name": "RunnerDrive",
-        "type": "translation",
-        "target_joint_id": "joint_002",
+        "name": "CrankDrive",
+        "type": "rotation",
+        "target_joint_id": "joint_001",
         "law": {
-          "expression": "50 mm * sin(360 deg * t / 4 s)",
-          "unit": "mm",
-          "expected_dimension": "length"
+          "expression": "360 deg * t / 1 s",
+          "unit": "deg",
+          "expected_dimension": "angle"
         },
         "metadata": {}
       }
@@ -621,20 +509,10 @@
     "sensors": [
       {
         "id": "sensor_001",
-        "name": "RibTipSensor",
+        "name": "PistonSensor",
         "type": "point",
         "marker_ids": [
-          "marker_002"
-        ],
-        "metadata": {}
-      },
-      {
-        "id": "sensor_002",
-        "name": "RibAngle",
-        "type": "angle_vertical",
-        "marker_ids": [
-          "marker_001",
-          "marker_002"
+          "marker_005"
         ],
         "metadata": {}
       }

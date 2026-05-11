@@ -36,7 +36,12 @@
       "Bash(git stash *)",
       "Bash(git checkout *)",
       "Bash(pytest tests/ -q --tb=short)",
-      "Bash(git branch *)"
+      "Bash(git branch *)",
+      "Bash(findstr /n \"constraint.*distance\\\\|constraint.*angle\" quino\\\\gui\\\\main_window.py)",
+      "Bash(xargs findstr /l \"UNITS\\\\|SI_\\\\|IMPERIAL\")",
+      "Read(//c/Users/ruben/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/**)",
+      "Bash(pytest --tb=short -q)",
+      "Bash(git commit *)"
     ]
   }
 }
