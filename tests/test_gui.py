@@ -770,11 +770,18 @@ def test_canvas_helpers_can_rename_joint_toggle_type_and_edit_driver(monkeypatch
     window._select_entity_by_id(joint_id)
     window._create_driver_for_selected("rotation")
     driver_id = window.app_service.project.model.drivers[-1].id
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getText",
-        staticmethod(lambda *args, **kwargs: ("45 deg * t / 1 s", True)),
-    )
+
+    # Patch QDialog.exec to return Accepted and set line edit text
+    original_exec = QtWidgets.QDialog.exec
+
+    def mock_exec(self):
+        # Find the QLineEdit in the dialog and set its text
+        for widget in self.findChildren(QtWidgets.QLineEdit):
+            widget.setText("45 deg * t / 1 s")
+            break
+        return QtWidgets.QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(QtWidgets.QDialog, "exec", mock_exec)
     window.canvas._edit_driver_law_dialog(driver_id)
     assert window.app_service._find_entity(driver_id).law.expression == "45 deg * t / 1 s"
 

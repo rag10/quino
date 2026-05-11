@@ -3951,10 +3951,39 @@ class MechanismCanvas(QtWidgets.QWidget):
         driver = self.app_service.get_entity(driver_id)
         if driver is None or not hasattr(driver, "law"):
             return
-        name, accepted = QtWidgets.QInputDialog.getText(self, "Driver Law", "Law:", text=driver.law.expression)
-        if not accepted or not name.strip():
+
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Edit Driver Law")
+        layout = QtWidgets.QVBoxLayout(dialog)
+
+        hint = QtWidgets.QLabel(
+            "Expression for position/angle as a function of time.\n"
+            "Use <b>t</b> for time (has unit <i>s</i>).\n"
+            "Examples: &nbsp;<code>90 deg * t / 1 s</code> &nbsp;|&nbsp; <code>50 mm * sin(t * 1 rad / 1 s)</code>"
+        )
+        hint.setWordWrap(True)
+        hint.setTextFormat(QtCore.Qt.TextFormat.RichText)
+        layout.addWidget(hint)
+
+        form = QtWidgets.QFormLayout()
+        law_edit = QtWidgets.QLineEdit(driver.law.expression)
+        form.addRow("Law:", law_edit)
+        layout.addLayout(form)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
-        self.app_service.update_property(driver_id, "law", PropertyValueInput("expression", name.strip()))
+
+        text = law_edit.text().strip()
+        if not text:
+            return
+        self.app_service.update_property(driver_id, "law", PropertyValueInput("expression", text))
         self.modelChanged.emit(f"Updated law for {driver.name}")
 
     def _assembled_mechanism(self, project: Project) -> AssembledMechanism | None:
