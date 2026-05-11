@@ -993,6 +993,9 @@ class ApplicationService:
         marker.y = new_y
 
     def update_property(self, entity_id: str, property_path: str, value: PropertyValueInput) -> None:
+        if entity_id == "__gravity__":
+            self._update_gravity_property(property_path, value)
+            return
         entity = self._find_entity(entity_id)
         if isinstance(entity, Marker) and property_path in {"x", "y"}:
             if value.kind != "expression" or not isinstance(value.value, str):
@@ -1065,6 +1068,10 @@ class ApplicationService:
         scalar = self._build_validated_scalar_property(entity, property_path, value.value)
         self._snapshot()
         self._assign_scalar_property(entity, property_path, scalar)
+
+    def toggle_gravity(self, enabled: bool) -> None:
+        self._snapshot()
+        self._require_project().model.gravity.enabled = enabled
 
     def delete_entity(self, entity_id: str) -> None:
         project = self._require_project()
@@ -1342,6 +1349,8 @@ class ApplicationService:
         return index
 
     def _find_entity(self, entity_id: str) -> object:
+        if entity_id == "__gravity__":
+            return self._require_project().model.gravity
         if self._entity_index is None:
             self._entity_index = self._build_entity_index()
         entity = self._entity_index.get(entity_id)
@@ -1352,6 +1361,9 @@ class ApplicationService:
     # Public read-only query API -------------------------------------------------
     def get_entity(self, entity_id: str) -> object | None:
         """Return any entity by id, or None if not found."""
+        if entity_id == "__gravity__":
+            project = self.project
+            return project.model.gravity if project else None
         try:
             return self._find_entity(entity_id)
         except ValueError:
@@ -1419,6 +1431,19 @@ class ApplicationService:
 
     def _rename_entity_no_snapshot(self, entity: object, new_name: str) -> None:
         entity.name = new_name
+
+    def _update_gravity_property(self, path: str, value: PropertyValueInput) -> None:
+        gravity = self._require_project().model.gravity
+        if path not in {"magnitude", "direction_x", "direction_y"}:
+            raise ValueError(f"Unknown gravity property: {path}")
+        if value.kind != "expression":
+            raise ValueError(f"Gravity {path} requires a numeric expression")
+        try:
+            float_val = float(value.value)
+        except (ValueError, TypeError):
+            raise ValueError(f"Gravity {path} must be a number, got: {value.value!r}")
+        self._snapshot()
+        setattr(gravity, path, float_val)
 
     def _apply_style_update(self, entity: object, property_path: str, value: PropertyValueInput) -> None:
         field = property_path.split(".", 1)[1]
