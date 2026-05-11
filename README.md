@@ -1,4 +1,4 @@
-# QUINO — 2D Mechanism Modeling & Simulation Toolkit
+8# QUINO — 2D Mechanism Modeling & Simulation Toolkit
 
 QUINO is a library-first, extensible toolkit for creating, simulating, and analyzing 2D mechanisms. It combines a parametric model architecture with a professional GUI built on PySide6 and currently supports kinematic analysis via Exudyn.
 
@@ -218,10 +218,6 @@ Inspired by:
 - [ASOM Kinematics](https://www.wm-kts.com/en/products/asom-kinematics/)
 - [SAM Mechanism Designer](https://www.artas.nl/)
 - [PMKS+](https://pmksprogram.com/)
-
-## Authors
-
-- Rubén Antón — rubenantonguijarro@gmail.com
 
 ---
 
