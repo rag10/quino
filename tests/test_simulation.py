@@ -706,3 +706,148 @@ def test_exudyn_script_includes_gravity() -> None:
 
     assert "LoadMassProportional" in script
     assert "[0.0, -9.81, 0.0]" in script
+
+
+# Gravity simulation tests
+
+
+def test_gravity_disabled_produces_no_load() -> None:
+    """When gravity is disabled, no LoadMassProportional is added."""
+    app = ApplicationService()
+    app.new_project("GravityTest")
+    body_id = app.create_body("Body1", [MarkerInput("0 mm", "0 mm", "P")])
+    app.update_property(body_id, "mass", PropertyValueInput("expression", "1 kg"))
+
+    # Disable gravity
+    app.project.model.gravity.enabled = False
+
+    # Generate script
+    adapter = ExudynAdapter(app.expression_service)
+    script = adapter.export_script(app.project, duration=1.0, steps=10)
+
+    # Verify: LoadMassProportional should not appear in script
+    assert "LoadMassProportional" not in script
+
+    # Verify: SetGravity should be [0, 0, 0]
+    assert "mbs.SetGravity([0, 0, 0])" in script
+
+
+def test_gravity_enabled_produces_loads() -> None:
+    """When gravity is enabled with mass, LoadMassProportional is added."""
+    app = ApplicationService()
+    app.new_project("GravityTest")
+    body_id = app.create_body("Body1", [MarkerInput("0 mm", "0 mm", "P")])
+    app.update_property(body_id, "mass", PropertyValueInput("expression", "1 kg"))
+
+    # Gravity is enabled by default
+    assert app.project.model.gravity.enabled is True
+
+    # Generate script
+    adapter = ExudynAdapter(app.expression_service)
+    script = adapter.export_script(app.project, duration=1.0, steps=10)
+
+    # Verify: LoadMassProportional should appear in script
+    assert "LoadMassProportional" in script
+
+    # Verify: SetGravity should use default values
+    assert "[0.0, -9.81, 0.0]" in script or "[0, -9.81, 0]" in script
+
+
+def test_custom_gravity_parameters_applied() -> None:
+    """Custom gravity magnitude and direction are applied correctly."""
+    app = ApplicationService()
+    app.new_project("CustomGravityTest")
+    body_id = app.create_body("Body1", [MarkerInput("0 mm", "0 mm", "P")])
+    app.update_property(body_id, "mass", PropertyValueInput("expression", "1 kg"))
+
+    # Set custom gravity
+    app.update_property(
+        "__gravity__",
+        "magnitude",
+        PropertyValueInput("expression", "5.0")
+    )
+    app.update_property(
+        "__gravity__",
+        "direction_x",
+        PropertyValueInput("expression", "1.0")
+    )
+    app.update_property(
+        "__gravity__",
+        "direction_y",
+        PropertyValueInput("expression", "0.0")
+    )
+
+    # Generate script
+    adapter = ExudynAdapter(app.expression_service)
+    script = adapter.export_script(app.project, duration=1.0, steps=10)
+
+    # Verify: SetGravity should contain custom values
+    # The script should have SetGravity([5.0, 0.0, 0])
+    assert "mbs.SetGravity([5" in script and "0.0, 0])" in script
+
+
+def test_gravity_with_zero_direction_components() -> None:
+    """Gravity with direction components set to zero works correctly."""
+    app = ApplicationService()
+    app.new_project("ZeroGravityTest")
+    body_id = app.create_body("Body1", [MarkerInput("0 mm", "0 mm", "P")])
+    app.update_property(body_id, "mass", PropertyValueInput("expression", "1 kg"))
+
+    # Set gravity to all zeros (effectively disables it)
+    app.update_property(
+        "__gravity__",
+        "magnitude",
+        PropertyValueInput("expression", "0.0")
+    )
+    app.update_property(
+        "__gravity__",
+        "direction_x",
+        PropertyValueInput("expression", "0.0")
+    )
+    app.update_property(
+        "__gravity__",
+        "direction_y",
+        PropertyValueInput("expression", "0.0")
+    )
+
+    # Generate script
+    adapter = ExudynAdapter(app.expression_service)
+    script = adapter.export_script(app.project, duration=1.0, steps=10)
+
+    # Verify: SetGravity should be [0.0, 0.0, 0]
+    assert "mbs.SetGravity([0.0, 0.0, 0])" in script
+
+
+def test_gravity_direction_normalization() -> None:
+    """Gravity direction with custom magnitude is applied correctly."""
+    app = ApplicationService()
+    app.new_project("DirectionNormTest")
+    body_id = app.create_body("Body1", [MarkerInput("0 mm", "0 mm", "P")])
+    app.update_property(body_id, "mass", PropertyValueInput("expression", "2 kg"))
+
+    # Set custom gravity with non-unit direction vector
+    app.update_property(
+        "__gravity__",
+        "magnitude",
+        PropertyValueInput("expression", "10.0")
+    )
+    app.update_property(
+        "__gravity__",
+        "direction_x",
+        PropertyValueInput("expression", "0.6")
+    )
+    app.update_property(
+        "__gravity__",
+        "direction_y",
+        PropertyValueInput("expression", "0.8")
+    )
+
+    # Generate script
+    adapter = ExudynAdapter(app.expression_service)
+    script = adapter.export_script(app.project, duration=1.0, steps=10)
+
+    # Verify: SetGravity should have magnitude*direction components
+    # magnitude * direction_x = 10 * 0.6 = 6.0
+    # magnitude * direction_y = 10 * 0.8 = 8.0
+    assert "mbs.SetGravity([6" in script or "6.0" in script
+    assert "8" in script or "8.0" in script

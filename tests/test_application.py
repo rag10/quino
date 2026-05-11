@@ -547,6 +547,153 @@ def test_validate_model_reports_unreachable_four_bar_loop() -> None:
     assert any(message.code == "kinematic_loop_reach" for message in report.messages)
 
 
+# Gravity feature tests
+
+
+def test_gravity_defaults_to_enabled() -> None:
+    """New project has gravity enabled by default."""
+    app = make_app()
+    assert app.project.model.gravity.enabled is True
+    assert app.project.model.gravity.magnitude == 9.81
+    assert app.project.model.gravity.direction_x == 0.0
+    assert app.project.model.gravity.direction_y == -1.0
+
+
+def test_toggle_gravity_disables_gravity() -> None:
+    """toggle_gravity(False) disables gravity."""
+    app = make_app()
+    assert app.project.model.gravity.enabled is True
+    app.toggle_gravity(False)
+    assert app.project.model.gravity.enabled is False
+
+
+def test_toggle_gravity_enables_gravity() -> None:
+    """toggle_gravity(True) enables gravity."""
+    app = make_app()
+    app.project.model.gravity.enabled = False
+    app.toggle_gravity(True)
+    assert app.project.model.gravity.enabled is True
+
+
+def test_update_gravity_magnitude() -> None:
+    """Updating magnitude via update_property works."""
+    app = make_app()
+    app.update_property(
+        "__gravity__",
+        "magnitude",
+        PropertyValueInput("expression", "5.0")
+    )
+    assert app.project.model.gravity.magnitude == 5.0
+
+
+def test_update_gravity_direction() -> None:
+    """Updating direction_x and direction_y via update_property works."""
+    app = make_app()
+    app.update_property(
+        "__gravity__",
+        "direction_x",
+        PropertyValueInput("expression", "1.0")
+    )
+    app.update_property(
+        "__gravity__",
+        "direction_y",
+        PropertyValueInput("expression", "0.0")
+    )
+    assert app.project.model.gravity.direction_x == 1.0
+    assert app.project.model.gravity.direction_y == 0.0
+
+
+def test_update_gravity_rejects_non_numeric() -> None:
+    """Updating with non-numeric value raises ValueError."""
+    app = make_app()
+    with pytest.raises(ValueError, match="must be a number"):
+        app.update_property(
+            "__gravity__",
+            "magnitude",
+            PropertyValueInput("expression", "abc")
+        )
+
+
+def test_gravity_serialization() -> None:
+    """Gravity settings are serialized and deserialized correctly."""
+    from quino.serialization.json_io import JsonMapper
+
+    app = make_app()
+    app.project.model.gravity.magnitude = 5.0
+    app.project.model.gravity.direction_y = -0.5
+    app.project.model.gravity.enabled = False
+
+    mapper = JsonMapper()
+    data = mapper.dump(app.project)
+    loaded = mapper.load(data)
+
+    assert loaded.model.gravity.enabled is False
+    assert loaded.model.gravity.magnitude == 5.0
+    assert loaded.model.gravity.direction_y == -0.5
+
+
+def test_backward_compat_old_project_without_gravity() -> None:
+    """Old project files without gravity key load with default gravity."""
+    from quino.serialization.json_io import JsonMapper
+
+    # Create a project dict without "gravity" key (simulating old format)
+    data = {
+        "schema_version": "1.0",
+        "project": {
+            "id": "test-project",
+            "name": "TestModel",
+            "metadata": {},
+        },
+        "model": {
+            "bodies": [],
+            "sliders": [],
+            "joints": [],
+            "drivers": [],
+            "sensors": {},
+            # Note: no "gravity" key
+        },
+        "parameters": [],
+        "sketch": None,
+        "view_state": {},
+    }
+
+    mapper = JsonMapper()
+    project = mapper.load(data)
+    assert project.model.gravity.enabled is True
+    assert project.model.gravity.magnitude == 9.81
+
+
+def test_gravity_update_undoable() -> None:
+    """Gravity changes are tracked by undo/redo."""
+    app = make_app()
+    assert app.project.model.gravity.enabled is True
+
+    app.toggle_gravity(False)
+    assert app.project.model.gravity.enabled is False
+
+    assert app.undo() is True
+    assert app.project.model.gravity.enabled is True
+
+    assert app.redo() is True
+    assert app.project.model.gravity.enabled is False
+
+
+def test_update_gravity_magnitude_undoable() -> None:
+    """Gravity magnitude changes are undoable."""
+    app = make_app()
+    original = app.project.model.gravity.magnitude
+
+    app.update_property(
+        "__gravity__",
+        "magnitude",
+        PropertyValueInput("expression", "3.5")
+    )
+    assert app.project.model.gravity.magnitude == 3.5
+
+    assert app.undo() is True
+    assert app.project.model.gravity.magnitude == original
+
+
 def test_sketch_entities_support_crud_and_cascade_delete() -> None:
     app = make_app()
     app.new_project("SketchDemo")
