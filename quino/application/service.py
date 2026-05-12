@@ -13,6 +13,7 @@ from quino.domain.model import (
     Expression,
     Joint,
     JointEndpoint,
+    Load,
     Marker,
     Metadata,
     Model,
@@ -1098,6 +1099,9 @@ class ApplicationService:
             project.model.drivers = [
                 driver for driver in project.model.drivers if driver.target_joint_id not in removed_joint_ids
             ]
+            project.model.loads = [
+                load for load in project.model.loads if load.target_marker_id not in marker_ids
+            ]
             project.model.bodies = [item for item in project.model.bodies if item.id != entity_id]
             return
         if any(slider.id == entity_id for slider in project.model.sliders):
@@ -1125,6 +1129,10 @@ class ApplicationService:
         if any(driver.id == entity_id for driver in project.model.drivers):
             self._snapshot()
             project.model.drivers = [item for item in project.model.drivers if item.id != entity_id]
+            return
+        if any(load.id == entity_id for load in project.model.loads):
+            self._snapshot()
+            project.model.loads = [item for item in project.model.loads if item.id != entity_id]
             return
         if any(sensor.id == entity_id for sensor in project.model.sensors):
             self._snapshot()
@@ -1155,6 +1163,9 @@ class ApplicationService:
             sensor
             for sensor in project.model.sensors
             if entity_id not in sensor.marker_ids
+        ]
+        project.model.loads = [
+            load for load in project.model.loads if load.target_marker_id != entity_id
         ]
         if len(body.structural_markers()) == 1:
             body.type = BodyType.POINT_MASS
@@ -1338,6 +1349,7 @@ class ApplicationService:
             project.model.joints,
             project.model.sliders,
             project.model.drivers,
+            project.model.loads,
             project.model.sensors,
             project.parameters,
         ):
@@ -1408,12 +1420,14 @@ class ApplicationService:
             "angle": Dimension.ANGLE,
             "mass": Dimension.MASS,
             "inertia": Dimension.INERTIA,
+            "fx": Dimension.FORCE,
+            "fy": Dimension.FORCE,
             "law": getattr(entity, "law", None).expected_dimension if isinstance(entity, Driver) else None,
         }
         if property_path not in dimension_map:
             raise ValueError(f"Unsupported property path: {property_path}")
-        current = getattr(entity, property_path)
-        unit = "deg" if property_path == "angle" else "kg" if property_path == "mass" else "mm"
+        current = getattr(entity, property_path, None)
+        unit = "deg" if property_path == "angle" else "kg" if property_path == "mass" else "N" if property_path in ("fx", "fy") else "mm"
         if property_path == "inertia":
             unit = "kgmm2"
         if current is not None and isinstance(current, ScalarProperty):
@@ -2919,3 +2933,48 @@ class ApplicationService:
         if sensor is not None:
             self._snapshot()
             sensor.name = name
+
+    def create_load(self, name: str, marker_id: str, fx_expression: str, fy_expression: str) -> str:
+        if self.project is None:
+            raise ValueError("No project loaded")
+        self.validation_service.ensure_unique_name(self.project.model.loads, name)
+        load_id = self.id_service.new("load")
+        fx = ScalarProperty(expression=fx_expression, unit="N", expected_dimension=Dimension.FORCE)
+        fy = ScalarProperty(expression=fy_expression, unit="N", expected_dimension=Dimension.FORCE)
+        self.expression_service.evaluate_property(fx, self.project.parameters)
+        self.expression_service.evaluate_property(fy, self.project.parameters)
+        load = Load(
+            id=load_id,
+            name=name,
+            target_marker_id=marker_id,
+            fx=fx,
+            fy=fy,
+            metadata=Metadata(),
+        )
+        self._snapshot()
+        self.project.model.loads.append(load)
+        return load_id
+
+    def delete_load(self, load_id: str) -> None:
+        if self.project is None:
+            raise ValueError("No project loaded")
+        self._snapshot()
+        self.project.model.loads = [ld for ld in self.project.model.loads if ld.id != load_id]
+
+    def rename_load(self, load_id: str, name: str) -> None:
+        if self.project is None:
+            raise ValueError("No project loaded")
+        load = next((ld for ld in self.project.model.loads if ld.id == load_id), None)
+        if load is not None:
+            self._snapshot()
+            load.name = name
+
+    def update_load_property(self, load_id: str, property_path: str, expression: str) -> None:
+        if self.project is None:
+            raise ValueError("No project loaded")
+        load = next((ld for ld in self.project.model.loads if ld.id == load_id), None)
+        if load is None:
+            raise ValueError(f"Load {load_id} not found")
+        scalar = self._build_validated_scalar_property(load, property_path, expression)
+        self._snapshot()
+        self._assign_scalar_property(load, property_path, scalar)

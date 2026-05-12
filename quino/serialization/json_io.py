@@ -10,6 +10,7 @@ from quino.domain.model import (
     GravityLoad,
     Joint,
     JointEndpoint,
+    Load,
     Marker,
     Metadata,
     Model,
@@ -60,6 +61,7 @@ class JsonMapper:
                 "sliders": [self._slider_to_dict(slider) for slider in project.model.sliders],
                 "joints": [self._joint_to_dict(joint) for joint in project.model.joints],
                 "drivers": [self._driver_to_dict(driver) for driver in project.model.drivers],
+                "loads": [self._load_to_dict(load) for load in project.model.loads],
                 "sensors": [self._sensor_to_dict(sensor) for sensor in project.model.sensors],
                 "gravity": {
                     "enabled": project.model.gravity.enabled,
@@ -93,6 +95,7 @@ class JsonMapper:
                 sliders=[self._slider_from_dict(item) for item in model_block.get("sliders", [])],
                 joints=[self._joint_from_dict(item) for item in model_block.get("joints", [])],
                 drivers=[self._driver_from_dict(item) for item in model_block.get("drivers", [])],
+                loads=[self._load_from_dict(item) for item in model_block.get("loads", [])],
                 sensors=[self._sensor_from_dict(item) for item in model_block.get("sensors", [])],
                 gravity=GravityLoad(**model_block.get("gravity", {})),
             ),
@@ -305,6 +308,26 @@ class JsonMapper:
             type=DriverType(data["type"]),
             target_joint_id=data["target_joint_id"],
             law=self._scalar_from_dict(data["law"]),
+            metadata=Metadata(data.get("metadata", {})),
+        )
+
+    def _load_to_dict(self, load: Load) -> dict:
+        return {
+            "id": load.id,
+            "name": load.name,
+            "target_marker_id": load.target_marker_id,
+            "fx": self._scalar_to_dict(load.fx),
+            "fy": self._scalar_to_dict(load.fy),
+            "metadata": load.metadata.values,
+        }
+
+    def _load_from_dict(self, data: dict) -> Load:
+        return Load(
+            id=data["id"],
+            name=data["name"],
+            target_marker_id=data["target_marker_id"],
+            fx=self._scalar_from_dict(data["fx"]),
+            fy=self._scalar_from_dict(data["fy"]),
             metadata=Metadata(data.get("metadata", {})),
         )
 

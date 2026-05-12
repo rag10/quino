@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 
-from quino.domain.model import Body, Driver, GravityLoad, Joint, Marker, Project, Slider
+from quino.domain.model import Body, Driver, GravityLoad, Joint, Load, Marker, Project, Slider
 from quino.domain.types import MarkerType
 from quino.services.expressions import ExpressionService
 
@@ -63,11 +63,21 @@ class AssembledDriver:
 
 
 @dataclass(slots=True)
+class AssembledLoad:
+    load_id: str
+    name: str
+    target_marker_id: str
+    fx: float
+    fy: float
+
+
+@dataclass(slots=True)
 class AssembledMechanism:
     bodies: dict[str, AssembledBody]
     sliders: dict[str, AssembledSlider]
     joints: list[Joint]
     drivers: list[AssembledDriver]
+    loads: list[AssembledLoad]
     gravity: GravityLoad
     warnings: list[str] = field(default_factory=list)
 
@@ -80,11 +90,13 @@ class MechanismAssembler:
         bodies = {body.id: self._assemble_body(project, body) for body in project.model.bodies}
         sliders = {slider.id: self._assemble_slider(project, slider) for slider in project.model.sliders}
         drivers = [self._assemble_driver(driver) for driver in project.model.drivers]
+        loads = [self._assemble_load(project, load) for load in project.model.loads]
         return AssembledMechanism(
             bodies=bodies,
             sliders=sliders,
             joints=list(project.model.joints),
             drivers=drivers,
+            loads=loads,
             gravity=project.model.gravity,
             warnings=[],
         )
@@ -199,4 +211,15 @@ class MechanismAssembler:
             law_expression=driver.law.expression,
             unit=driver.law.unit,
             expected_dimension=driver.law.expected_dimension.value,
+        )
+
+    def _assemble_load(self, project: Project, load: Load) -> AssembledLoad:
+        fx = self.expression_service.evaluate_property(load.fx, project.parameters).value
+        fy = self.expression_service.evaluate_property(load.fy, project.parameters).value
+        return AssembledLoad(
+            load_id=load.id,
+            name=load.name,
+            target_marker_id=load.target_marker_id,
+            fx=fx,
+            fy=fy,
         )

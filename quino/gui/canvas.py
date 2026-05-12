@@ -97,6 +97,7 @@ class CanvasMode:
     CREATE_ANGLE_HORIZONTAL_SENSOR = "create_angle_horizontal_sensor"
     CREATE_ANGLE_VERTICAL_SENSOR = "create_angle_vertical_sensor"
     CREATE_ANGLE_VECTOR_SENSOR = "create_angle_vector_sensor"
+    CREATE_LOAD = "create_load"
     CREATE_SKETCH_POINT = "create_sketch_point"
     CREATE_SKETCH_LINE_SEGMENT = "create_sketch_line_segment"
     CREATE_SKETCH_RECTANGLE = "create_sketch_rectangle"
@@ -204,6 +205,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._screen_slider_handles: list[tuple[str, str, QtCore.QPointF]] = []
         self._screen_joints: list[tuple[str, QtCore.QPointF]] = []
         self._screen_drivers: list[tuple[str, QtCore.QPointF]] = []
+        self._screen_loads: list[tuple[str, QtCore.QPointF]] = []
         self._mode = CanvasMode.SELECT
         self._interaction_mode = "all"
         self._editing_enabled = True
@@ -438,6 +440,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_ANGLE_VECTOR_SENSOR: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_LOAD: QtCore.Qt.CursorShape.CrossCursor,
         }
         self.setCursor(QtGui.QCursor(cursor_map.get(mode, QtCore.Qt.CursorShape.ArrowCursor)))
 
@@ -645,6 +648,12 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._create_sensor_from_markers([entity_id], "point")
             return
 
+        if self._mode == CanvasMode.CREATE_LOAD:
+            marker = marker_map.get(entity_id)
+            if marker is not None:
+                self._create_load_from_marker(entity_id)
+            return
+
         if self._mode in {
             CanvasMode.CREATE_DISTANCE_SENSOR,
             CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR,
@@ -791,6 +800,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._draw_drivers(painter, project, markers, sliders, transform)
                 self._draw_markers(painter, markers, transform)
                 self._draw_forces(painter, project, markers, transform)
+                self._draw_loads(painter, project, markers, transform)
             painter.restore()
             self._draw_sketch(painter, sketch_points, sketch_entities, transform, invalid=sketch_invalid)
             self._draw_sketch_constraints(painter, project, sketch_points, transform, invalid=sketch_invalid)
@@ -809,6 +819,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._draw_drivers(painter, project, markers, sliders, transform)
                 self._draw_markers(painter, markers, transform)
                 self._draw_forces(painter, project, markers, transform)
+                self._draw_loads(painter, project, markers, transform)
             elif not sketch_points and not sketch_entities:
                 self._draw_empty_state(painter)
             if self._show_trajectories and self._trajectories:
@@ -850,6 +861,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         clicked_slider_handle = self._slider_handle_at(clicked)
         clicked_joint = self._joint_at(clicked)
         clicked_driver = self._driver_at(clicked)
+        clicked_load = self._load_at(clicked)
         world = self._to_world(clicked, self._current_transform())
         additive_selection = bool(event.modifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier)
 
@@ -892,6 +904,9 @@ class MechanismCanvas(QtWidgets.QWidget):
                 return
             if clicked_driver is not None and self._interaction_mode in ("model", "sim", "all"):
                 self._select_canvas_entity(clicked_driver, additive=additive_selection)
+                return
+            if clicked_load is not None and self._interaction_mode in ("model", "sim", "all"):
+                self._select_canvas_entity(clicked_load, additive=additive_selection)
                 return
             if clicked_body is not None and self._interaction_mode in ("model", "sim", "all"):
                 self._select_canvas_entity(clicked_body, additive=additive_selection)
@@ -1328,6 +1343,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         slider = self._slider_at(event.pos())
         joint_id = self._joint_at(event.pos())
         driver_id = self._driver_at(event.pos())
+        load_id = self._load_at(event.pos())
         menu = QtWidgets.QMenu(self)
         delete_action = None
         rename_action = None
@@ -1335,12 +1351,14 @@ class MechanismCanvas(QtWidgets.QWidget):
         edit_driver_law_action = None
         connect_ground_action = None
         add_marker_action = None
+        add_load_action = None
         toggle_com_action = None
         slider_actions: dict[QtGui.QAction, str] = {}
         if marker is not None:
             delete_action = menu.addAction("Delete")
             connect_ground_action = menu.addAction("Connect To Ground")
             add_marker_action = menu.addAction("Add Marker To Body")
+            add_load_action = menu.addAction("Add Load")
             slider_menu = menu.addMenu("Connect To Slider")
             for slider_item in self.app_service.project.model.sliders:
                 slider_actions[slider_menu.addAction(slider_item.name)] = slider_item.id
@@ -1359,6 +1377,9 @@ class MechanismCanvas(QtWidgets.QWidget):
             rename_action = menu.addAction("Rename Driver")
             edit_driver_law_action = menu.addAction("Edit Driver Law")
             delete_action = menu.addAction("Delete")
+        elif load_id is not None:
+            rename_action = menu.addAction("Rename Load")
+            delete_action = menu.addAction("Delete")
         else:
             selected_body = self._selected_body()
             if selected_body is not None:
@@ -1369,7 +1390,12 @@ class MechanismCanvas(QtWidgets.QWidget):
         if chosen is None:
             return
         if chosen is rename_action:
-            target_id = slider.entity_id if slider is not None else joint_id if joint_id is not None else driver_id
+            target_id = (
+                slider.entity_id if slider is not None
+                else joint_id if joint_id is not None
+                else driver_id if driver_id is not None
+                else load_id
+            )
             if target_id is not None:
                 self._rename_entity_dialog(target_id)
             return
@@ -1389,6 +1415,8 @@ class MechanismCanvas(QtWidgets.QWidget):
                 if joint_id is not None
                 else driver_id
                 if driver_id is not None
+                else load_id
+                if load_id is not None
                 else self._selected_entity_id
             )
             if target_id:
@@ -1411,6 +1439,9 @@ class MechanismCanvas(QtWidgets.QWidget):
                     PropertyValueInput("boolean", not com_marker.visible),
                 )
                 self.modelChanged.emit("Toggled CoM visibility")
+            return
+        if chosen is add_load_action and marker is not None:
+            self._add_load_dialog(marker.entity_id)
             return
         if chosen in slider_actions and marker is not None:
             details = self._request_ground_or_slider_joint("SliderJoint")
@@ -1505,6 +1536,12 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def _driver_at(self, screen_pos: QtCore.QPointF) -> str | None:
         for entity_id, center in reversed(self._screen_drivers):
+            if QtCore.QLineF(screen_pos, center).length() <= 12.0:
+                return entity_id
+        return None
+
+    def _load_at(self, screen_pos: QtCore.QPointF) -> str | None:
+        for entity_id, center in reversed(self._screen_loads):
             if QtCore.QLineF(screen_pos, center).length() <= 12.0:
                 return entity_id
         return None
@@ -2533,6 +2570,70 @@ class MechanismCanvas(QtWidgets.QWidget):
                 painter.setPen(QtCore.Qt.PenStyle.NoPen)
                 painter.drawPolygon(QtGui.QPolygonF([end_screen, p1, p2]))
             painter.restore()
+            painter.setPen(QtGui.QPen(text_color))
+            painter.drawText(end_screen + QtCore.QPointF(8.0, -8.0), f"{force:.2f} N")
+
+    def _draw_loads(
+        self,
+        painter: QtGui.QPainter,
+        project: Project,
+        markers: list[CanvasMarker],
+        transform,
+    ) -> None:
+        self._screen_loads = []
+        marker_map = {marker.entity_id: marker for marker in markers}
+        scale_mm_per_n = 3.0
+        base_arrow_color = QtGui.QColor(69, 123, 157, 192)
+        base_text_color = QtGui.QColor("#457b9d")
+        selected_arrow_color = QtGui.QColor(231, 111, 81, 220)
+        selected_text_color = QtGui.QColor("#c75b12")
+        for load in project.model.loads:
+            canvas_marker = marker_map.get(load.target_marker_id)
+            if canvas_marker is None:
+                continue
+            fx = self.app_service.expression_service.evaluate_property(load.fx, project.parameters).value
+            fy = self.app_service.expression_service.evaluate_property(load.fy, project.parameters).value
+            force = math.sqrt(fx * fx + fy * fy)
+            if force < 1e-9:
+                continue
+            is_selected = self._selected_entity_id == load.id
+            marker_screen = self._to_screen(canvas_marker.x, canvas_marker.y, transform)
+            dx = fx / force
+            dy = fy / force
+            arrow_length_mm = force * scale_mm_per_n
+            end_x = canvas_marker.x + dx * arrow_length_mm
+            end_y = canvas_marker.y + dy * arrow_length_mm
+            end_screen = self._to_screen(end_x, end_y, transform)
+            if is_selected:
+                painter.setPen(QtCore.Qt.PenStyle.NoPen)
+                painter.setBrush(QtGui.QBrush(QtGui.QColor(231, 111, 81, 45)))
+                painter.drawEllipse(end_screen, 14.0, 14.0)
+            arrow_color = selected_arrow_color if is_selected else base_arrow_color
+            text_color = selected_text_color if is_selected else base_text_color
+            painter.save()
+            painter.setOpacity(0.7)
+            pen = QtGui.QPen(arrow_color, 3.0, QtCore.Qt.PenStyle.SolidLine, QtCore.Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.drawLine(marker_screen, end_screen)
+            screen_dx = end_screen.x() - marker_screen.x()
+            screen_dy = end_screen.y() - marker_screen.y()
+            screen_len = math.sqrt(screen_dx * screen_dx + screen_dy * screen_dy)
+            if screen_len > 1e-6:
+                ux = screen_dx / screen_len
+                uy = screen_dy / screen_len
+                arrow_size = 12.0
+                wing = 6.0
+                bx = end_screen.x() - ux * arrow_size
+                by = end_screen.y() - uy * arrow_size
+                wx = -uy * wing
+                wy = ux * wing
+                p1 = QtCore.QPointF(bx + wx, by + wy)
+                p2 = QtCore.QPointF(bx - wx, by - wy)
+                painter.setBrush(QtGui.QBrush(arrow_color))
+                painter.setPen(QtCore.Qt.PenStyle.NoPen)
+                painter.drawPolygon(QtGui.QPolygonF([end_screen, p1, p2]))
+            painter.restore()
+            self._screen_loads.append((load.id, end_screen))
             painter.setPen(QtGui.QPen(text_color))
             painter.drawText(end_screen + QtCore.QPointF(8.0, -8.0), f"{force:.2f} N")
 
@@ -3995,6 +4096,37 @@ class MechanismCanvas(QtWidgets.QWidget):
             return None
         return name, type_combo.currentText()
 
+    def _add_load_dialog(self, marker_id: str) -> None:
+        if not self._require_editing():
+            return
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Add Load")
+        layout = QtWidgets.QFormLayout(dialog)
+        name_edit = QtWidgets.QLineEdit("Load")
+        fx_edit = QtWidgets.QLineEdit("0 N")
+        fy_edit = QtWidgets.QLineEdit("0 N")
+        layout.addRow("Name:", name_edit)
+        layout.addRow("Fx:", fx_edit)
+        layout.addRow("Fy:", fy_edit)
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+        if dialog.exec() != int(QtWidgets.QDialog.DialogCode.Accepted):
+            return
+        name = name_edit.text().strip()
+        fx = fx_edit.text().strip()
+        fy = fy_edit.text().strip()
+        if not name:
+            return
+        try:
+            self.app_service.create_load(name, marker_id, fx, fy)
+            self.modelChanged.emit(f"Added load {name}")
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Add Load Failed", str(exc))
+
     def _rename_entity_dialog(self, entity_id: str) -> None:
         if not self._require_editing():
             return
@@ -4261,6 +4393,45 @@ class MechanismCanvas(QtWidgets.QWidget):
             CanvasMode.CREATE_ANGLE_VECTOR_SENSOR: "angle_vector",
         }
         return mode_map.get(self._mode, "point")
+
+    def _create_load_from_marker(self, marker_id: str) -> None:
+        if not self._require_editing():
+            return
+        default_name = self._next_name(
+            "Load",
+            [load.name for load in self.app_service.project.model.loads],
+        )
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Add Load")
+        layout = QtWidgets.QFormLayout(dialog)
+        name_edit = QtWidgets.QLineEdit(default_name)
+        fx_edit = QtWidgets.QLineEdit("0 N")
+        fy_edit = QtWidgets.QLineEdit("0 N")
+        layout.addRow("Name:", name_edit)
+        layout.addRow("Fx:", fx_edit)
+        layout.addRow("Fy:", fy_edit)
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+        if dialog.exec() != int(QtWidgets.QDialog.DialogCode.Accepted):
+            self.set_mode(CanvasMode.SELECT)
+            return
+        name = name_edit.text().strip()
+        fx = fx_edit.text().strip()
+        fy = fy_edit.text().strip()
+        if not name:
+            self.set_mode(CanvasMode.SELECT)
+            return
+        try:
+            self.app_service.create_load(name, marker_id, fx, fy)
+            self.modelChanged.emit(f"Added load {name}")
+            self.set_mode(CanvasMode.SELECT)
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Add Load Failed", str(exc))
+            self.set_mode(CanvasMode.SELECT)
 
     def _create_sensor_from_markers(self, marker_ids: list[str], sensor_type: str) -> None:
         if not self._require_editing():

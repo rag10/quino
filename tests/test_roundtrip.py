@@ -50,3 +50,24 @@ def test_roundtrip_project_json_with_sketch() -> None:
     assert len(restored.sketch.constraints) == 2
     assert any(entity.name == "Arc1" for entity in restored.sketch.entities.values())
     assert any(constraint.name == "D1" for constraint in restored.sketch.constraints.values())
+
+
+def test_roundtrip_load() -> None:
+    app = ApplicationService()
+    project = app.new_project("LoadDemo")
+    body_id = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    marker_id = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "B")
+    load_id = app.create_load("Wind", marker_id, "10 N", "-5 N")
+
+    mapper = JsonMapper()
+    data = mapper.dump(project)
+    restored = mapper.load(data)
+
+    assert len(restored.model.loads) == 1
+    load = restored.model.loads[0]
+    assert load.name == "Wind"
+    assert load.target_marker_id == marker_id
+    assert load.fx.expression == "10 N"
+    assert load.fy.expression == "-5 N"
+    assert load.fx.unit == "N"
+    assert load.fy.unit == "N"

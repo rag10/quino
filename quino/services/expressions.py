@@ -28,7 +28,7 @@ class EvaluationResult:
 class ExpressionService:
     _number_unit_pattern = re.compile(
         r"(?P<num>(?<![A-Za-z_])[-+]?\d+(?:[\.,]\d+)?)\s*"
-        r"(?P<unit>kgmm2|kgm2|unitless|deg|rad|kg|mm|m|s)\b"
+        r"(?P<unit>kgmm2|kgm2|unitless|deg|rad|kg|mm|m|N|s)\b"
     )
 
     def __init__(self, unit_service: UnitService) -> None:

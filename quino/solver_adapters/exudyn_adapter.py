@@ -12,6 +12,7 @@ from quino.services.expressions import ExpressionService
 from quino.simulation.assembler import (
     AssembledBody,
     AssembledDriver,
+    AssembledLoad,
     AssembledMechanism,
     AssembledSlider,
     MechanismAssembler,
@@ -159,6 +160,8 @@ class ExudynAdapter(SolverAdapter):
                 driver,
                 translation_driver_mode=translation_driver_mode,
             )
+        for load in assembled.loads:
+            self._create_load(mbs, item_interface, assembled, body_objects, load)
         mbs.Assemble()
         time: list[float] = []
         frames: list[dict[str, float]] = []
@@ -304,6 +307,28 @@ class ExudynAdapter(SolverAdapter):
             self._create_marker_to_slider_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, b, a, joint.type, joint.name)
             return
         raise ValueError(f"Unsupported joint topology for Exudyn adapter: {joint.name}")
+
+    def _find_body_for_marker(self, assembled: AssembledMechanism, marker_id: str) -> AssembledBody:
+        for body in assembled.bodies.values():
+            if marker_id in body.markers:
+                return body
+        raise ValueError(f"Marker {marker_id} not found in any body")
+
+    def _create_load(self, mbs, item_interface, assembled, body_objects, load: AssembledLoad) -> None:
+        body = self._find_body_for_marker(assembled, load.target_marker_id)
+        marker = body.markers[load.target_marker_id]
+        load_marker = mbs.AddMarker(
+            item_interface.MarkerBodyRigid(
+                bodyNumber=body_objects[body.body_id],
+                localPosition=[marker.local_x, marker.local_y, 0.0],
+            )
+        )
+        mbs.AddLoad(
+            item_interface.LoadForceVector(
+                markerNumber=load_marker,
+                loadVector=[load.fx, load.fy, 0.0],
+            )
+        )
 
     def _create_marker_to_marker_joint(self, mbs, item_interface, assembled, body_objects, node_numbers, endpoint_a, endpoint_b, joint_type) -> None:
         body_a = assembled.bodies[endpoint_a.body_id]

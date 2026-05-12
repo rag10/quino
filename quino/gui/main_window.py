@@ -14,6 +14,7 @@ from quino.domain.model import (
     Expression,
     GravityLoad,
     Joint,
+    Load,
     Marker,
     Parameter,
     Project,
@@ -372,6 +373,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_angle_v_sensor = self._tool_action("Ang V", CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR, get_icon("sensor-angle-v", color_dynamic), "Create an angle (vertical) sensor (select 2 markers on canvas)")
         self.action_angle_vector_sensor = self._tool_action("Vec", CanvasMode.CREATE_ANGLE_VECTOR_SENSOR, get_icon("sensor-angle-vec", color_dynamic), "Create an angle (vector) sensor (select 4 markers on canvas)")
 
+        self.action_add_load = self._tool_action("Load", CanvasMode.CREATE_LOAD, get_icon("load-gravity", color_dynamic), "Add a point load to a marker (select a marker on canvas)")
+
         self.action_new_plot = QtGui.QAction(get_icon("new-graph", color_dynamic), "Plot", self)
         self.action_new_plot.triggered.connect(self.create_plot_window)
         self.action_new_plot.setToolTip("Create a new plot from sensor data")
@@ -498,6 +501,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_angle_h_sensor,
             self.action_angle_v_sensor,
             self.action_angle_vector_sensor,
+            self.action_add_load,
         ):
             self.tool_group.addAction(action)
         self.action_select_tool.setChecked(True)
@@ -506,7 +510,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.addAction(self.action_redo)
 
     def _tool_action(self, label: str, mode: str, icon: QtGui.QIcon | None = None, tooltip: str | None = None) -> QtGui.QAction:
-        action = QtGui.QAction(icon or label, label, self)
+        action = QtGui.QAction(icon if icon is not None else label, label, self) if icon is not None else QtGui.QAction(label, self)
         action.setCheckable(True)
         if tooltip:
             action.setToolTip(tooltip)
@@ -713,7 +717,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._add_toolbar_sep(t)
 
         self._add_toolbar_block(t, [
-            [self.action_toggle_gravity],
+            [self.action_add_load, self.action_toggle_gravity],
         ], "Loads")
 
         self._model_toolbar.setVisible(True)
@@ -1402,7 +1406,7 @@ class MainWindow(QtWidgets.QMainWindow):
         joints_root = _root("Joints", len(project.model.joints))
         drivers_root = _root("Drivers", len(project.model.drivers))
         sensors_root = _root("Sensors", len(project.model.sensors))
-        loads_root = _root("Loads", 1)
+        loads_root = _root("Loads", len(project.model.loads) + 1)
         sketch_count = (len(project.sketch.entities) + len(project.sketch.constraints)) if project.sketch is not None else 0
         sketch_root = _root("Sketch", sketch_count)
         self.tree.addTopLevelItems([sketch_root, bodies_root, sliders_root, joints_root, drivers_root, sensors_root, loads_root])
@@ -1453,6 +1457,8 @@ class MainWindow(QtWidgets.QMainWindow):
             drivers_root.addChild(self._entity_item(driver.name, driver.type.value, driver.id))
         for sensor in project.model.sensors:
             sensors_root.addChild(self._entity_item(sensor.name, sensor.type.value, sensor.id))
+        for load in project.model.loads:
+            loads_root.addChild(self._entity_item(load.name, "load", load.id))
 
         gravity = project.model.gravity
         gravity_label = "Gravity (ON)" if gravity.enabled else "Gravity (OFF)"
@@ -1531,7 +1537,7 @@ class MainWindow(QtWidgets.QMainWindow):
         CanvasMode.CREATE_ROTATION_DRIVER, CanvasMode.CREATE_TRANSLATION_DRIVER,
         CanvasMode.CREATE_POINT_SENSOR, CanvasMode.CREATE_DISTANCE_SENSOR,
         CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR, CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR,
-        CanvasMode.CREATE_ANGLE_VECTOR_SENSOR,
+        CanvasMode.CREATE_ANGLE_VECTOR_SENSOR, CanvasMode.CREATE_LOAD,
         CanvasMode.CREATE_SKETCH_POINT, CanvasMode.CREATE_SKETCH_LINE_SEGMENT,
         CanvasMode.CREATE_SKETCH_RECTANGLE, CanvasMode.CREATE_SKETCH_CIRCLE, CanvasMode.CREATE_SKETCH_ARC,
         CanvasMode.CREATE_SKETCH_INFINITE_LINE,
@@ -1624,6 +1630,7 @@ class MainWindow(QtWidgets.QMainWindow):
             CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR: self.action_angle_h_sensor,
             CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR: self.action_angle_v_sensor,
             CanvasMode.CREATE_ANGLE_VECTOR_SENSOR: self.action_angle_vector_sensor,
+            CanvasMode.CREATE_LOAD: self.action_add_load,
         }.get(mode)
         if action_for_mode:
             if action_for_mode in self.tool_group.actions():
@@ -1832,7 +1839,7 @@ class MainWindow(QtWidgets.QMainWindow):
         def prop(label, path, value, kind, evaluated):
             rows.append((label, path, value, kind, evaluated, None))
 
-        if isinstance(entity, (Body, Marker, Slider, Joint, Driver, Sensor, Parameter, SketchPoint, SketchLineSegment, SketchCircle, SketchArc, SketchInfiniteLine, SketchConstraint)):
+        if isinstance(entity, (Body, Marker, Slider, Joint, Driver, Sensor, Load, Parameter, SketchPoint, SketchLineSegment, SketchCircle, SketchArc, SketchInfiniteLine, SketchConstraint)):
             prop("name", "name", entity.name, "expression", entity.name)
 
         if isinstance(entity, Body):
@@ -1858,6 +1865,11 @@ class MainWindow(QtWidgets.QMainWindow):
         elif isinstance(entity, Driver):
             prop("type", "", entity.type.value, "readonly", entity.type.value)
             prop("law", "law", entity.law.expression, "expression", self._evaluate_scalar(entity.law, with_time=True))
+
+        elif isinstance(entity, Load):
+            prop("target_marker_id", "", entity.target_marker_id, "readonly", entity.target_marker_id)
+            prop("fx", "fx", entity.fx.expression, "expression", self._evaluate_scalar(entity.fx))
+            prop("fy", "fy", entity.fy.expression, "expression", self._evaluate_scalar(entity.fy))
 
         elif isinstance(entity, Sensor):
             prop("type", "", entity.type.value, "readonly", entity.type.value)
@@ -2311,6 +2323,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_delete,
             self.action_add_rotation_driver,
             self.action_add_translation_driver,
+            self.action_add_load,
         ):
             action.setEnabled(editing_allowed)
         in_sketch_mode = self._app_mode == "sketch"
@@ -2373,6 +2386,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "create_sketch_arc_center": "CtrArc",
             "create_rotation_driver": "RotDrv",
             "create_translation_driver": "LinDrv",
+            "create_load": "Load",
         }.get(mode, mode)
         mode_hint = {
             "create_bar": "2 clicks",
@@ -2400,6 +2414,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "create_sketch_tangent": "Click 1 line then 1 circle",
             "create_sketch_concentric": "Click 2 circles",
             "create_sketch_arc_center": "Click center, start, end",
+            "create_load": "Click a marker",
         }.get(mode)
 
         if self._editing_allowed():

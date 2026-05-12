@@ -15,6 +15,7 @@ from quino import (
 )
 from quino.domain.model import SimulationResult, SketchLineSegment
 from quino.domain.types import Dimension
+from quino.simulation.assembler import MechanismAssembler
 
 
 def make_app() -> ApplicationService:
@@ -1377,3 +1378,70 @@ def test_legacy_unitless_inertia_still_loads_and_assembles() -> None:
     assembler = MechanismAssembler(app.expression_service)
     assembled = assembler.assemble(app.project)
     assert assembled.bodies  # at least one body assembled
+
+
+def test_create_load_and_assemble() -> None:
+    app = make_app()
+    body_id = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    marker_id = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "B")
+    load_id = app.create_load("Wind", marker_id, "10 N", "-5 N")
+
+    load = next(ld for ld in app.project.model.loads if ld.id == load_id)
+    assert load.name == "Wind"
+    assert load.target_marker_id == marker_id
+    assert load.fx.expression == "10 N"
+    assert load.fy.expression == "-5 N"
+
+    assembler = MechanismAssembler(app.expression_service)
+    assembled = assembler.assemble(app.project)
+    assert len(assembled.loads) == 1
+    assert assembled.loads[0].fx == pytest.approx(10.0)
+    assert assembled.loads[0].fy == pytest.approx(-5.0)
+    assert assembled.loads[0].target_marker_id == marker_id
+
+
+def test_delete_load() -> None:
+    app = make_app()
+    body_id = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    marker_id = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "B")
+    load_id = app.create_load("Wind", marker_id, "10 N", "-5 N")
+    app.delete_load(load_id)
+    assert len(app.project.model.loads) == 0
+
+
+def test_delete_body_removes_associated_load() -> None:
+    app = make_app()
+    body_id = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    marker_id = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "B")
+    app.create_load("Wind", marker_id, "10 N", "-5 N")
+    app.delete_entity(body_id)
+    assert len(app.project.model.loads) == 0
+
+
+def test_delete_marker_removes_associated_load() -> None:
+    app = make_app()
+    body_id = app.create_body("Arm", [MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"), MarkerInput("50 mm", "50 mm", "C")])
+    marker_id = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "C")
+    app.create_load("Wind", marker_id, "10 N", "-5 N")
+    app.delete_entity(marker_id)
+    assert len(app.project.model.loads) == 0
+
+
+def test_rename_load() -> None:
+    app = make_app()
+    body_id = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    marker_id = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "B")
+    load_id = app.create_load("Wind", marker_id, "10 N", "-5 N")
+    app.rename_load(load_id, "Gust")
+    assert app.project.model.loads[0].name == "Gust"
+
+
+def test_update_load_property() -> None:
+    app = make_app()
+    body_id = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    marker_id = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "B")
+    load_id = app.create_load("Wind", marker_id, "10 N", "-5 N")
+    app.update_load_property(load_id, "fx", "20 N")
+    assert app.project.model.loads[0].fx.expression == "20 N"
+    app.update_load_property(load_id, "fy", "0 N")
+    assert app.project.model.loads[0].fy.expression == "0 N"

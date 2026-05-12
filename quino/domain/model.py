@@ -143,6 +143,16 @@ class Driver:
 
 
 @dataclass(slots=True)
+class Load:
+    id: str
+    name: str
+    target_marker_id: str
+    fx: ScalarProperty
+    fy: ScalarProperty
+    metadata: Metadata = field(default_factory=Metadata)
+
+
+@dataclass(slots=True)
 class Sensor:
     id: str
     name: str
@@ -295,6 +305,7 @@ class Model:
     sliders: list[Slider] = field(default_factory=list)
     joints: list[Joint] = field(default_factory=list)
     drivers: list[Driver] = field(default_factory=list)
+    loads: list[Load] = field(default_factory=list)
     sensors: list[Sensor] = field(default_factory=list)
     gravity: GravityLoad = field(default_factory=GravityLoad)
 

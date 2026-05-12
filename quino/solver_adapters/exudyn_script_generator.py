@@ -6,7 +6,7 @@ from typing import Any
 from quino.domain.model import Project
 from quino.domain.types import Dimension, JointEndpointKind, JointType
 from quino.services.expressions import ExpressionService
-from quino.simulation.assembler import AssembledBody, AssembledMechanism, AssembledSlider
+from quino.simulation.assembler import AssembledBody, AssembledLoad, AssembledMechanism, AssembledSlider
 
 
 def _safe_var(name: str) -> str:
@@ -395,6 +395,32 @@ def _rotation_coordinate_markers(assembled: AssembledMechanism, joint) -> tuple[
     raise ValueError(f"Rotation driver requires a revolute joint between marker-ground or marker-marker: {joint.name}")
 
 
+def _find_body_for_marker(assembled: AssembledMechanism, marker_id: str) -> AssembledBody:
+    for body in assembled.bodies.values():
+        if marker_id in body.markers:
+            return body
+    raise ValueError(f"Marker {marker_id} not found in any body")
+
+
+def _generate_loads(assembled: AssembledMechanism) -> list[str]:
+    lines: list[str] = ["# --- Loads ---", ""]
+    for load in assembled.loads:
+        body = _find_body_for_marker(assembled, load.target_marker_id)
+        marker = body.markers[load.target_marker_id]
+        b = _safe_var(body.body_id)
+        lm = _safe_var(f"lm_{load.load_id}")
+        lines.append(
+            f"{lm} = mbs.AddMarker(item_interface.MarkerBodyRigid("
+            f"bodyNumber=body_{b}, localPosition=[{marker.local_x}, {marker.local_y}, 0.0]))"
+        )
+        lines.append(
+            f"mbs.AddLoad(item_interface.LoadForceVector("
+            f"markerNumber={lm}, loadVector=[{load.fx}, {load.fy}, 0.0]))"
+        )
+    lines.append("")
+    return lines
+
+
 def generate_exudyn_script(
     project: Project,
     assembled: AssembledMechanism,
@@ -422,6 +448,7 @@ def generate_exudyn_script(
     lines.extend(_generate_bodies(project, assembled))
     lines.extend(_generate_joints(assembled))
     lines.extend(_generate_drivers(assembled))
+    lines.extend(_generate_loads(assembled))
     if assembled.gravity.enabled:
         g = assembled.gravity
         lines.append(f"mbs.SetGravity([{g.magnitude * g.direction_x}, {g.magnitude * g.direction_y}, 0])")

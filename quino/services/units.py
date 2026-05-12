@@ -45,6 +45,7 @@ class UnitService:
         "deg": (Dimension.ANGLE, math.pi / 180.0),
         "rad": (Dimension.ANGLE, 1.0),
         "kg": (Dimension.MASS, 1.0),
+        "N": (Dimension.FORCE, 1.0),
         "s": (Dimension.TIME, 1.0),
         "unitless": (Dimension.UNITLESS, 1.0),
         "kgmm2": (Dimension.INERTIA, 1e-6),
@@ -58,6 +59,7 @@ class UnitService:
         Dimension.MASS: {Dimension.MASS: 1},
         Dimension.TIME: {Dimension.TIME: 1},
         Dimension.INERTIA: {Dimension.MASS: 1, Dimension.LENGTH: 2},
+        Dimension.FORCE: {Dimension.FORCE: 1},
         Dimension.UNITLESS: {},
     }
 

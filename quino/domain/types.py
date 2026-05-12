@@ -35,6 +35,7 @@ class Dimension(StrEnum):
     ANGLE = "angle"
     MASS = "mass"
     INERTIA = "inertia"
+    FORCE = "force"
     TIME = "time"
     UNITLESS = "unitless"
 
