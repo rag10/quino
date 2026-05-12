@@ -790,6 +790,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._draw_joints(painter, project, markers, sliders, transform)
                 self._draw_drivers(painter, project, markers, sliders, transform)
                 self._draw_markers(painter, markers, transform)
+                self._draw_forces(painter, project, markers, transform)
             painter.restore()
             self._draw_sketch(painter, sketch_points, sketch_entities, transform, invalid=sketch_invalid)
             self._draw_sketch_constraints(painter, project, sketch_points, transform, invalid=sketch_invalid)
@@ -807,6 +808,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._draw_joints(painter, project, markers, sliders, transform)
                 self._draw_drivers(painter, project, markers, sliders, transform)
                 self._draw_markers(painter, markers, transform)
+                self._draw_forces(painter, project, markers, transform)
             elif not sketch_points and not sketch_entities:
                 self._draw_empty_state(painter)
             if self._show_trajectories and self._trajectories:
@@ -2462,6 +2464,77 @@ class MechanismCanvas(QtWidgets.QWidget):
             painter.drawEllipse(point, radius, radius)
             painter.setPen(QtGui.QPen(QtGui.QColor("#5b5247")))
             painter.drawText(point + QtCore.QPointF(6.0, -6.0), marker.name)
+
+    def _draw_forces(
+        self,
+        painter: QtGui.QPainter,
+        project: Project,
+        markers: list[CanvasMarker],
+        transform,
+    ) -> None:
+        gravity = project.model.gravity
+        if not gravity.enabled:
+            return
+        marker_map = {marker.entity_id: marker for marker in markers}
+        scale_mm_per_n = 3.0
+        arrow_color = QtGui.QColor("#e63946")
+        text_color = QtGui.QColor("#e63946")
+        for body in project.model.bodies:
+            if body.mass is None:
+                continue
+            try:
+                mass_result = self.app_service.expression_service.evaluate_property(
+                    body.mass, project.parameters
+                )
+                mass = mass_result.value
+            except Exception:
+                continue
+            if mass <= 0:
+                continue
+            force = mass * gravity.magnitude
+            com_marker = body.com_marker()
+            if com_marker is None or com_marker.id not in marker_map:
+                continue
+            canvas_com = marker_map[com_marker.id]
+            com_screen = self._to_screen(canvas_com.x, canvas_com.y, transform)
+            dx = gravity.direction_x
+            dy = gravity.direction_y
+            length = math.sqrt(dx * dx + dy * dy)
+            if length == 0:
+                continue
+            dx /= length
+            dy /= length
+            arrow_length_mm = force * scale_mm_per_n
+            end_x = canvas_com.x + dx * arrow_length_mm
+            end_y = canvas_com.y + dy * arrow_length_mm
+            end_screen = self._to_screen(end_x, end_y, transform)
+            painter.save()
+            painter.setOpacity(0.6)
+            pen = QtGui.QPen(arrow_color, 3.0, QtCore.Qt.PenStyle.SolidLine, QtCore.Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.drawLine(com_screen, end_screen)
+            screen_dx = end_screen.x() - com_screen.x()
+            screen_dy = end_screen.y() - com_screen.y()
+            screen_len = math.sqrt(screen_dx * screen_dx + screen_dy * screen_dy)
+            if screen_len > 1e-6:
+                ux = screen_dx / screen_len
+                uy = screen_dy / screen_len
+                arrow_size = 12.0
+                wing = 6.0
+                # Base of the arrowhead (slightly back from the tip)
+                bx = end_screen.x() - ux * arrow_size
+                by = end_screen.y() - uy * arrow_size
+                # Wing vectors perpendicular to the shaft
+                wx = -uy * wing
+                wy = ux * wing
+                p1 = QtCore.QPointF(bx + wx, by + wy)
+                p2 = QtCore.QPointF(bx - wx, by - wy)
+                painter.setBrush(QtGui.QBrush(arrow_color))
+                painter.setPen(QtCore.Qt.PenStyle.NoPen)
+                painter.drawPolygon(QtGui.QPolygonF([end_screen, p1, p2]))
+            painter.restore()
+            painter.setPen(QtGui.QPen(text_color))
+            painter.drawText(end_screen + QtCore.QPointF(8.0, -8.0), f"{force:.2f} N")
 
     def _body_at(self, point: QtCore.QPointF) -> str | None:
         project = self.app_service.project
