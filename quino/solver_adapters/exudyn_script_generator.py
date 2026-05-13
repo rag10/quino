@@ -193,6 +193,7 @@ def _marker_to_marker_joint(assembled: AssembledMechanism, joint, endpoint_a, en
     mb = _safe_var(f"m_{endpoint_b.body_id}_{endpoint_b.marker_id}")
     ba = _safe_var(body_a.body_id)
     bb = _safe_var(body_b.body_id)
+    sj = _safe_var(joint.id)
     lx_a, ly_a = _com_rel(body_a, marker_a)
     lx_b, ly_b = _com_rel(body_b, marker_b)
     lines.append(
@@ -204,7 +205,7 @@ def _marker_to_marker_joint(assembled: AssembledMechanism, joint, endpoint_a, en
         f"localPosition=[{lx_b * 1e-3}, {ly_b * 1e-3}, 0.0]))"
     )
     lines.append(
-        f"mbs.AddObject(item_interface.ObjectJointRevolute2D("
+        f"pjoint_{sj} = mbs.AddObject(item_interface.ObjectJointRevolute2D("
         f"markerNumbers=[{ma}, {mb}]))"
     )
     if joint_type is JointType.RIGID:
@@ -221,6 +222,7 @@ def _marker_to_ground_joint(assembled: AssembledMechanism, joint, endpoint, join
     body = assembled.bodies[endpoint.body_id]
     marker = body.markers[endpoint.marker_id]
     b = _safe_var(body.body_id)
+    sj = _safe_var(joint.id)
     gm = _safe_var(f"gm_{endpoint.body_id}_{endpoint.marker_id}")
     bm = _safe_var(f"bm_{endpoint.body_id}_{endpoint.marker_id}")
     lines.append(
@@ -233,7 +235,7 @@ def _marker_to_ground_joint(assembled: AssembledMechanism, joint, endpoint, join
         f"localPosition=[{lx_bm * 1e-3}, {ly_bm * 1e-3}, 0.0]))"
     )
     lines.append(
-        f"mbs.AddObject(item_interface.ObjectJointRevolute2D("
+        f"pjoint_{sj} = mbs.AddObject(item_interface.ObjectJointRevolute2D("
         f"markerNumbers=[{gm}, {bm}]))"
     )
     if joint_type is JointType.RIGID:
@@ -268,8 +270,9 @@ def _marker_to_slider_joint(
     lines.append(
         f"zm_{j} = mbs.AddMarker(item_interface.MarkerNodeCoordinate(nodeNumber=gn_{j}, coordinate=0))"
     )
+    sj = _safe_var(joint.id)
     lines.append(
-        f"mbs.AddObject(item_interface.CoordinateConstraint("
+        f"pjoint_{sj} = mbs.AddObject(item_interface.CoordinateConstraint("
         f"name={_py_repr(joint_name)}, markerNumbers=[nm_{j}, zm_{j}], offset=0.0))"
     )
     if joint_type is JointType.RIGID:
@@ -290,13 +293,20 @@ def _joint_friction_lines(assembled: AssembledMechanism, joint) -> list[str]:
         return []
     if abs(coulomb) <= 1e-12 and abs(viscous) <= 1e-12:
         return []
-    safe_joint = _safe_var(joint.id)
+    sj = _safe_var(joint.id)
     lines: list[str] = []
-    lines.append(f"def _joint_friction_{safe_joint}(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):")
-    lines.append("    sign = 1.0 if velocity > 1e-12 else -1.0 if velocity < -1e-12 else 0.0")
-    lines.append(f"    return -({viscous} * float(velocity) + {coulomb} * sign)")
-    lines.append("")
-    if joint.endpoint_a.kind is JointEndpointKind.SLIDER or joint.endpoint_b.kind is JointEndpointKind.SLIDER:
+    is_slider = joint.endpoint_a.kind is JointEndpointKind.SLIDER or joint.endpoint_b.kind is JointEndpointKind.SLIDER
+    if is_slider:
+        # Physics-based: F = μ × |F_normal| × sign(v) + c × v
+        lines.append(f"def _joint_friction_{sj}(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):")
+        lines.append("    try:")
+        lines.append(f"        forces = mbs.GetObjectOutput(pjoint_{sj}, exudyn.OutputVariableType.Lagrange)")
+        lines.append("        N = abs(float(forces[0]))")
+        lines.append("    except Exception:")
+        lines.append("        N = 0.0")
+        lines.append("    sign = 1.0 if velocity > 1e-12 else -1.0 if velocity < -1e-12 else 0.0")
+        lines.append(f"    return -({coulomb} * N * sign + {viscous} * float(velocity))")
+        lines.append("")
         marker_endpoint = joint.endpoint_a if joint.endpoint_a.kind is JointEndpointKind.MARKER else joint.endpoint_b
         slider_endpoint = joint.endpoint_a if joint.endpoint_a.kind is JointEndpointKind.SLIDER else joint.endpoint_b
         body = assembled.bodies[marker_endpoint.body_id]
@@ -305,27 +315,42 @@ def _joint_friction_lines(assembled: AssembledMechanism, joint) -> list[str]:
         b = _safe_var(body.body_id)
         lx_fr, ly_fr = _com_rel(body, marker)
         lines.append(
-            f"frtm_{safe_joint} = mbs.AddMarker(item_interface.MarkerBodiesRelativeTranslationCoordinate("
+            f"frtm_{sj} = mbs.AddMarker(item_interface.MarkerBodiesRelativeTranslationCoordinate("
             f"bodyNumbers=[ground_object, body_{b}], "
             f"localPosition0=[{slider.origin_x * 1e-3}, {slider.origin_y * 1e-3}, 0.0], "
             f"localPosition1=[{lx_fr * 1e-3}, {ly_fr * 1e-3}, 0.0], "
             f"axis0=[{slider.axis_x}, {slider.axis_y}, 0.0], offset=0.0))"
         )
-        lines.append(
-            f"frgn_{safe_joint} = mbs.AddNode(item_interface.NodePointGround(referenceCoordinates=[0.0, 0.0, 0.0]))"
-        )
-        lines.append(
-            f"frzm_{safe_joint} = mbs.AddMarker(item_interface.MarkerNodeCoordinate(nodeNumber=frgn_{safe_joint}, coordinate=0))"
-        )
-        marker_list = f"[frtm_{safe_joint}, frzm_{safe_joint}]"
+        lines.append(f"frgn_{sj} = mbs.AddNode(item_interface.NodePointGround(referenceCoordinates=[0.0, 0.0, 0.0]))")
+        lines.append(f"frzm_{sj} = mbs.AddMarker(item_interface.MarkerNodeCoordinate(nodeNumber=frgn_{sj}, coordinate=0))")
+        marker_list = f"[frtm_{sj}, frzm_{sj}]"
     else:
+        try:
+            pin_radius_mm = float(joint.metadata.values.get("friction_pin_radius", 0.0))
+        except (TypeError, ValueError):
+            pin_radius_mm = 0.0
+        if pin_radius_mm > 1e-12:
+            r_m = pin_radius_mm * 1e-3
+            lines.append(f"def _joint_friction_{sj}(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):")
+            lines.append("    try:")
+            lines.append(f"        forces = mbs.GetObjectOutput(pjoint_{sj}, exudyn.OutputVariableType.Lagrange)")
+            lines.append("        N = math.sqrt(float(forces[0])**2 + float(forces[1])**2)")
+            lines.append("    except Exception:")
+            lines.append("        N = 0.0")
+            lines.append("    sign = 1.0 if velocity > 1e-12 else -1.0 if velocity < -1e-12 else 0.0")
+            lines.append(f"    return -({coulomb} * N * {r_m} * sign + {viscous} * float(velocity))")
+        else:
+            lines.append(f"def _joint_friction_{sj}(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):")
+            lines.append("    sign = 1.0 if velocity > 1e-12 else -1.0 if velocity < -1e-12 else 0.0")
+            lines.append(f"    return -({viscous} * float(velocity) + {coulomb} * sign)")
+        lines.append("")
         marker_lines, marker_names = _rotation_coordinate_markers(assembled, joint)
         lines.extend(marker_lines)
         marker_list = "[" + ", ".join(marker_names) + "]"
     lines.append(
         f"mbs.AddObject(item_interface.ObjectConnectorCoordinateSpringDamper("
         f"name={_py_repr(joint.name + '_friction')}, markerNumbers={marker_list}, "
-        f"stiffness=0.0, damping=0.0, springForceUserFunction=_joint_friction_{safe_joint}))"
+        f"stiffness=0.0, damping=0.0, springForceUserFunction=_joint_friction_{sj}))"
     )
     return lines
 

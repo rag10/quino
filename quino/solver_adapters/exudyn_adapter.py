@@ -40,6 +40,40 @@ def _marker_local_rel_com(body: "AssembledBody", marker: "AssembledMarker") -> t
     return (marker.local_x - body.com_local_x, marker.local_y - body.com_local_y)
 
 
+def _make_constant_friction_fn(coulomb: float, viscous: float):
+    """Constant-torque/force Coulomb model (no reaction force scaling)."""
+    def fn(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):
+        sign = 1.0 if velocity > 1e-12 else -1.0 if velocity < -1e-12 else 0.0
+        return -(viscous * float(velocity) + coulomb * sign)
+    return fn
+
+
+def _make_revolute_physics_friction_fn(joint_obj_num: int, exu, mu: float, r_m: float, viscous: float):
+    """Physics-based revolute friction: T = μ × ||F_joint|| × r_pin × sign(ω) + c × ω."""
+    def fn(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):
+        try:
+            forces = mbs.GetObjectOutput(joint_obj_num, exu.OutputVariableType.Lagrange)
+            N = math.sqrt(float(forces[0]) ** 2 + float(forces[1]) ** 2)
+        except Exception:
+            N = 0.0
+        sign = 1.0 if velocity > 1e-12 else -1.0 if velocity < -1e-12 else 0.0
+        return -(mu * N * r_m * sign + viscous * float(velocity))
+    return fn
+
+
+def _make_slider_physics_friction_fn(joint_obj_num: int, exu, mu: float, viscous: float):
+    """Physics-based slider friction: F = μ × |F_normal| × sign(v) + c × v."""
+    def fn(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):
+        try:
+            forces = mbs.GetObjectOutput(joint_obj_num, exu.OutputVariableType.Lagrange)
+            N = abs(float(forces[0]))
+        except Exception:
+            N = 0.0
+        sign = 1.0 if velocity > 1e-12 else -1.0 if velocity < -1e-12 else 0.0
+        return -(mu * N * sign + viscous * float(velocity))
+    return fn
+
+
 class ExudynAdapter(SolverAdapter):
     name = "exudyn"
 
@@ -165,10 +199,11 @@ class ExudynAdapter(SolverAdapter):
         mbs = sc.AddSystem()
         ground_object = mbs.AddObject(item_interface.ObjectGround())
         body_objects, node_numbers, body_order = self._create_bodies(mbs, item_interface, assembled)
+        joint_objects: dict[str, int] = {}
         for joint in assembled.joints:
-            self._create_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, joint)
+            joint_objects[joint.id] = self._create_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, joint)
         for joint in assembled.joints:
-            self._add_joint_friction(mbs, item_interface, assembled, node_numbers, body_objects, ground_object, joint)
+            self._add_joint_friction(mbs, item_interface, assembled, node_numbers, body_objects, ground_object, joint, exu, joint_objects)
         for driver in assembled.drivers:
             self._create_driver(
                 mbs,
@@ -310,24 +345,19 @@ class ExudynAdapter(SolverAdapter):
             body_order.append(body.body_id)
         return body_objects, node_numbers, body_order
 
-    def _create_joint(self, mbs, item_interface, assembled, body_objects, node_numbers, ground_object, joint) -> None:
+    def _create_joint(self, mbs, item_interface, assembled, body_objects, node_numbers, ground_object, joint) -> int:
         a = joint.endpoint_a
         b = joint.endpoint_b
         if a.kind is JointEndpointKind.MARKER and b.kind is JointEndpointKind.MARKER:
-            self._create_marker_to_marker_joint(mbs, item_interface, assembled, body_objects, node_numbers, a, b, joint.type)
-            return
+            return self._create_marker_to_marker_joint(mbs, item_interface, assembled, body_objects, node_numbers, a, b, joint.type)
         if a.kind is JointEndpointKind.MARKER and b.kind is JointEndpointKind.GROUND:
-            self._create_marker_to_ground_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, a, joint.type)
-            return
+            return self._create_marker_to_ground_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, a, joint.type)
         if a.kind is JointEndpointKind.MARKER and b.kind is JointEndpointKind.SLIDER:
-            self._create_marker_to_slider_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, a, b, joint.type, joint.name)
-            return
+            return self._create_marker_to_slider_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, a, b, joint.type, joint.name)
         if b.kind is JointEndpointKind.MARKER and a.kind is JointEndpointKind.GROUND:
-            self._create_marker_to_ground_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, b, joint.type)
-            return
+            return self._create_marker_to_ground_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, b, joint.type)
         if b.kind is JointEndpointKind.MARKER and a.kind is JointEndpointKind.SLIDER:
-            self._create_marker_to_slider_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, b, a, joint.type, joint.name)
-            return
+            return self._create_marker_to_slider_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, b, a, joint.type, joint.name)
         raise ValueError(f"Unsupported joint topology for Exudyn adapter: {joint.name}")
 
     def _find_body_for_marker(self, assembled: AssembledMechanism, marker_id: str) -> AssembledBody:
@@ -353,7 +383,7 @@ class ExudynAdapter(SolverAdapter):
             )
         )
 
-    def _create_marker_to_marker_joint(self, mbs, item_interface, assembled, body_objects, node_numbers, endpoint_a, endpoint_b, joint_type) -> None:
+    def _create_marker_to_marker_joint(self, mbs, item_interface, assembled, body_objects, node_numbers, endpoint_a, endpoint_b, joint_type) -> int:
         body_a = assembled.bodies[endpoint_a.body_id]
         body_b = assembled.bodies[endpoint_b.body_id]
         marker_a = body_a.markers[endpoint_a.marker_id]
@@ -372,17 +402,18 @@ class ExudynAdapter(SolverAdapter):
                 localPosition=[lx_b * _MM_TO_M, ly_b * _MM_TO_M, 0.0],
             )
         )
-        mbs.AddObject(item_interface.ObjectJointRevolute2D(markerNumbers=[marker_number_a, marker_number_b]))
+        joint_obj = mbs.AddObject(item_interface.ObjectJointRevolute2D(markerNumbers=[marker_number_a, marker_number_b]))
         if joint_type is JointType.RIGID:
             mbs.CreateCoordinateConstraint(
                 bodyNumbers=[body_objects[body_a.body_id], body_objects[body_b.body_id]],
                 coordinates=[2, 2],
                 offset=0.0,
             )
+        return joint_obj
 
     def _create_marker_to_ground_joint(
         self, mbs, item_interface, assembled, body_objects, node_numbers, ground_object, endpoint, joint_type
-    ) -> None:
+    ) -> int:
         body = assembled.bodies[endpoint.body_id]
         marker = body.markers[endpoint.marker_id]
         ground_marker = mbs.AddMarker(
@@ -398,17 +429,18 @@ class ExudynAdapter(SolverAdapter):
                 localPosition=[lx * _MM_TO_M, ly * _MM_TO_M, 0.0],
             )
         )
-        mbs.AddObject(item_interface.ObjectJointRevolute2D(markerNumbers=[ground_marker, body_marker]))
+        joint_obj = mbs.AddObject(item_interface.ObjectJointRevolute2D(markerNumbers=[ground_marker, body_marker]))
         if joint_type is JointType.RIGID:
             mbs.CreateCoordinateConstraint(
                 bodyNumbers=[ground_object, body_objects[body.body_id]],
                 coordinates=[None, 2],
                 offset=0.0,
             )
+        return joint_obj
 
     def _create_marker_to_slider_joint(
         self, mbs, item_interface, assembled, body_objects, node_numbers, ground_object, endpoint_a, endpoint_b, joint_type, joint_name
-    ) -> None:
+    ) -> int:
         body = assembled.bodies[endpoint_a.body_id]
         marker = body.markers[endpoint_a.marker_id]
         slider = assembled.sliders[endpoint_b.slider_id]
@@ -424,7 +456,7 @@ class ExudynAdapter(SolverAdapter):
         )
         ground_node = mbs.AddNode(item_interface.NodePointGround(referenceCoordinates=[0.0, 0.0, 0.0]))
         zero_coordinate_marker = mbs.AddMarker(item_interface.MarkerNodeCoordinate(nodeNumber=ground_node, coordinate=0))
-        mbs.AddObject(
+        joint_obj = mbs.AddObject(
             item_interface.CoordinateConstraint(
                 name=joint_name,
                 markerNumbers=[normal_translation_marker, zero_coordinate_marker],
@@ -446,6 +478,7 @@ class ExudynAdapter(SolverAdapter):
             body_object=body_objects[body.body_id],
             ground_object=ground_object,
         )
+        return joint_obj
 
     def _add_joint_friction(
         self,
@@ -456,6 +489,8 @@ class ExudynAdapter(SolverAdapter):
         body_objects: dict[str, int],
         ground_object: int,
         joint: Joint,
+        exu,
+        joint_objects: dict[str, int],
     ) -> None:
         mode = None
         if joint.endpoint_a.kind is JointEndpointKind.SLIDER or joint.endpoint_b.kind is JointEndpointKind.SLIDER:
@@ -471,8 +506,17 @@ class ExudynAdapter(SolverAdapter):
             return
         if abs(coulomb) <= 1e-12 and abs(viscous) <= 1e-12:
             return
+        joint_obj_num = joint_objects.get(joint.id, -1)
         if mode == "rotation":
             marker_numbers = self._rotation_coordinate_markers(mbs, item_interface, node_numbers, ground_object, joint)
+            try:
+                pin_radius_mm = float(joint.metadata.values.get("friction_pin_radius", 0.0))
+            except (TypeError, ValueError):
+                pin_radius_mm = 0.0
+            if pin_radius_mm > 1e-12:
+                force_fn = _make_revolute_physics_friction_fn(joint_obj_num, exu, coulomb, pin_radius_mm * _MM_TO_M, viscous)
+            else:
+                force_fn = _make_constant_friction_fn(coulomb, viscous)
         else:
             marker_endpoint = joint.endpoint_a if joint.endpoint_a.kind is JointEndpointKind.MARKER else joint.endpoint_b
             slider_endpoint = joint.endpoint_a if joint.endpoint_a.kind is JointEndpointKind.SLIDER else joint.endpoint_b
@@ -494,22 +538,16 @@ class ExudynAdapter(SolverAdapter):
                 item_interface.MarkerNodeCoordinate(nodeNumber=friction_ground_node, coordinate=0)
             )
             marker_numbers = [relative_translation_marker, zero_coordinate_marker]
+            force_fn = _make_slider_physics_friction_fn(joint_obj_num, exu, coulomb, viscous)
         mbs.AddObject(
             item_interface.ObjectConnectorCoordinateSpringDamper(
                 name=f"{joint.name}_friction",
                 markerNumbers=marker_numbers,
                 stiffness=0.0,
                 damping=0.0,
-                springForceUserFunction=self._make_friction_force_function(coulomb, viscous),
+                springForceUserFunction=force_fn,
             )
         )
-
-    def _make_friction_force_function(self, coulomb: float, viscous: float):
-        def friction_force_fn(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):
-            sign = 1.0 if velocity > 1e-12 else -1.0 if velocity < -1e-12 else 0.0
-            return -(viscous * float(velocity) + coulomb * sign)
-
-        return friction_force_fn
 
     def _add_slider_limit_stops(self, mbs, item_interface, slider: AssembledSlider, body: AssembledBody, marker, body_object: int, ground_object: int) -> None:
         if slider.travel_min is None and slider.travel_max is None:

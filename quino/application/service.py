@@ -1093,7 +1093,7 @@ class ApplicationService:
             if body.type is BodyType.BAR and property_path in {"position_percent", "position_distance"}:
                 self._update_bar_com_property(body, property_path, value)
                 return
-        if isinstance(entity, Joint) and property_path in {"friction_coulomb", "friction_viscous"}:
+        if isinstance(entity, Joint) and property_path in {"friction_coulomb", "friction_viscous", "friction_pin_radius"}:
             self._update_joint_friction_property(entity, property_path, value)
             return
         if isinstance(entity, Marker) and property_path in {"x", "y"}:
@@ -1679,6 +1679,13 @@ class ApplicationService:
             return float(coulomb), float(viscous)
         except (TypeError, ValueError):
             return 0.0, 0.0
+
+    def joint_friction_pin_radius(self, joint: Joint) -> float:
+        r = joint.metadata.values.get("friction_pin_radius", 0.0)
+        try:
+            return float(r)
+        except (TypeError, ValueError):
+            return 0.0
 
     def _update_joint_friction_property(self, joint: Joint, path: str, value: PropertyValueInput) -> None:
         if self.joint_friction_mode(joint) is None:

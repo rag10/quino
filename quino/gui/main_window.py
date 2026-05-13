@@ -9,6 +9,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from quino.application.example_registry import ExampleEntry, ExampleRegistry
 from quino.application.service import ApplicationService
 from quino.domain.inputs import PropertyValueInput
+from quino.domain.types import MarkerType
 from quino.domain.model import (
     Body,
     Driver,
@@ -48,6 +49,7 @@ _PROPERTY_DIMENSION_HINTS: dict[str, str] = {
     "radius": "length (e.g. 25 mm)",
     "value": "see constraint type",
     "law": "angle or length (e.g. 90 deg * t / 1 s)",
+    "friction_pin_radius": "pin radius in mm (e.g. 5 mm)",
 }
 
 
@@ -1918,12 +1920,19 @@ class MainWindow(QtWidgets.QMainWindow):
             friction_mode = self.app_service.joint_friction_mode(entity)
             if friction_mode == "rotation":
                 coulomb, viscous = self.app_service.joint_friction_values(entity)
+                pin_r = self.app_service.joint_friction_pin_radius(entity)
+                prop("friction_pin_radius", "friction_pin_radius", f"{pin_r:.6g}", "expression", f"{pin_r:.6g}")
                 prop("friction_coulomb", "friction_coulomb", f"{coulomb:.6g}", "expression", f"{coulomb:.6g}")
                 prop("friction_viscous", "friction_viscous", f"{viscous:.6g}", "expression", f"{viscous:.6g}")
+                if pin_r > 1e-12:
+                    prop("— formula", "", "T = μ·‖F_rótula‖·r_pin·sign(ω) + c·ω  [N·m]", "readonly", "")
+                else:
+                    prop("— formula", "", "T = T_coulomb·sign(ω) + c·ω  [N·m]  (sin radio → par cte.)", "readonly", "")
             elif friction_mode == "translation":
                 coulomb, viscous = self.app_service.joint_friction_values(entity)
                 prop("friction_coulomb", "friction_coulomb", f"{coulomb:.6g}", "expression", f"{coulomb:.6g}")
                 prop("friction_viscous", "friction_viscous", f"{viscous:.6g}", "expression", f"{viscous:.6g}")
+                prop("— formula", "", "F = μ·|F_normal|·sign(v) + c·v  [N]", "readonly", "")
 
         elif isinstance(entity, Driver):
             prop("type", "", entity.type.value, "readonly", entity.type.value)
