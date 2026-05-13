@@ -6,7 +6,7 @@ import pytest
 from PySide6 import QtCore, QtTest, QtWidgets
 
 from quino.application.service import ApplicationService
-from quino.domain.inputs import MarkerInput, SliderInput
+from quino.domain.inputs import MarkerInput, PropertyValueInput, SliderInput
 from quino.gui.main_window import MainWindow
 
 
@@ -144,6 +144,64 @@ def test_playback_controls_are_disabled_without_simulation() -> None:
     assert not window.action_play_pause.isEnabled()
     assert not window.action_stop.isEnabled()
     assert not window.timeline_slider.isEnabled()
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_simulation_parameter_changes_discard_existing_simulation() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.load_four_bar_example()
+    window.run_simulation()
+    qt_app.processEvents()
+
+    assert window._last_simulation_result is not None
+    assert window._last_simulation_result.frames
+
+    window.steps_spin.setValue(window.steps_spin.value() + window.steps_spin.singleStep())
+    qt_app.processEvents()
+    assert window._last_simulation_result is None
+    assert "Simulation discarded because frame count changed" in window.messages.toPlainText()
+
+    window.run_simulation()
+    qt_app.processEvents()
+    assert window._last_simulation_result is not None
+
+    window.dt_spin.setValue(window.dt_spin.value() + window.dt_spin.singleStep())
+    qt_app.processEvents()
+    assert window._last_simulation_result is None
+    assert "Simulation discarded because delta t changed" in window.messages.toPlainText()
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_simulation_spin_boxes_use_adaptive_steps() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    window.steps_spin.setValue(1000)
+    qt_app.processEvents()
+    assert window.steps_spin.singleStep() == 100
+
+    window.steps_spin.setValue(54608)
+    qt_app.processEvents()
+    assert window.steps_spin.singleStep() == 5460
+
+    window.dt_spin.setValue(0.001)
+    qt_app.processEvents()
+    assert window.dt_spin.singleStep() == pytest.approx(0.0005)
+
+    window.dt_spin.setValue(0.07)
+    qt_app.processEvents()
+    assert window.dt_spin.singleStep() == pytest.approx(0.005)
+
+    window.playback_speed_spin.setValue(2.5)
+    qt_app.processEvents()
+    assert window.playback_speed_spin.singleStep() == pytest.approx(0.5)
 
     window.close()
     qt_app.processEvents()
@@ -937,6 +995,95 @@ def test_canvas_distance_constraint_waits_for_label_position() -> None:
     qt_app.processEvents()
 
 
+def test_canvas_horizontal_distance_constraint_waits_for_label_position() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    p1 = window.app_service.create_sketch_point("0 mm", "0 mm", "P1")
+    p2 = window.app_service.create_sketch_point("40 mm", "10 mm", "P2")
+    window.refresh_all()
+    window._set_app_mode("sketch")
+    window.action_sketch_horizontal_distance_tool.trigger()
+    qt_app.processEvents()
+
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=window.canvas.screen_position_for_entity(p1))
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=window.canvas.screen_position_for_entity(p2))
+    qt_app.processEvents()
+    assert window.canvas.mode() == "create_sketch_horizontal_distance"
+    assert window.canvas._pending_distance_constraint_refs == [p1, p2]
+
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=window.canvas.screen_position_for_world(20.0, 20.0))
+    qt_app.processEvents()
+
+    constraint = next(iter(window.app_service.project.sketch.constraints.values()))
+    assert constraint.type.value == "horizontal_distance"
+    assert constraint.metadata.values["label_position"] == pytest.approx([20.0, 20.0], abs=0.5)
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_canvas_distance_constraint_can_be_created_from_line_entity() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    p1 = window.app_service.create_sketch_point("0 mm", "0 mm", "P1")
+    p2 = window.app_service.create_sketch_point("40 mm", "0 mm", "P2")
+    line_id = window.app_service.create_sketch_line_segment(p1, p2, "L1")
+    window.refresh_all()
+    window._set_app_mode("sketch")
+    window.action_sketch_distance_tool.trigger()
+    qt_app.processEvents()
+
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=window.canvas.screen_position_for_entity(line_id))
+    qt_app.processEvents()
+
+    assert window.canvas._pending_distance_constraint_refs == [p1, p2]
+
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=window.canvas.screen_position_for_world(20.0, 15.0))
+    qt_app.processEvents()
+
+    constraint = next(iter(window.app_service.project.sketch.constraints.values()))
+    assert constraint.type.value == "distance"
+    assert constraint.references == [p1, p2]
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_canvas_clicking_distance_constraint_selects_it() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    p1 = window.app_service.create_sketch_point("0 mm", "0 mm", "P1")
+    p2 = window.app_service.create_sketch_point("40 mm", "0 mm", "P2")
+    constraint_id = window.app_service.create_sketch_constraint("distance", [p1, p2], value="40 mm")
+    window.app_service.update_sketch_constraint(constraint_id, "label_x", PropertyValueInput("expression", "20 mm"))
+    window.app_service.update_sketch_constraint(constraint_id, "label_y", PropertyValueInput("expression", "15 mm"))
+    window.refresh_all()
+    window._set_app_mode("sketch")
+    window.action_select_tool.trigger()
+    qt_app.processEvents()
+
+    pos = window.canvas.screen_position_for_entity(constraint_id)
+    assert pos is not None
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=pos)
+    qt_app.processEvents()
+
+    assert window.canvas._selected_entity_id == constraint_id
+
+    window.close()
+    qt_app.processEvents()
+
+
+
+
 def test_sketch_point_can_be_edited_from_inspector_and_canvas_drag_snaps_marker() -> None:
     qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = MainWindow(ApplicationService())
@@ -1101,10 +1248,8 @@ def test_canvas_display_settings_and_preferences_dialog() -> None:
     qt_app.processEvents()
 
 
-def test_coincident_on_line_click_picks_nearest_endpoint() -> None:
-    """Clicking a line in COINCIDENT mode should add only the nearest endpoint."""
-    from unittest.mock import patch
-
+def test_coincident_on_line_click_uses_entity_reference() -> None:
+    """Clicking a line in COINCIDENT mode should treat it as a geometric target."""
     from quino.domain.types import SketchEntityType
     from quino.gui.canvas import CanvasMode, CanvasSketchEntity, MechanismCanvas
 
@@ -1133,18 +1278,45 @@ def test_coincident_on_line_click_picks_nearest_endpoint() -> None:
         visible=True,
         construction=False,
     )
-    # Fake a CanvasSketchPoint for the start point so _canvas_sketch_point_by_id returns it
-    from quino.gui.canvas import CanvasSketchPoint
-    fake_cpt = CanvasSketchPoint(
-        entity_id=seg.start_point_id, name="P1",
-        x=0.0, y=0.0, visible=True, construction=False,
-    )
-    canvas._screen_sketch_points = [(fake_cpt, None)]
+    canvas._handle_constraint_input_click(None, entity, n_pts=2, n_ent=0)
+    assert canvas._creation_entity_ids == [line_id]
+    assert canvas._sensor_marker_ids == []
 
-    with patch.object(
-        canvas, "_nearest_endpoint_of_entity", return_value=seg.start_point_id
-    ) as mock_near:
+
+def test_coincident_point_then_line_uses_entity_reference() -> None:
+    from unittest.mock import patch
+
+    from quino.domain.types import SketchEntityType
+    from quino.gui.canvas import CanvasMode, CanvasSketchEntity, CanvasSketchPoint, MechanismCanvas
+
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    app_svc = ApplicationService()
+    app_svc.new_project("test")
+    canvas = MechanismCanvas(app_svc)
+
+    app_svc.create_sketch()
+    p1 = app_svc.create_sketch_point("0 mm", "0 mm")
+    p2 = app_svc.create_sketch_point("100 mm", "0 mm")
+    p3 = app_svc.create_sketch_point("50 mm", "20 mm")
+    line_id = app_svc.create_sketch_line_segment(p1, p2)
+    canvas.set_interaction_mode("sketch")
+    canvas.set_mode(CanvasMode.CREATE_SKETCH_COINCIDENT)
+
+    seg = app_svc.get_entity(line_id)
+    point = CanvasSketchPoint(entity_id=p3, name="P3", x=50.0, y=20.0, visible=True, construction=False)
+    entity = CanvasSketchEntity(
+        entity_id=seg.id,
+        name="",
+        entity_type=SketchEntityType.LINE_SEGMENT,
+        point_ids=[seg.start_point_id, seg.end_point_id],
+        visible=True,
+        construction=False,
+    )
+
+    with patch.object(canvas, "_finalize_sketch_constraint_creation") as mock_finalize:
+        canvas._handle_constraint_input_click(point, None, n_pts=2, n_ent=0)
         canvas._handle_constraint_input_click(None, entity, n_pts=2, n_ent=0)
-        mock_near.assert_called_once()
-    assert len(canvas._sensor_marker_ids) == 1
-    assert canvas._sensor_marker_ids[0] == seg.start_point_id
+        mock_finalize.assert_called_once()
+
+    assert canvas._creation_entity_ids == [line_id]
+    assert canvas._sensor_marker_ids == [p3]

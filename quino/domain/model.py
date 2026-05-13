@@ -293,7 +293,7 @@ class SketchAnalysis:
 
 @dataclass(slots=True)
 class GravityLoad:
-    enabled: bool = True
+    enabled: bool = False
     magnitude: float = 9.81
     direction_x: float = 0.0
     direction_y: float = -1.0

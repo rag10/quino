@@ -4,7 +4,7 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from quino.domain.model import Expression, Project, Sketch, SketchArc, SketchCircle, SketchConstraint, SketchPoint
+from quino.domain.model import Expression, Project, Sketch, SketchArc, SketchCircle, SketchConstraint, SketchInfiniteLine, SketchLineSegment, SketchPoint
 from quino.domain.sketch_constraints import CONSTRAINT_SPECS
 from quino.domain.types import SketchConstraintType
 from quino.services.expressions import ExpressionService
@@ -32,6 +32,9 @@ class SketchSolver:
             SketchConstraintType.HORIZONTAL: self._apply_horizontal,
             SketchConstraintType.VERTICAL: self._apply_vertical,
             SketchConstraintType.DISTANCE: self._apply_distance_handler,
+            SketchConstraintType.HORIZONTAL_DISTANCE: self._apply_horizontal_distance_handler,
+            SketchConstraintType.VERTICAL_DISTANCE: self._apply_vertical_distance_handler,
+            SketchConstraintType.RADIUS: self._apply_radius_handler,
             SketchConstraintType.PARALLEL: self._apply_parallel,
             SketchConstraintType.PERPENDICULAR: self._apply_perpendicular,
             SketchConstraintType.EQUAL_LENGTH: self._apply_equal_length,
@@ -145,8 +148,8 @@ class SketchSolver:
         t = constraint.type
         if t is SketchConstraintType.FIX or not refs:
             return 0.0
-        # DISTANCE radius form: 1 point + 1 entity ref — bypass spec.points check
-        if t is SketchConstraintType.DISTANCE and len(constraint.entity_references) == 1:
+        # Special forms using one point + one entity ref bypass the fixed point-count spec.
+        if t in {SketchConstraintType.DISTANCE, SketchConstraintType.RADIUS, SketchConstraintType.COINCIDENT} and len(constraint.entity_references) == 1:
             handler = self._handlers.get(t)
             if handler is None:
                 return float("inf")
@@ -164,6 +167,18 @@ class SketchSolver:
         return handler(project, sketch, constraint, refs, positions, locked_axes, tolerance)
 
     def _apply_coincident(self, project, sketch, constraint, refs, positions, locked_axes, tolerance):
+        if constraint.entity_references:
+            entity = sketch.entities.get(constraint.entity_references[0])
+            if isinstance(entity, (SketchCircle, SketchArc)):
+                return self._apply_on_circle(project, refs, constraint.entity_references, sketch, positions, locked_axes, tolerance)
+            if isinstance(entity, (SketchLineSegment, SketchInfiniteLine)):
+                line_point_ids = (
+                    [entity.start_point_id, entity.end_point_id]
+                    if isinstance(entity, SketchLineSegment)
+                    else [entity.point_a_id, entity.point_b_id]
+                )
+                return self._apply_point_on_line(refs[0], line_point_ids, positions, locked_axes, tolerance)
+            return 0.0
         ex = self._apply_axis_pair(refs[0], refs[1], positions, locked_axes, 0, tolerance)
         ey = self._apply_axis_pair(refs[0], refs[1], positions, locked_axes, 1, tolerance)
         return ex + ey
@@ -183,6 +198,24 @@ class SketchSolver:
                 refs[0], constraint.entity_references[0], target, sketch, tolerance
             )
         return self._apply_distance(refs[0], refs[1], target, positions, locked_axes, tolerance)
+
+    def _apply_radius_handler(self, project, sketch, constraint, refs, positions, locked_axes, tolerance):
+        if constraint.value is None or not constraint.entity_references:
+            return 0.0
+        target = self.expression_service.evaluate_property(constraint.value, project.parameters).value
+        return self._apply_radius(refs[0], constraint.entity_references[0], target, sketch, tolerance)
+
+    def _apply_horizontal_distance_handler(self, project, sketch, constraint, refs, positions, locked_axes, tolerance):
+        if constraint.value is None:
+            return 0.0
+        target = self.expression_service.evaluate_property(constraint.value, project.parameters).value
+        return self._apply_projected_distance(refs[0], refs[1], target, positions, locked_axes, 0, tolerance)
+
+    def _apply_vertical_distance_handler(self, project, sketch, constraint, refs, positions, locked_axes, tolerance):
+        if constraint.value is None:
+            return 0.0
+        target = self.expression_service.evaluate_property(constraint.value, project.parameters).value
+        return self._apply_projected_distance(refs[0], refs[1], target, positions, locked_axes, 1, tolerance)
 
     def _apply_angle_handler(self, project, sketch, constraint, refs, positions, locked_axes, tolerance):
         if constraint.value is None:
@@ -287,6 +320,40 @@ class SketchSolver:
             c = 0.5 * error
             positions[point_a_id] = (ax + c * ux, ay + c * uy)
             positions[point_b_id] = (bx - c * ux, by - c * uy)
+        return abs(error)
+
+    def _apply_projected_distance(
+        self,
+        point_a_id: str,
+        point_b_id: str,
+        target: float,
+        positions: dict[str, tuple[float, float]],
+        locked_axes: dict[str, list[bool]],
+        axis: int,
+        tolerance: float,
+    ) -> float:
+        a = list(positions[point_a_id])
+        b = list(positions[point_b_id])
+        delta = b[axis] - a[axis]
+        sign = -1.0 if delta < 0.0 else 1.0
+        error = abs(delta) - target
+        if abs(error) <= tolerance:
+            return abs(error)
+        a_locked = locked_axes[point_a_id][axis]
+        b_locked = locked_axes[point_b_id][axis]
+        desired_delta = sign * target
+        if a_locked and b_locked:
+            return abs(error)
+        if a_locked:
+            b[axis] = a[axis] + desired_delta
+        elif b_locked:
+            a[axis] = b[axis] - desired_delta
+        else:
+            midpoint = 0.5 * (a[axis] + b[axis])
+            a[axis] = midpoint - 0.5 * desired_delta
+            b[axis] = midpoint + 0.5 * desired_delta
+        positions[point_a_id] = (a[0], a[1])
+        positions[point_b_id] = (b[0], b[1])
         return abs(error)
 
     def _apply_radius(
@@ -526,37 +593,60 @@ class SketchSolver:
         locked_axes: dict[str, list[bool]],
         tolerance: float,
     ) -> float:
-        """refs = [p1, p2, p3]. All three points must be collinear."""
+        """All referenced points must lie on the same best-fit line."""
+        if len(refs) < 3:
+            return 0.0
+        coords = [positions[ref] for ref in refs]
+        cx = sum(x for x, _ in coords) / len(coords)
+        cy = sum(y for _, y in coords) / len(coords)
+        sxx = sum((x - cx) * (x - cx) for x, _ in coords)
+        syy = sum((y - cy) * (y - cy) for _, y in coords)
+        sxy = sum((x - cx) * (y - cy) for x, y in coords)
+        angle = 0.5 * math.atan2(2.0 * sxy, sxx - syy)
+        ux = math.cos(angle)
+        uy = math.sin(angle)
         max_err = 0.0
-        # For each point, project it onto the line defined by the other two (Gauss-Seidel)
-        for i in range(3):
-            ia, ib = [j for j in range(3) if j != i]
-            ax, ay = positions[refs[ia]]
-            bx, by = positions[refs[ib]]
-            px, py = positions[refs[i]]
-            dx, dy = bx - ax, by - ay
-            length = math.hypot(dx, dy)
-            if length < 1e-12:
-                continue
-            ux, uy = dx / length, dy / length
-            # Distance from p to line AB
-            cross = (px - ax) * uy - (py - ay) * ux
+        for ref in refs:
+            px, py = positions[ref]
+            cross = (px - cx) * uy - (py - cy) * ux
             error = abs(cross)
             max_err = max(max_err, error)
-            if error <= tolerance:
+            if error <= tolerance or all(locked_axes[ref]):
                 continue
-            if all(locked_axes[refs[i]]):
-                continue
-            # Project p onto line AB
-            t_proj = (px - ax) * ux + (py - ay) * uy
-            proj_x = ax + t_proj * ux
-            proj_y = ay + t_proj * uy
-            alpha = 0.5
-            positions[refs[i]] = (
-                px + alpha * (proj_x - px),
-                py + alpha * (proj_y - py),
+            t_proj = (px - cx) * ux + (py - cy) * uy
+            proj_x = cx + t_proj * ux
+            proj_y = cy + t_proj * uy
+            positions[ref] = (
+                px + 0.5 * (proj_x - px),
+                py + 0.5 * (proj_y - py),
             )
         return max_err
+
+    def _apply_point_on_line(
+        self,
+        point_id: str,
+        line_point_ids: list[str],
+        positions: dict[str, tuple[float, float]],
+        locked_axes: dict[str, list[bool]],
+        tolerance: float,
+    ) -> float:
+        if len(line_point_ids) < 2:
+            return 0.0
+        ax, ay = positions[line_point_ids[0]]
+        bx, by = positions[line_point_ids[1]]
+        px, py = positions[point_id]
+        dx, dy = bx - ax, by - ay
+        length = math.hypot(dx, dy)
+        if length < 1e-12:
+            return 0.0
+        ux, uy = dx / length, dy / length
+        cross = (px - ax) * uy - (py - ay) * ux
+        error = abs(cross)
+        if error <= tolerance or all(locked_axes[point_id]):
+            return error
+        t_proj = (px - ax) * ux + (py - ay) * uy
+        positions[point_id] = (ax + t_proj * ux, ay + t_proj * uy)
+        return error
 
     def _apply_symmetric(
         self,

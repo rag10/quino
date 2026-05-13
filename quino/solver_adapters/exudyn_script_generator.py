@@ -148,22 +148,22 @@ def _generate_joints(assembled: AssembledMechanism) -> list[str]:
         a = joint.endpoint_a
         b = joint.endpoint_b
         if a.kind is JointEndpointKind.MARKER and b.kind is JointEndpointKind.MARKER:
-            lines.extend(_marker_to_marker_joint(assembled, a, b, joint.type))
+            lines.extend(_marker_to_marker_joint(assembled, joint, a, b, joint.type))
         elif a.kind is JointEndpointKind.MARKER and b.kind is JointEndpointKind.GROUND:
-            lines.extend(_marker_to_ground_joint(assembled, a, joint.type))
+            lines.extend(_marker_to_ground_joint(assembled, joint, a, joint.type))
         elif b.kind is JointEndpointKind.MARKER and a.kind is JointEndpointKind.GROUND:
-            lines.extend(_marker_to_ground_joint(assembled, b, joint.type))
+            lines.extend(_marker_to_ground_joint(assembled, joint, b, joint.type))
         elif a.kind is JointEndpointKind.MARKER and b.kind is JointEndpointKind.SLIDER:
-            lines.extend(_marker_to_slider_joint(assembled, a, b, joint.type, joint.name))
+            lines.extend(_marker_to_slider_joint(assembled, joint, a, b, joint.type, joint.name))
         elif b.kind is JointEndpointKind.MARKER and a.kind is JointEndpointKind.SLIDER:
-            lines.extend(_marker_to_slider_joint(assembled, b, a, joint.type, joint.name))
+            lines.extend(_marker_to_slider_joint(assembled, joint, b, a, joint.type, joint.name))
         else:
             lines.append(f"# Unsupported joint topology: {joint.name}")
     lines.append("")
     return lines
 
 
-def _marker_to_marker_joint(assembled: AssembledMechanism, endpoint_a, endpoint_b, joint_type) -> list[str]:
+def _marker_to_marker_joint(assembled: AssembledMechanism, joint, endpoint_a, endpoint_b, joint_type) -> list[str]:
     lines: list[str] = []
     body_a = assembled.bodies[endpoint_a.body_id]
     body_b = assembled.bodies[endpoint_b.body_id]
@@ -190,10 +190,11 @@ def _marker_to_marker_joint(assembled: AssembledMechanism, endpoint_a, endpoint_
             f"mbs.CreateCoordinateConstraint(bodyNumbers=[body_{ba}, body_{bb}], "
             f"coordinates=[2, 2], offset=0.0)"
         )
+    lines.extend(_joint_friction_lines(assembled, joint))
     return lines
 
 
-def _marker_to_ground_joint(assembled: AssembledMechanism, endpoint, joint_type) -> list[str]:
+def _marker_to_ground_joint(assembled: AssembledMechanism, joint, endpoint, joint_type) -> list[str]:
     lines: list[str] = []
     body = assembled.bodies[endpoint.body_id]
     marker = body.markers[endpoint.marker_id]
@@ -217,11 +218,12 @@ def _marker_to_ground_joint(assembled: AssembledMechanism, endpoint, joint_type)
             f"mbs.CreateCoordinateConstraint(bodyNumbers=[ground_object, body_{b}], "
             f"coordinates=[None, 2], offset=0.0)"
         )
+    lines.extend(_joint_friction_lines(assembled, joint))
     return lines
 
 
 def _marker_to_slider_joint(
-    assembled: AssembledMechanism, endpoint_a, endpoint_b, joint_type, joint_name
+    assembled: AssembledMechanism, joint, endpoint_a, endpoint_b, joint_type, joint_name
 ) -> list[str]:
     lines: list[str] = []
     body = assembled.bodies[endpoint_a.body_id]
@@ -252,6 +254,54 @@ def _marker_to_slider_joint(
             f"coordinates=[None, 2], offset=0.0)"
         )
     lines.extend(_slider_limit_stops(assembled, slider, body, marker, body.body_id, joint_name))
+    lines.extend(_joint_friction_lines(assembled, joint))
+    return lines
+
+
+def _joint_friction_lines(assembled: AssembledMechanism, joint) -> list[str]:
+    try:
+        coulomb = float(joint.metadata.values.get("friction_coulomb", 0.0))
+        viscous = float(joint.metadata.values.get("friction_viscous", 0.0))
+    except (TypeError, ValueError):
+        return []
+    if abs(coulomb) <= 1e-12 and abs(viscous) <= 1e-12:
+        return []
+    safe_joint = _safe_var(joint.id)
+    lines: list[str] = []
+    lines.append(f"def _joint_friction_{safe_joint}(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):")
+    lines.append("    sign = 1.0 if velocity > 1e-12 else -1.0 if velocity < -1e-12 else 0.0")
+    lines.append(f"    return -({viscous} * float(velocity) + {coulomb} * sign)")
+    lines.append("")
+    if joint.endpoint_a.kind is JointEndpointKind.SLIDER or joint.endpoint_b.kind is JointEndpointKind.SLIDER:
+        marker_endpoint = joint.endpoint_a if joint.endpoint_a.kind is JointEndpointKind.MARKER else joint.endpoint_b
+        slider_endpoint = joint.endpoint_a if joint.endpoint_a.kind is JointEndpointKind.SLIDER else joint.endpoint_b
+        body = assembled.bodies[marker_endpoint.body_id]
+        marker = body.markers[marker_endpoint.marker_id]
+        slider = assembled.sliders[slider_endpoint.slider_id]
+        b = _safe_var(body.body_id)
+        lines.append(
+            f"frtm_{safe_joint} = mbs.AddMarker(item_interface.MarkerBodiesRelativeTranslationCoordinate("
+            f"bodyNumbers=[ground_object, body_{b}], "
+            f"localPosition0=[{slider.origin_x}, {slider.origin_y}, 0.0], "
+            f"localPosition1=[{marker.local_x}, {marker.local_y}, 0.0], "
+            f"axis0=[{slider.axis_x}, {slider.axis_y}, 0.0], offset=0.0))"
+        )
+        lines.append(
+            f"frgn_{safe_joint} = mbs.AddNode(item_interface.NodePointGround(referenceCoordinates=[0.0, 0.0, 0.0]))"
+        )
+        lines.append(
+            f"frzm_{safe_joint} = mbs.AddMarker(item_interface.MarkerNodeCoordinate(nodeNumber=frgn_{safe_joint}, coordinate=0))"
+        )
+        marker_list = f"[frtm_{safe_joint}, frzm_{safe_joint}]"
+    else:
+        marker_lines, marker_names = _rotation_coordinate_markers(assembled, joint)
+        lines.extend(marker_lines)
+        marker_list = "[" + ", ".join(marker_names) + "]"
+    lines.append(
+        f"mbs.AddObject(item_interface.ObjectConnectorCoordinateSpringDamper("
+        f"name={_py_repr(joint.name + '_friction')}, markerNumbers={marker_list}, "
+        f"stiffness=0.0, damping=0.0, springForceUserFunction=_joint_friction_{safe_joint}))"
+    )
     return lines
 
 

@@ -19,6 +19,9 @@ _CONSTRAINT_DOF_REMOVED: dict[SketchConstraintType, int] = {
     SketchConstraintType.VERTICAL: 1,
     SketchConstraintType.COINCIDENT: 2,
     SketchConstraintType.DISTANCE: 1,
+    SketchConstraintType.HORIZONTAL_DISTANCE: 1,
+    SketchConstraintType.VERTICAL_DISTANCE: 1,
+    SketchConstraintType.RADIUS: 1,
     SketchConstraintType.PARALLEL: 1,
     SketchConstraintType.PERPENDICULAR: 1,
     SketchConstraintType.EQUAL_LENGTH: 1,
@@ -65,13 +68,17 @@ class SketchDofAnalyzer:
         point_dof: dict[str, int] = {pid: 2 for pid in all_point_ids}
 
         for constraint in sketch.constraints.values():
-            removed = _CONSTRAINT_DOF_REMOVED.get(constraint.type, 0)
+            removed = (
+                1
+                if constraint.type is SketchConstraintType.COINCIDENT and constraint.entity_references
+                else _CONSTRAINT_DOF_REMOVED.get(constraint.type, 0)
+            )
             refs = constraint.references
             if constraint.type is SketchConstraintType.FIX:
                 for ref in refs:
                     point_dof[ref] = max(0, point_dof.get(ref, 2) - 2)
             elif constraint.type is SketchConstraintType.COINCIDENT:
-                for ref in refs[:2]:
+                for ref in refs[: (1 if constraint.entity_references else 2)]:
                     point_dof[ref] = max(0, point_dof.get(ref, 2) - 1)
             elif constraint.type is SketchConstraintType.MIDPOINT:
                 for ref in refs:

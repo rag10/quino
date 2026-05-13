@@ -211,7 +211,12 @@ class ValidationService:
         else:
             spec = CONSTRAINT_SPECS.get(constraint.type)
             expected_points = spec.points if spec is not None else None
-            if expected_points is not None and (
+            point_entity_coincident = (
+                constraint.type is SketchConstraintType.COINCIDENT
+                and len(constraint.references) == 1
+                and len(constraint.entity_references) == 1
+            )
+            if expected_points is not None and not point_entity_coincident and (
                 len(constraint.references) != expected_points
                 or len(set(constraint.references)) != len(constraint.references)
             ):
@@ -219,7 +224,12 @@ class ValidationService:
                     ValidationMessage("error", "invalid_sketch_constraint", f"{constraint.name} requires {expected_points} distinct point references", constraint.id)
                 )
         spec = CONSTRAINT_SPECS.get(constraint.type)
-        if constraint.type is SketchConstraintType.DISTANCE and constraint.value is None:
+        if constraint.type in {
+            SketchConstraintType.DISTANCE,
+            SketchConstraintType.HORIZONTAL_DISTANCE,
+            SketchConstraintType.VERTICAL_DISTANCE,
+            SketchConstraintType.RADIUS,
+        } and constraint.value is None:
             report.messages.append(
                 ValidationMessage("error", "invalid_sketch_constraint", f"{constraint.name} requires a distance value", constraint.id)
             )
@@ -228,7 +238,7 @@ class ValidationService:
                 ValidationMessage("error", "invalid_sketch_constraint", f"{constraint.name} requires an angle value", constraint.id)
             )
         expected_entities = spec.entities if spec is not None else 0
-        if len(constraint.entity_references) != expected_entities:
+        if not point_entity_coincident and len(constraint.entity_references) != expected_entities:
             report.messages.append(
                 ValidationMessage("error", "invalid_sketch_constraint", f"{constraint.name} requires {expected_entities} entity references", constraint.id)
             )

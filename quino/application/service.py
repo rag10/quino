@@ -60,6 +60,7 @@ from quino.solver_adapters.exudyn_adapter import ExudynAdapter
 
 class ApplicationService:
     schema_version = "0.1.0"
+    _PLAIN_NUMBER_RE = re.compile(r"^\s*[-+]?(?:\d+(?:[.,]\d*)?|[.,]\d+)\s*$")
 
     _STYLE_FIELD_TYPES: dict[str, type] = {
         "color": str,
@@ -103,6 +104,7 @@ class ApplicationService:
         self._sync_id_service()
         self._undo_stack.clear()
         self._redo_stack.clear()
+        self._sync_all_special_com_markers()
         if self.project is not None and self.project.sketch is not None:
             self.project.sketch.solve_error = None
             self._apply_sketch_constraints(set())
@@ -145,6 +147,7 @@ class ApplicationService:
         parameter.expression = new_expression
         parameter.unit = new_unit
         parameter.description = new_description
+        self._sync_all_special_com_markers()
 
     def delete_parameter(self, parameter_id: str) -> None:
         project = self._require_project()
@@ -386,8 +389,13 @@ class ApplicationService:
         label_position: tuple[float, float] | None = None,
     ) -> None:
         constraint = self._find_sketch_constraint(constraint_id)
-        if constraint.type is not SketchConstraintType.DISTANCE:
-            raise ValueError("Only distance constraints can be edited with this helper")
+        if constraint.type not in {
+            SketchConstraintType.DISTANCE,
+            SketchConstraintType.HORIZONTAL_DISTANCE,
+            SketchConstraintType.VERTICAL_DISTANCE,
+            SketchConstraintType.RADIUS,
+        }:
+            raise ValueError("Only distance/radius constraints can be edited with this helper")
         with self._operation():
             scalar = self._scalar(value, "mm", Dimension.LENGTH)
             eval_result = self.expression_service.evaluate_property(scalar, self._require_project().parameters)
@@ -413,22 +421,28 @@ class ApplicationService:
             if isinstance(entity, SketchPoint):
                 refs.append(entity.id)
             elif isinstance(entity, (SketchLineSegment, SketchInfiniteLine)):
-                refs.extend(self._line_point_ids(entity))
+                if ctype is SketchConstraintType.COINCIDENT:
+                    entity_refs.append(entity.id)
+                else:
+                    refs.extend(self._line_point_ids(entity))
             elif isinstance(entity, (SketchCircle, SketchArc)):
                 if ctype is SketchConstraintType.COINCIDENT:
-                    refs.append(entity.center_point_id)
+                    entity_refs.append(entity.id)
                 else:
                     entity_refs.append(entity.id)
         if ctype in {
             SketchConstraintType.HORIZONTAL,
             SketchConstraintType.VERTICAL,
             SketchConstraintType.DISTANCE,
+            SketchConstraintType.HORIZONTAL_DISTANCE,
+            SketchConstraintType.VERTICAL_DISTANCE,
+            SketchConstraintType.RADIUS,
             SketchConstraintType.COINCIDENT,
             SketchConstraintType.MIDPOINT,
             SketchConstraintType.COLLINEAR,
             SketchConstraintType.SYMMETRIC,
         }:
-            return self.create_sketch_constraint(ctype.value, refs, value=value)
+            return self.create_sketch_constraint(ctype.value, refs, value=value, entity_references=entity_refs or None)
         if ctype in {
             SketchConstraintType.PARALLEL,
             SketchConstraintType.PERPENDICULAR,
@@ -453,10 +467,17 @@ class ApplicationService:
         constraint_enum = SketchConstraintType(constraint_type)
         normalized_refs = list(references)
         normalized_entity_refs = list(entity_references) if entity_references else []
+        if constraint_enum is SketchConstraintType.DISTANCE and len(normalized_refs) == 1 and len(normalized_entity_refs) == 1:
+            constraint_enum = SketchConstraintType.RADIUS
         self._validate_sketch_constraint_references(constraint_enum, normalized_refs, normalized_entity_refs)
         scalar_value = None
-        if constraint_enum is SketchConstraintType.DISTANCE:
-            is_radius_form = (len(normalized_refs) == 1 and len(normalized_entity_refs) == 1)
+        if constraint_enum in {
+            SketchConstraintType.DISTANCE,
+            SketchConstraintType.HORIZONTAL_DISTANCE,
+            SketchConstraintType.VERTICAL_DISTANCE,
+            SketchConstraintType.RADIUS,
+        }:
+            is_radius_form = constraint_enum is SketchConstraintType.RADIUS
             if is_radius_form:
                 entity = self._find_sketch_entity(normalized_entity_refs[0])
                 if value is None:
@@ -466,6 +487,14 @@ class ApplicationService:
                     default_value = f"{current_radius:.6g} mm"
                 else:
                     default_value = value
+            elif constraint_enum is SketchConstraintType.HORIZONTAL_DISTANCE:
+                default_value = value or self._current_sketch_projected_distance_expression(
+                    normalized_refs[0], normalized_refs[1], axis=0
+                )
+            elif constraint_enum is SketchConstraintType.VERTICAL_DISTANCE:
+                default_value = value or self._current_sketch_projected_distance_expression(
+                    normalized_refs[0], normalized_refs[1], axis=1
+                )
             else:
                 default_value = value or self._current_sketch_distance_expression(
                     normalized_refs[0], normalized_refs[1]
@@ -478,6 +507,7 @@ class ApplicationService:
             default_value = value or self._current_sketch_angle_expression(
                 normalized_refs[0], normalized_refs[1], normalized_refs[2]
             )
+            default_value = self._normalize_angle_expression(default_value)
             scalar_value = self._scalar(default_value, "deg", Dimension.ANGLE)
             angle_eval = self.expression_service.evaluate_property(scalar_value, project.parameters)
             if angle_eval.value == 0.0:
@@ -504,7 +534,11 @@ class ApplicationService:
         self._validate_sketch_constraint_name(constraint.name)
         self._snapshot()
         sketch.constraints[constraint.id] = constraint
-        locked_refs = {normalized_refs[0]} if normalized_refs else set()
+        locked_refs = (
+            set()
+            if constraint_enum is SketchConstraintType.COINCIDENT and normalized_entity_refs
+            else ({normalized_refs[0]} if normalized_refs else set())
+        )
         self._apply_sketch_constraints(locked_refs)
         return constraint.id
 
@@ -519,23 +553,54 @@ class ApplicationService:
             constraint.name = value.value
             return
         if property_path == "value":
-            if constraint.type not in {SketchConstraintType.DISTANCE, SketchConstraintType.ANGLE}:
+            if constraint.type not in {
+                SketchConstraintType.DISTANCE,
+                SketchConstraintType.HORIZONTAL_DISTANCE,
+                SketchConstraintType.VERTICAL_DISTANCE,
+                SketchConstraintType.RADIUS,
+                SketchConstraintType.ANGLE,
+            }:
                 raise ValueError("Only distance and angle constraints expose a scalar value")
             if value.kind != "expression" or not isinstance(value.value, str):
                 raise ValueError("Constraint value requires an expression input")
-            if constraint.type is SketchConstraintType.DISTANCE:
+            if constraint.type in {
+                SketchConstraintType.DISTANCE,
+                SketchConstraintType.HORIZONTAL_DISTANCE,
+                SketchConstraintType.VERTICAL_DISTANCE,
+                SketchConstraintType.RADIUS,
+            }:
                 scalar = self._scalar(value.value, "mm", Dimension.LENGTH)
                 eval_result = self.expression_service.evaluate_property(scalar, project.parameters)
                 if eval_result.value <= 0:
                     raise ValueError("Distance constraint must be positive")
             else:
-                scalar = self._scalar(value.value, "deg", Dimension.ANGLE)
+                scalar = self._scalar(self._normalize_angle_expression(value.value), "deg", Dimension.ANGLE)
                 eval_result = self.expression_service.evaluate_property(scalar, project.parameters)
                 if eval_result.value == 0.0:
                     raise ValueError("Angle constraint value cannot be zero")
             self._snapshot()
             constraint.value = scalar
             self._apply_sketch_constraints({constraint.references[0]} if constraint.references else set())
+            return
+        if property_path in {"label_x", "label_y"}:
+            if constraint.type not in {
+                SketchConstraintType.DISTANCE,
+                SketchConstraintType.HORIZONTAL_DISTANCE,
+                SketchConstraintType.VERTICAL_DISTANCE,
+                SketchConstraintType.RADIUS,
+            }:
+                raise ValueError("Only distance/radius constraints expose label position")
+            if value.kind != "expression" or not isinstance(value.value, str):
+                raise ValueError("Constraint label position requires an expression input")
+            scalar = self._scalar(value.value, "mm", Dimension.LENGTH)
+            eval_result = self.expression_service.evaluate_property(scalar, project.parameters)
+            label_x, label_y = self._current_sketch_constraint_label_position(constraint)
+            if property_path == "label_x":
+                label_x = eval_result.value
+            else:
+                label_y = eval_result.value
+            self._snapshot()
+            constraint.metadata.values["label_position"] = [label_x, label_y]
             return
         raise ValueError(f"Unsupported sketch constraint property path: {property_path}")
 
@@ -722,6 +787,7 @@ class ApplicationService:
         elif body.type is BodyType.POINT_MASS and len(body.structural_markers()) > 1:
             body.type = BodyType.BODY
             body.closed_shape = True
+        self._sync_special_com_marker(body)
         return created.id
 
     def add_marker_to_body_at(
@@ -809,6 +875,7 @@ class ApplicationService:
         self._ensure_joint_not_duplicate(joint)
         self._snapshot()
         project.model.joints.append(joint)
+        self._entity_index = None
         return joint.id
 
     def create_rigid_joint(
@@ -962,11 +1029,27 @@ class ApplicationService:
         parameter.expression = expression
         parameter.unit = unit
         parameter.description = description
+        self._sync_all_special_com_markers()
 
     def move_marker(self, marker_id: str, x_expression: str, y_expression: str) -> None:
         marker = self._find_entity(marker_id)
         if not isinstance(marker, Marker):
             raise ValueError("move_marker requires a marker entity")
+        body = self._find_body_by_marker(marker_id)
+        if marker.type is MarkerType.COM:
+            if body.type is BodyType.POINT_MASS:
+                raise ValueError("CoM of a point mass cannot be moved independently")
+            if body.type is BodyType.BAR:
+                project = self._require_project()
+                new_x = ScalarProperty(expression=x_expression, unit=marker.x.unit, expected_dimension=Dimension.LENGTH)
+                new_y = ScalarProperty(expression=y_expression, unit=marker.y.unit, expected_dimension=Dimension.LENGTH)
+                target_x_eval = self.expression_service.evaluate_property(new_x, project.parameters)
+                target_y_eval = self.expression_service.evaluate_property(new_y, project.parameters)
+                target_x = self.unit_service.convert(self.unit_service.quantity(target_x_eval.value, target_x_eval.unit), "mm")
+                target_y = self.unit_service.convert(self.unit_service.quantity(target_y_eval.value, target_y_eval.unit), "mm")
+                self._snapshot()
+                self._set_bar_com_from_point(body, target_x, target_y)
+                return
         project = self._require_project()
         new_x = ScalarProperty(expression=x_expression, unit=marker.x.unit, expected_dimension=Dimension.LENGTH)
         new_y = ScalarProperty(expression=y_expression, unit=marker.y.unit, expected_dimension=Dimension.LENGTH)
@@ -988,16 +1071,31 @@ class ApplicationService:
             marker.x = new_x
             marker.y = new_y
             self._translate_direct_joint_counterparts(marker_id, linked_joints, delta_x, delta_y)
+            self._sync_special_com_marker(body)
             return
         self._snapshot()
         marker.x = new_x
         marker.y = new_y
+        self._sync_special_com_marker(body)
 
     def update_property(self, entity_id: str, property_path: str, value: PropertyValueInput) -> None:
         if entity_id == "__gravity__":
             self._update_gravity_property(property_path, value)
             return
         entity = self._find_entity(entity_id)
+        if isinstance(entity, Marker) and entity.type is MarkerType.COM:
+            body = self._find_body_by_marker(entity.id)
+            if property_path in {"x", "y"}:
+                if body.type is BodyType.POINT_MASS:
+                    raise ValueError("CoM of a point mass cannot be moved independently")
+                if body.type is BodyType.BAR:
+                    raise ValueError("Bar CoM must be edited with position_percent or position_distance")
+            if body.type is BodyType.BAR and property_path in {"position_percent", "position_distance"}:
+                self._update_bar_com_property(body, property_path, value)
+                return
+        if isinstance(entity, Joint) and property_path in {"friction_coulomb", "friction_viscous"}:
+            self._update_joint_friction_property(entity, property_path, value)
+            return
         if isinstance(entity, Marker) and property_path in {"x", "y"}:
             if value.kind != "expression" or not isinstance(value.value, str):
                 raise ValueError("Marker coordinates require an expression value")
@@ -1172,6 +1270,7 @@ class ApplicationService:
             body.closed_shape = False
         elif body.type is BodyType.BODY and len(body.structural_markers()) == 2:
             body.closed_shape = True
+        self._sync_special_com_marker(body)
 
     def validate_model(self, duration: float = 1.0, steps: int = 20) -> ValidationReport:
         project = self._require_project()
@@ -1270,7 +1369,7 @@ class ApplicationService:
         y_vals = [self.expression_service.evaluate_property(m.y, project.parameters).value for m in structural]
         x_avg = sum(x_vals) / len(x_vals) if x_vals else 0.0
         y_avg = sum(y_vals) / len(y_vals) if y_vals else 0.0
-        return Marker(
+        com_marker = Marker(
             id=self.id_service.new("marker"),
             name="CoM",
             type=MarkerType.COM,
@@ -1278,12 +1377,119 @@ class ApplicationService:
             y=self._scalar(self._mm_expression(y_avg), "mm", Dimension.LENGTH),
             visible=False,
         )
+        if body.type is BodyType.BAR and len(structural) == 2:
+            com_marker.metadata.values["position_percent"] = 50.0
+        return com_marker
 
     def _scalar(self, expression: str, unit: str, dimension: Dimension) -> ScalarProperty:
         return ScalarProperty(expression=expression, unit=unit, expected_dimension=dimension)
 
     def _mm_expression(self, value: float) -> str:
         return f"{value:.6g} mm"
+
+    def _sync_all_special_com_markers(self) -> None:
+        project = self.project
+        if project is None:
+            return
+        for body in project.model.bodies:
+            self._sync_special_com_marker(body)
+
+    def _sync_special_com_marker(self, body: Body) -> None:
+        com_marker = body.com_marker()
+        structural = body.structural_markers()
+        if body.type is BodyType.POINT_MASS and len(structural) == 1:
+            base = structural[0]
+            com_marker.x = self._scalar(base.x.expression, base.x.unit, Dimension.LENGTH)
+            com_marker.y = self._scalar(base.y.expression, base.y.unit, Dimension.LENGTH)
+            com_marker.metadata.values.pop("position_percent", None)
+            return
+        if body.type is BodyType.BAR and len(structural) == 2:
+            self._set_bar_com_from_percent(body, self._bar_com_percent(body))
+
+    def _bar_structural_data(self, body: Body) -> tuple[Marker, Marker, float, float, float, float]:
+        if body.type is not BodyType.BAR or len(body.structural_markers()) != 2:
+            raise ValueError("Bar CoM helpers require a bar with exactly two structural markers")
+        first, second = body.structural_markers()
+        project = self._require_project()
+        x1 = self.expression_service.evaluate_property(first.x, project.parameters).value
+        y1 = self.expression_service.evaluate_property(first.y, project.parameters).value
+        x2 = self.expression_service.evaluate_property(second.x, project.parameters).value
+        y2 = self.expression_service.evaluate_property(second.y, project.parameters).value
+        return first, second, x1, y1, x2, y2
+
+    def _bar_length(self, body: Body) -> float:
+        _, _, x1, y1, x2, y2 = self._bar_structural_data(body)
+        return math.hypot(x2 - x1, y2 - y1)
+
+    def _bar_com_percent(self, body: Body) -> float:
+        com_marker = body.com_marker()
+        stored = com_marker.metadata.values.get("position_percent")
+        if stored is not None:
+            try:
+                return max(0.0, min(100.0, float(stored)))
+            except (TypeError, ValueError):
+                pass
+        _, _, x1, y1, x2, y2 = self._bar_structural_data(body)
+        length_sq = (x2 - x1) ** 2 + (y2 - y1) ** 2
+        if length_sq <= 1e-12:
+            return 0.0
+        project = self._require_project()
+        cx = self.expression_service.evaluate_property(com_marker.x, project.parameters).value
+        cy = self.expression_service.evaluate_property(com_marker.y, project.parameters).value
+        t = ((cx - x1) * (x2 - x1) + (cy - y1) * (y2 - y1)) / length_sq
+        return max(0.0, min(100.0, t * 100.0))
+
+    def _set_bar_com_from_percent(self, body: Body, percent: float) -> None:
+        com_marker = body.com_marker()
+        _, _, x1, y1, x2, y2 = self._bar_structural_data(body)
+        clamped = max(0.0, min(100.0, percent))
+        t = clamped / 100.0
+        cx = x1 + t * (x2 - x1)
+        cy = y1 + t * (y2 - y1)
+        com_marker.x = self._scalar(self._mm_expression(cx), "mm", Dimension.LENGTH)
+        com_marker.y = self._scalar(self._mm_expression(cy), "mm", Dimension.LENGTH)
+        com_marker.metadata.values["position_percent"] = clamped
+
+    def _set_bar_com_from_distance(self, body: Body, distance_mm: float) -> None:
+        length = self._bar_length(body)
+        if length <= 1e-12:
+            self._set_bar_com_from_percent(body, 0.0)
+            return
+        clamped_distance = max(0.0, min(distance_mm, length))
+        self._set_bar_com_from_percent(body, clamped_distance / length * 100.0)
+
+    def _set_bar_com_from_point(self, body: Body, x: float, y: float) -> None:
+        _, _, x1, y1, x2, y2 = self._bar_structural_data(body)
+        dx = x2 - x1
+        dy = y2 - y1
+        length_sq = dx * dx + dy * dy
+        if length_sq <= 1e-12:
+            self._set_bar_com_from_percent(body, 0.0)
+            return
+        t = ((x - x1) * dx + (y - y1) * dy) / length_sq
+        self._set_bar_com_from_percent(body, t * 100.0)
+
+    def _update_bar_com_property(self, body: Body, property_path: str, value: PropertyValueInput) -> None:
+        if value.kind != "expression" or not isinstance(value.value, str):
+            raise ValueError("Bar CoM properties require an expression value")
+        if property_path == "position_percent":
+            try:
+                percent = float(value.value.strip().replace(",", "."))
+            except ValueError as exc:
+                raise ValueError("position_percent must be a number between 0 and 100") from exc
+            self._snapshot()
+            self._set_bar_com_from_percent(body, percent)
+            return
+        scalar = self._scalar(value.value, "mm", Dimension.LENGTH)
+        evaluated = self.expression_service.evaluate_property(scalar, self._require_project().parameters)
+        self._snapshot()
+        self._set_bar_com_from_distance(body, evaluated.value)
+
+    def _normalize_angle_expression(self, expression: str) -> str:
+        stripped = expression.strip()
+        if self._PLAIN_NUMBER_RE.fullmatch(stripped):
+            return f"{stripped} deg"
+        return expression
 
     def _is_literal_expression(self, expression: str) -> bool:
         """Return True if expression is a plain number with optional unit (no parameters)."""
@@ -1459,6 +1665,33 @@ class ApplicationService:
         self._snapshot()
         setattr(gravity, path, float_val)
 
+    def joint_friction_mode(self, joint: Joint) -> str | None:
+        if joint.endpoint_a.kind is JointEndpointKind.SLIDER or joint.endpoint_b.kind is JointEndpointKind.SLIDER:
+            return "translation"
+        if joint.type is JointType.REVOLUTE:
+            return "rotation"
+        return None
+
+    def joint_friction_values(self, joint: Joint) -> tuple[float, float]:
+        coulomb = joint.metadata.values.get("friction_coulomb", 0.0)
+        viscous = joint.metadata.values.get("friction_viscous", 0.0)
+        try:
+            return float(coulomb), float(viscous)
+        except (TypeError, ValueError):
+            return 0.0, 0.0
+
+    def _update_joint_friction_property(self, joint: Joint, path: str, value: PropertyValueInput) -> None:
+        if self.joint_friction_mode(joint) is None:
+            raise ValueError("This joint topology does not support friction")
+        if value.kind != "expression" or not isinstance(value.value, str):
+            raise ValueError(f"{path} requires a numeric value")
+        try:
+            numeric = float(value.value.strip().replace(",", "."))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{path} must be a number") from exc
+        self._snapshot()
+        joint.metadata.values[path] = numeric
+
     def _apply_style_update(self, entity: object, property_path: str, value: PropertyValueInput) -> None:
         field = property_path.split(".", 1)[1]
         expected_type = self._STYLE_FIELD_TYPES.get(field)
@@ -1588,6 +1821,9 @@ class ApplicationService:
             SketchConstraintType.HORIZONTAL: "Horizontal",
             SketchConstraintType.VERTICAL: "Vertical",
             SketchConstraintType.DISTANCE: "Distance",
+            SketchConstraintType.HORIZONTAL_DISTANCE: "HorizontalDistance",
+            SketchConstraintType.VERTICAL_DISTANCE: "VerticalDistance",
+            SketchConstraintType.RADIUS: "Radius",
             SketchConstraintType.COINCIDENT: "Coincident",
             SketchConstraintType.PARALLEL: "Parallel",
             SketchConstraintType.PERPENDICULAR: "Perpendicular",
@@ -1609,12 +1845,22 @@ class ApplicationService:
         for point_id in references:
             self._ensure_sketch_point_exists(point_id)
         # Special case: DISTANCE with 1 point + 1 circle entity = radius constraint
-        if constraint_type is SketchConstraintType.DISTANCE:
+        if constraint_type in {
+            SketchConstraintType.DISTANCE,
+            SketchConstraintType.HORIZONTAL_DISTANCE,
+            SketchConstraintType.VERTICAL_DISTANCE,
+            SketchConstraintType.RADIUS,
+        }:
             if len(references) == 1 and len(entity_references or []) == 1:
                 entity = self._find_sketch_entity((entity_references or [])[0])
                 if not isinstance(entity, (SketchCircle, SketchArc)):
                     raise ValueError("Distance radius constraint requires a circle or arc entity reference")
                 return  # valid radius form — skip generic checks below
+        if constraint_type is SketchConstraintType.COINCIDENT and len(references) == 1 and len(entity_references or []) == 1:
+            entity = self._find_sketch_entity((entity_references or [])[0])
+            if not isinstance(entity, (SketchLineSegment, SketchInfiniteLine, SketchCircle, SketchArc)):
+                raise ValueError("Coincident point-entity constraint requires a line, circle, or arc entity reference")
+            return
         spec = CONSTRAINT_SPECS.get(constraint_type)
         expected_pts = spec.points if spec is not None else 2
         if len(references) != expected_pts:
@@ -1682,6 +1928,43 @@ class ApplicationService:
         bx = self._evaluate_sketch_expression(point_b.x, project.parameters)
         by = self._evaluate_sketch_expression(point_b.y, project.parameters)
         return self._mm_expression(math.hypot(bx - ax, by - ay))
+
+    def _current_sketch_projected_distance_expression(self, point_a_id: str, point_b_id: str, *, axis: int) -> str:
+        project = self._require_project()
+        point_a = self._find_sketch_point(point_a_id)
+        point_b = self._find_sketch_point(point_b_id)
+        values_a = (
+            self._evaluate_sketch_expression(point_a.x, project.parameters),
+            self._evaluate_sketch_expression(point_a.y, project.parameters),
+        )
+        values_b = (
+            self._evaluate_sketch_expression(point_b.x, project.parameters),
+            self._evaluate_sketch_expression(point_b.y, project.parameters),
+        )
+        return self._mm_expression(abs(values_b[axis] - values_a[axis]))
+
+    def _current_sketch_constraint_label_position(self, constraint: SketchConstraint) -> tuple[float, float]:
+        label_position = constraint.metadata.values.get("label_position")
+        if isinstance(label_position, list) and len(label_position) == 2:
+            return float(label_position[0]), float(label_position[1])
+        project = self._require_project()
+        refs = [self._find_sketch_point(point_id) for point_id in constraint.references]
+        points = [
+            (
+                self._evaluate_sketch_expression(point.x, project.parameters),
+                self._evaluate_sketch_expression(point.y, project.parameters),
+            )
+            for point in refs
+        ]
+        if constraint.type is SketchConstraintType.RADIUS and len(points) == 1:
+            x, y = points[0]
+            return x + 10.0, y
+        if not points:
+            return 0.0, 0.0
+        return (
+            sum(point[0] for point in points) / len(points),
+            sum(point[1] for point in points) / len(points),
+        )
 
     def _sketch_signature(self, sketch: Sketch) -> str:
         import hashlib

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 from quino.gui.icons import get_icon
@@ -170,8 +171,8 @@ class MainWindow(QtWidgets.QMainWindow):
         controls_layout.addSpacing(12)
         controls_layout.addWidget(QtWidgets.QLabel("Speed:"))
         self.playback_speed_spin = QtWidgets.QDoubleSpinBox()
-        self.playback_speed_spin.setRange(0.01, 100.0)
-        self.playback_speed_spin.setDecimals(2)
+        self.playback_speed_spin.setRange(0.0005, 100.0)
+        self.playback_speed_spin.setDecimals(6)
         self.playback_speed_spin.setValue(1.0)
         self.playback_speed_spin.setSuffix(" x")
         self.playback_speed_spin.setMaximumWidth(80)
@@ -209,6 +210,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.duration_spin.valueChanged.connect(self._on_duration_changed)
         self.steps_spin.valueChanged.connect(self._on_steps_changed)
         self.dt_spin.valueChanged.connect(self._on_dt_changed)
+        self.playback_speed_spin.valueChanged.connect(self._on_playback_speed_changed)
+        self._update_simulation_spin_steps()
 
         playback_layout.addWidget(playback_group)
         center_panel.addWidget(playback_widget)
@@ -408,7 +411,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.action_toggle_gravity = QtGui.QAction(get_icon("load-gravity", color_base), "Gravity", self)
         self.action_toggle_gravity.setCheckable(True)
-        self.action_toggle_gravity.setChecked(True)
+        self.action_toggle_gravity.setChecked(False)
         self.action_toggle_gravity.setToolTip("Enable gravity (LoadMassProportional)")
         self.action_toggle_gravity.triggered.connect(self._on_toggle_gravity)
 
@@ -440,6 +443,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_sketch_horizontal_tool = self._tool_action("Horz", CanvasMode.CREATE_SKETCH_HORIZONTAL, get_icon("constraint-horizontal", color_sketch), "Constrain two sketch points horizontally")
         self.action_sketch_vertical_tool = self._tool_action("Vert", CanvasMode.CREATE_SKETCH_VERTICAL, get_icon("constraint-vertical", color_sketch), "Constrain two sketch points vertically")
         self.action_sketch_distance_tool = self._tool_action("Dist", CanvasMode.CREATE_SKETCH_DISTANCE, get_icon("constraint-distance", color_sketch), "Constrain the distance between two sketch points")
+        self.action_sketch_horizontal_distance_tool = self._tool_action("HDist", CanvasMode.CREATE_SKETCH_HORIZONTAL_DISTANCE, get_icon("constraint-horizontal", color_sketch), "Constrain the horizontal projected distance between two sketch points")
+        self.action_sketch_vertical_distance_tool = self._tool_action("VDist", CanvasMode.CREATE_SKETCH_VERTICAL_DISTANCE, get_icon("constraint-vertical", color_sketch), "Constrain the vertical projected distance between two sketch points")
         self.action_sketch_coincident_tool = self._tool_action("Coinc", CanvasMode.CREATE_SKETCH_COINCIDENT, get_icon("constraint-coincident", color_sketch), "Constrain two sketch points to coincide")
         self.action_sketch_parallel_tool = self._tool_action("Parallel", CanvasMode.CREATE_SKETCH_PARALLEL, get_icon("parallel", color_sketch), "Constrain two line segments to be parallel (click 2 segments)")
         self.action_sketch_perpendicular_tool = self._tool_action("Perp", CanvasMode.CREATE_SKETCH_PERPENDICULAR, get_icon("perpendicular", color_sketch), "Constrain two line segments to be perpendicular (click 2 segments)")
@@ -482,6 +487,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_sketch_horizontal_tool,
             self.action_sketch_vertical_tool,
             self.action_sketch_distance_tool,
+            self.action_sketch_horizontal_distance_tool,
+            self.action_sketch_vertical_distance_tool,
             self.action_sketch_coincident_tool,
             self.action_sketch_parallel_tool,
             self.action_sketch_perpendicular_tool,
@@ -674,7 +681,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._add_toolbar_block(t, [
             [self.action_sketch_fix_tool, self.action_sketch_horizontal_tool, self.action_sketch_vertical_tool, self.action_sketch_coincident_tool, self.action_sketch_distance_tool],
-            [self.action_sketch_angle_tool, self.action_sketch_midpoint_tool, self.action_sketch_collinear_tool, self.action_sketch_symmetric_tool, self.action_sketch_on_circle_tool],
+            [self.action_sketch_horizontal_distance_tool, self.action_sketch_vertical_distance_tool, self.action_sketch_angle_tool, self.action_sketch_midpoint_tool, self.action_sketch_collinear_tool],
+            [self.action_sketch_symmetric_tool, self.action_sketch_on_circle_tool, None, None, None],
         ], "Point")
         self._add_toolbar_sep(t)
 
@@ -1041,6 +1049,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.dt_spin.setValue(actual_dt)
             finally:
                 self._suspend_simulation_config_updates = False
+        self._update_simulation_spin_steps()
+        self._discard_simulation_for_parameter_change("Simulation discarded because duration changed")
 
     def _on_steps_changed(self) -> None:
         if self._suspend_simulation_config_updates:
@@ -1054,6 +1064,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.dt_spin.setValue(dt)
             finally:
                 self._suspend_simulation_config_updates = False
+        self._update_simulation_spin_steps()
+        self._discard_simulation_for_parameter_change("Simulation discarded because frame count changed")
 
     def _on_dt_changed(self) -> None:
         if self._suspend_simulation_config_updates:
@@ -1069,6 +1081,30 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.dt_spin.setValue(actual_dt)
             finally:
                 self._suspend_simulation_config_updates = False
+        self._update_simulation_spin_steps()
+        self._discard_simulation_for_parameter_change("Simulation discarded because delta t changed")
+
+    def _on_playback_speed_changed(self) -> None:
+        self._update_simulation_spin_steps()
+
+    def _update_simulation_spin_steps(self) -> None:
+        self.steps_spin.setSingleStep(self._adaptive_frame_step(self.steps_spin.value()))
+        self.dt_spin.setSingleStep(self._adaptive_fractional_step(self.dt_spin.value()))
+        self.playback_speed_spin.setSingleStep(self._adaptive_fractional_step(self.playback_speed_spin.value()))
+
+    def _adaptive_frame_step(self, value: int) -> int:
+        return max(1, value // 10)
+
+    def _adaptive_fractional_step(self, value: float) -> float:
+        magnitude = abs(value)
+        if magnitude <= 0.0:
+            return 0.0005
+        exponent = math.floor(math.log10(magnitude))
+        return 0.5 * (10 ** exponent)
+
+    def _discard_simulation_for_parameter_change(self, message: str) -> None:
+        if self._has_simulation_frames():
+            self._clear_simulation_state(message)
 
     def _apply_current_frame(self) -> None:
         frame = None
@@ -1543,6 +1579,7 @@ class MainWindow(QtWidgets.QMainWindow):
         CanvasMode.CREATE_SKETCH_INFINITE_LINE,
         CanvasMode.CREATE_SKETCH_FIX, CanvasMode.CREATE_SKETCH_HORIZONTAL,
         CanvasMode.CREATE_SKETCH_VERTICAL, CanvasMode.CREATE_SKETCH_DISTANCE,
+        CanvasMode.CREATE_SKETCH_HORIZONTAL_DISTANCE, CanvasMode.CREATE_SKETCH_VERTICAL_DISTANCE,
         CanvasMode.CREATE_SKETCH_COINCIDENT,
         CanvasMode.CREATE_SKETCH_PARALLEL, CanvasMode.CREATE_SKETCH_PERPENDICULAR,
         CanvasMode.CREATE_SKETCH_EQUAL_LENGTH, CanvasMode.CREATE_SKETCH_ANGLE,
@@ -1611,6 +1648,8 @@ class MainWindow(QtWidgets.QMainWindow):
             CanvasMode.CREATE_SKETCH_HORIZONTAL: self.action_sketch_horizontal_tool,
             CanvasMode.CREATE_SKETCH_VERTICAL: self.action_sketch_vertical_tool,
             CanvasMode.CREATE_SKETCH_DISTANCE: self.action_sketch_distance_tool,
+            CanvasMode.CREATE_SKETCH_HORIZONTAL_DISTANCE: self.action_sketch_horizontal_distance_tool,
+            CanvasMode.CREATE_SKETCH_VERTICAL_DISTANCE: self.action_sketch_vertical_distance_tool,
             CanvasMode.CREATE_SKETCH_COINCIDENT: self.action_sketch_coincident_tool,
             CanvasMode.CREATE_SKETCH_PARALLEL: self.action_sketch_parallel_tool,
             CanvasMode.CREATE_SKETCH_PERPENDICULAR: self.action_sketch_perpendicular_tool,
@@ -1822,6 +1861,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 "horizontal": "constraint-horizontal",
                 "vertical": "constraint-vertical",
                 "distance": "constraint-distance",
+                "horizontal_distance": "constraint-horizontal",
+                "vertical_distance": "constraint-vertical",
                 "coincident": "constraint-coincident",
             }.get(entity.type.value, "constraint-distance")
         return ""
@@ -1848,8 +1889,21 @@ class MainWindow(QtWidgets.QMainWindow):
             prop("inertia", "inertia", entity.inertia.expression if entity.inertia else "", "expression_or_null", self._evaluate_scalar(entity.inertia))
 
         elif isinstance(entity, Marker):
-            prop("x", "x", entity.x.expression, "expression", self._evaluate_scalar(entity.x))
-            prop("y", "y", entity.y.expression, "expression", self._evaluate_scalar(entity.y))
+            body = self.app_service.get_body_by_marker(entity.id)
+            if entity.type is MarkerType.COM and body is not None and body.type.value == "point_mass":
+                prop("x", "x", entity.x.expression, "readonly", self._evaluate_scalar(entity.x))
+                prop("y", "y", entity.y.expression, "readonly", self._evaluate_scalar(entity.y))
+            elif entity.type is MarkerType.COM and body is not None and body.type.value == "bar":
+                percent = float(entity.metadata.values.get("position_percent", 50.0))
+                length = self.app_service._bar_length(body)
+                distance = length * percent / 100.0
+                prop("position_percent", "position_percent", f"{percent:.6g}", "expression", f"{percent:.6g} %")
+                prop("position_distance", "position_distance", f"{distance:.6g} mm", "expression", f"{distance:.6g} mm")
+                prop("x", "x", entity.x.expression, "readonly", self._evaluate_scalar(entity.x))
+                prop("y", "y", entity.y.expression, "readonly", self._evaluate_scalar(entity.y))
+            else:
+                prop("x", "x", entity.x.expression, "expression", self._evaluate_scalar(entity.x))
+                prop("y", "y", entity.y.expression, "expression", self._evaluate_scalar(entity.y))
             prop("visible", "visible", str(entity.visible).lower(), "boolean", str(entity.visible).lower())
 
         elif isinstance(entity, Slider):
@@ -1861,6 +1915,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
         elif isinstance(entity, Joint):
             prop("type", "", entity.type.value, "readonly", entity.type.value)
+            friction_mode = self.app_service.joint_friction_mode(entity)
+            if friction_mode == "rotation":
+                coulomb, viscous = self.app_service.joint_friction_values(entity)
+                prop("friction_coulomb", "friction_coulomb", f"{coulomb:.6g}", "expression", f"{coulomb:.6g}")
+                prop("friction_viscous", "friction_viscous", f"{viscous:.6g}", "expression", f"{viscous:.6g}")
+            elif friction_mode == "translation":
+                coulomb, viscous = self.app_service.joint_friction_values(entity)
+                prop("friction_coulomb", "friction_coulomb", f"{coulomb:.6g}", "expression", f"{coulomb:.6g}")
+                prop("friction_viscous", "friction_viscous", f"{viscous:.6g}", "expression", f"{viscous:.6g}")
 
         elif isinstance(entity, Driver):
             prop("type", "", entity.type.value, "readonly", entity.type.value)
@@ -1923,6 +1986,15 @@ class MainWindow(QtWidgets.QMainWindow):
             prop("type", "", entity.type.value, "readonly", entity.type.value)
             if entity.value is not None:
                 prop("value", "value", entity.value.expression, "expression", self._evaluate_scalar(entity.value))
+            if entity.type in {
+                SketchConstraintType.DISTANCE,
+                SketchConstraintType.HORIZONTAL_DISTANCE,
+                SketchConstraintType.VERTICAL_DISTANCE,
+                SketchConstraintType.RADIUS,
+            }:
+                label_x, label_y = self.app_service._current_sketch_constraint_label_position(entity)
+                prop("label_x", "label_x", f"{label_x:.6g} mm", "expression", f"{label_x:.6g} mm")
+                prop("label_y", "label_y", f"{label_y:.6g} mm", "expression", f"{label_y:.6g} mm")
 
         elif isinstance(entity, GravityLoad):
             prop("magnitude", "magnitude", str(entity.magnitude), "expression", str(entity.magnitude))
@@ -2307,6 +2379,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_sketch_horizontal_tool,
             self.action_sketch_vertical_tool,
             self.action_sketch_distance_tool,
+            self.action_sketch_horizontal_distance_tool,
+            self.action_sketch_vertical_distance_tool,
             self.action_sketch_coincident_tool,
             self.action_sketch_parallel_tool,
             self.action_sketch_perpendicular_tool,

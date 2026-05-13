@@ -148,6 +148,8 @@ class ExudynAdapter(SolverAdapter):
         body_objects, node_numbers, body_order = self._create_bodies(mbs, item_interface, assembled)
         for joint in assembled.joints:
             self._create_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, joint)
+        for joint in assembled.joints:
+            self._add_joint_friction(mbs, item_interface, assembled, node_numbers, body_objects, ground_object, joint)
         for driver in assembled.drivers:
             self._create_driver(
                 mbs,
@@ -419,6 +421,69 @@ class ExudynAdapter(SolverAdapter):
             body_object=body_objects[body.body_id],
             ground_object=ground_object,
         )
+
+    def _add_joint_friction(
+        self,
+        mbs,
+        item_interface,
+        assembled: AssembledMechanism,
+        node_numbers: dict[str, int],
+        body_objects: dict[str, int],
+        ground_object: int,
+        joint: Joint,
+    ) -> None:
+        mode = None
+        if joint.endpoint_a.kind is JointEndpointKind.SLIDER or joint.endpoint_b.kind is JointEndpointKind.SLIDER:
+            mode = "translation"
+        elif joint.type is JointType.REVOLUTE:
+            mode = "rotation"
+        if mode is None:
+            return
+        try:
+            coulomb = float(joint.metadata.values.get("friction_coulomb", 0.0))
+            viscous = float(joint.metadata.values.get("friction_viscous", 0.0))
+        except (TypeError, ValueError):
+            return
+        if abs(coulomb) <= 1e-12 and abs(viscous) <= 1e-12:
+            return
+        if mode == "rotation":
+            marker_numbers = self._rotation_coordinate_markers(mbs, item_interface, node_numbers, ground_object, joint)
+        else:
+            marker_endpoint = joint.endpoint_a if joint.endpoint_a.kind is JointEndpointKind.MARKER else joint.endpoint_b
+            slider_endpoint = joint.endpoint_a if joint.endpoint_a.kind is JointEndpointKind.SLIDER else joint.endpoint_b
+            body = assembled.bodies[marker_endpoint.body_id]
+            marker = body.markers[marker_endpoint.marker_id]
+            slider = assembled.sliders[slider_endpoint.slider_id]
+            relative_translation_marker = mbs.AddMarker(
+                item_interface.MarkerBodiesRelativeTranslationCoordinate(
+                    bodyNumbers=[ground_object, body_objects[body.body_id]],
+                    localPosition0=[slider.origin_x, slider.origin_y, 0.0],
+                    localPosition1=[marker.local_x, marker.local_y, 0.0],
+                    axis0=[slider.axis_x, slider.axis_y, 0.0],
+                    offset=0.0,
+                )
+            )
+            friction_ground_node = mbs.AddNode(item_interface.NodePointGround(referenceCoordinates=[0.0, 0.0, 0.0]))
+            zero_coordinate_marker = mbs.AddMarker(
+                item_interface.MarkerNodeCoordinate(nodeNumber=friction_ground_node, coordinate=0)
+            )
+            marker_numbers = [relative_translation_marker, zero_coordinate_marker]
+        mbs.AddObject(
+            item_interface.ObjectConnectorCoordinateSpringDamper(
+                name=f"{joint.name}_friction",
+                markerNumbers=marker_numbers,
+                stiffness=0.0,
+                damping=0.0,
+                springForceUserFunction=self._make_friction_force_function(coulomb, viscous),
+            )
+        )
+
+    def _make_friction_force_function(self, coulomb: float, viscous: float):
+        def friction_force_fn(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):
+            sign = 1.0 if velocity > 1e-12 else -1.0 if velocity < -1e-12 else 0.0
+            return -(viscous * float(velocity) + coulomb * sign)
+
+        return friction_force_fn
 
     def _add_slider_limit_stops(self, mbs, item_interface, slider: AssembledSlider, body: AssembledBody, marker, body_object: int, ground_object: int) -> None:
         if slider.travel_min is None and slider.travel_max is None:

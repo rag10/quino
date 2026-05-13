@@ -52,6 +52,89 @@ def test_point_mass_body_type() -> None:
     assert app._find_body(body_id).type.value == "point_mass"
 
 
+def test_point_mass_com_follows_only_marker() -> None:
+    app = make_app()
+    body_id = app.create_body("Mass1", [MarkerInput("10 mm", "20 mm", "P")])
+    body = app._find_body(body_id)
+    marker = body.structural_markers()[0]
+    com = body.com_marker()
+
+    assert com.x.expression == marker.x.expression
+    assert com.y.expression == marker.y.expression
+
+    app.move_marker(marker.id, "30 mm", "40 mm")
+
+    assert com.x.expression == "30 mm"
+    assert com.y.expression == "40 mm"
+
+
+def test_point_mass_com_cannot_be_moved_independently() -> None:
+    app = make_app()
+    body_id = app.create_body("Mass1", [MarkerInput("0 mm", "0 mm", "P")])
+    com = app._find_body(body_id).com_marker()
+
+    with pytest.raises(ValueError, match="cannot be moved independently"):
+        app.move_marker(com.id, "10 mm", "0 mm")
+
+
+def test_bar_com_is_edited_by_percent_and_distance() -> None:
+    app = make_app()
+    body_id = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    body = app._find_body(body_id)
+    com = body.com_marker()
+
+    app.update_property(com.id, "position_percent", PropertyValueInput("expression", "25"))
+    assert _mm(app, com.x.expression) == pytest.approx(25.0)
+    assert _mm(app, com.y.expression) == pytest.approx(0.0)
+
+    app.update_property(com.id, "position_distance", PropertyValueInput("expression", "60 mm"))
+    assert _mm(app, com.x.expression) == pytest.approx(60.0)
+    assert _mm(app, com.y.expression) == pytest.approx(0.0)
+
+
+def test_bar_com_stays_relative_when_bar_markers_move() -> None:
+    app = make_app()
+    body_id = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    body = app._find_body(body_id)
+    first, second = body.structural_markers()
+    com = body.com_marker()
+
+    app.update_property(com.id, "position_percent", PropertyValueInput("expression", "25"))
+    app.move_marker(second.id, "200 mm", "0 mm")
+    assert _mm(app, com.x.expression) == pytest.approx(50.0)
+
+    app.move_marker(first.id, "100 mm", "100 mm")
+    assert _mm(app, com.x.expression) == pytest.approx(125.0)
+    assert _mm(app, com.y.expression) == pytest.approx(75.0)
+
+
+def test_bar_com_updates_when_parameter_changes_marker_position() -> None:
+    app = make_app()
+    body_id = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("L1", "0 mm", "B"))
+    body = app._find_body(body_id)
+    com = body.com_marker()
+
+    app.update_property(com.id, "position_percent", PropertyValueInput("expression", "25"))
+    assert _mm(app, com.x.expression) == pytest.approx(30.0)
+
+    parameter = next(p for p in app.project.parameters if p.name == "L1")
+    app.update_parameter(parameter.id, expression="200 mm")
+
+    assert _mm(app, com.x.expression) == pytest.approx(50.0)
+
+
+def test_bar_com_drag_is_projected_to_segment() -> None:
+    app = make_app()
+    body_id = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    body = app._find_body(body_id)
+    com = body.com_marker()
+
+    app.move_marker(com.id, "30 mm", "40 mm")
+
+    assert _mm(app, com.x.expression) == pytest.approx(30.0)
+    assert _mm(app, com.y.expression) == pytest.approx(0.0)
+
+
 def test_joint_duplicates_are_rejected() -> None:
     app = make_app()
     body_id = app.create_bar("Crank", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("L1", "0 mm", "B"))
@@ -86,6 +169,40 @@ def test_update_property_supports_expression_boolean_and_null() -> None:
 
     app.update_property(body.id, "mass", PropertyValueInput("null", None))
     assert body.mass is None
+
+
+def test_joint_friction_properties_can_be_edited() -> None:
+    app = make_app()
+    body1 = app.create_bar("Crank", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    body2 = app.create_bar("Rod", MarkerInput("100 mm", "0 mm", "C"), MarkerInput("200 mm", "0 mm", "D"))
+    joint_id = app.create_joint(
+        "Joint1",
+        "revolute",
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body1, marker_id=next(m.id for m in app._find_body(body1).markers if m.name == "B")),
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body2, marker_id=next(m.id for m in app._find_body(body2).markers if m.name == "C")),
+    )
+    joint = app.get_joint(joint_id)
+
+    app.update_property(joint_id, "friction_coulomb", PropertyValueInput("expression", "2.5"))
+    app.update_property(joint_id, "friction_viscous", PropertyValueInput("expression", "0.1"))
+
+    assert app.joint_friction_mode(joint) == "rotation"
+    assert app.joint_friction_values(joint) == pytest.approx((2.5, 0.1))
+
+
+def test_slider_joint_friction_properties_can_be_edited() -> None:
+    app = make_app()
+    body = app.create_body("Block", [MarkerInput("0 mm", "0 mm", "P")])
+    slider_id = app.create_slider("Guide", SliderInput("0 mm", "0 mm", "0 deg"))
+    marker_id = next(m.id for m in app._find_body(body).markers if m.name == "P")
+    joint_id = app.connect_marker_to_slider(marker_id, slider_id, name="SliderJoint")
+    joint = app.get_joint(joint_id)
+
+    app.update_property(joint_id, "friction_coulomb", PropertyValueInput("expression", "5"))
+    app.update_property(joint_id, "friction_viscous", PropertyValueInput("expression", "0.25"))
+
+    assert app.joint_friction_mode(joint) == "translation"
+    assert app.joint_friction_values(joint) == pytest.approx((5.0, 0.25))
 
 
 def test_move_marker_translates_only_direct_joint_counterparts() -> None:
@@ -551,10 +668,10 @@ def test_validate_model_reports_unreachable_four_bar_loop() -> None:
 # Gravity feature tests
 
 
-def test_gravity_defaults_to_enabled() -> None:
-    """New project has gravity enabled by default."""
+def test_gravity_defaults_to_disabled() -> None:
+    """New project has gravity disabled by default."""
     app = make_app()
-    assert app.project.model.gravity.enabled is True
+    assert app.project.model.gravity.enabled is False
     assert app.project.model.gravity.magnitude == 9.81
     assert app.project.model.gravity.direction_x == 0.0
     assert app.project.model.gravity.direction_y == -1.0
@@ -563,7 +680,7 @@ def test_gravity_defaults_to_enabled() -> None:
 def test_toggle_gravity_disables_gravity() -> None:
     """toggle_gravity(False) disables gravity."""
     app = make_app()
-    assert app.project.model.gravity.enabled is True
+    assert app.project.model.gravity.enabled is False
     app.toggle_gravity(False)
     assert app.project.model.gravity.enabled is False
 
@@ -660,23 +777,23 @@ def test_backward_compat_old_project_without_gravity() -> None:
 
     mapper = JsonMapper()
     project = mapper.load(data)
-    assert project.model.gravity.enabled is True
+    assert project.model.gravity.enabled is False
     assert project.model.gravity.magnitude == 9.81
 
 
 def test_gravity_update_undoable() -> None:
     """Gravity changes are tracked by undo/redo."""
     app = make_app()
-    assert app.project.model.gravity.enabled is True
-
-    app.toggle_gravity(False)
     assert app.project.model.gravity.enabled is False
+
+    app.toggle_gravity(True)
+    assert app.project.model.gravity.enabled is True
 
     assert app.undo() is True
-    assert app.project.model.gravity.enabled is True
+    assert app.project.model.gravity.enabled is False
 
     assert app.redo() is True
-    assert app.project.model.gravity.enabled is False
+    assert app.project.model.gravity.enabled is True
 
 
 def test_update_gravity_magnitude_undoable() -> None:
@@ -884,6 +1001,48 @@ def test_sketch_solver_handles_parallel_midpoint_angle_and_on_circle() -> None:
     d2x, d2y = vbx - vx, vby - vy
     angle = abs(math.degrees(math.atan2(d1x * d2y - d1y * d2x, d1x * d2x + d1y * d2y)))
     assert abs(angle - 45.0) < 1.0
+
+
+def test_sketch_coincident_accepts_point_on_line_and_circle() -> None:
+    app = make_app()
+    app.new_project("SketchCoincidentEntities")
+    a = app.create_sketch_point("0 mm", "0 mm", "A")
+    b = app.create_sketch_point("10 mm", "0 mm", "B")
+    p_line = app.create_sketch_point("5 mm", "4 mm", "P")
+    center = app.create_sketch_point("30 mm", "0 mm", "O")
+    p_circle = app.create_sketch_point("34 mm", "3 mm", "Q")
+    line_id = app.create_sketch_line_segment(a, b, "L1")
+    circle_id = app.create_sketch_circle(center, "10 mm", "C1")
+
+    app.create_sketch_constraint("coincident", [p_line], entity_references=[line_id])
+    app.create_sketch_constraint("coincident", [p_circle], entity_references=[circle_id])
+
+    line_point = app._find_sketch_point(p_line)
+    circle_point = app._find_sketch_point(p_circle)
+    assert abs(float(line_point.y.text.split()[0])) < 1e-3
+    qx = float(circle_point.x.text.split()[0])
+    qy = float(circle_point.y.text.split()[0])
+    assert abs(math.hypot(qx - 30.0, qy) - 10.0) < 1e-3
+
+
+def test_collinear_constraint_accepts_two_segments() -> None:
+    app = make_app()
+    app.new_project("SketchCollinearSegments")
+    a = app.create_sketch_point("0 mm", "0 mm", "A")
+    b = app.create_sketch_point("10 mm", "0 mm", "B")
+    c = app.create_sketch_point("20 mm", "3 mm", "C")
+    d = app.create_sketch_point("30 mm", "3 mm", "D")
+
+    constraint_id = app.create_sketch_constraint("collinear", [a, b, c, d])
+    assert constraint_id is not None
+
+    points = [app._find_sketch_point(pid) for pid in (a, b, c, d)]
+    coords = [(float(point.x.text.split()[0]), float(point.y.text.split()[0])) for point in points]
+    ax, ay = coords[0]
+    bx, by = coords[1]
+    for px, py in coords[2:]:
+        cross = (bx - ax) * (py - ay) - (by - ay) * (px - ax)
+        assert abs(cross) < 1e-3
 
 
 def test_sketch_solver_handles_tangent_constraint() -> None:
@@ -1215,6 +1374,21 @@ def test_changing_distance_value_invalidates_solve_cache() -> None:
     assert abs(x2 - 80.0) < 1e-4, f"After updating distance to 80mm, got x2={x2}"
 
 
+def test_angle_constraint_accepts_unitless_numeric_value_as_degrees() -> None:
+    app = make_app()
+    p1 = app.create_sketch_point("0 mm", "0 mm")
+    p2 = app.create_sketch_point("10 mm", "0 mm")
+    p3 = app.create_sketch_point("10 mm", "10 mm")
+
+    constraint_id = app.create_sketch_constraint("angle", [p1, p2, p3], value="45")
+    constraint = app._find_sketch_constraint(constraint_id)
+    assert constraint.value is not None
+    assert constraint.value.expression == "45 deg"
+
+    app.update_sketch_constraint(constraint_id, "value", PropertyValueInput(kind="expression", value="90"))
+    assert constraint.value.expression == "90 deg"
+
+
 def test_distance_on_circle_constrains_radius() -> None:
     """DISTANCE constraint on a circle with entity_ref enforces its radius."""
     app = make_app()
@@ -1228,6 +1402,7 @@ def test_distance_on_circle_constrains_radius() -> None:
         entity_references=[circle_id],
     )
     assert constraint_id is not None
+    assert app._find_sketch_constraint(constraint_id).type.value == "radius"
     project = app.project
     circle = app.get_entity(circle_id)
     result = app.sketch_solver.solve(project)
@@ -1247,6 +1422,50 @@ def test_distance_on_circle_rejected_without_entity_ref() -> None:
     app.create_sketch_circle(center_id, "50 mm")
     with pytest.raises(ValueError):
         app.create_sketch_constraint("distance", [center_id])
+
+
+def test_projected_distance_constraints_follow_axis_projection() -> None:
+    app = make_app()
+    app.new_project("SketchProjectedDistance")
+    p1 = app.create_sketch_point("0 mm", "0 mm", "A")
+    p2 = app.create_sketch_point("40 mm", "10 mm", "B")
+
+    horizontal_id = app.create_sketch_constraint("horizontal_distance", [p1, p2], value="50 mm")
+    vertical_id = app.create_sketch_constraint("vertical_distance", [p1, p2], value="15 mm")
+
+    point_a = app._find_sketch_point(p1)
+    point_b = app._find_sketch_point(p2)
+    ax = float(point_a.x.text.split()[0])
+    ay = float(point_a.y.text.split()[0])
+    bx = float(point_b.x.text.split()[0])
+    by = float(point_b.y.text.split()[0])
+    assert abs(abs(bx - ax) - 50.0) < 1e-6
+    assert abs(abs(by - ay) - 15.0) < 1e-6
+
+    app.update_sketch_constraint(horizontal_id, "value", PropertyValueInput("expression", "60 mm"))
+    app.update_sketch_constraint(vertical_id, "value", PropertyValueInput("expression", "20 mm"))
+
+    point_a = app._find_sketch_point(p1)
+    point_b = app._find_sketch_point(p2)
+    ax = float(point_a.x.text.split()[0])
+    ay = float(point_a.y.text.split()[0])
+    bx = float(point_b.x.text.split()[0])
+    by = float(point_b.y.text.split()[0])
+    assert abs(abs(bx - ax) - 60.0) < 1e-6
+    assert abs(abs(by - ay) - 20.0) < 1e-6
+
+
+def test_distance_constraint_label_position_can_be_edited() -> None:
+    app = make_app()
+    p1 = app.create_sketch_point("0 mm", "0 mm")
+    p2 = app.create_sketch_point("40 mm", "0 mm")
+    constraint_id = app.create_sketch_constraint("distance", [p1, p2], value="40 mm")
+
+    app.update_sketch_constraint(constraint_id, "label_x", PropertyValueInput("expression", "12 mm"))
+    app.update_sketch_constraint(constraint_id, "label_y", PropertyValueInput("expression", "18 mm"))
+
+    constraint = app._find_sketch_constraint(constraint_id)
+    assert constraint.metadata.values["label_position"] == pytest.approx([12.0, 18.0])
 
 
 def test_solver_near_convergence_succeeds() -> None:

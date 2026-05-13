@@ -298,6 +298,94 @@ def test_translation_driver_is_relative_to_initial_slider_coordinate(monkeypatch
     assert driver_constraint["offsetUserFunction"](None, 1.0, 0, 0.0) == pytest.approx(-60.0)
 
 
+def test_revolute_joint_friction_creates_coordinate_spring_damper(monkeypatch) -> None:
+    fake_sc = _FakeSystemContainer()
+    fake_exu = types.SimpleNamespace(
+        SystemContainer=lambda: fake_sc,
+        OutputVariableType=types.SimpleNamespace(Coordinates="Coordinates"),
+    )
+    fake_exu.SimulationSettings = lambda: types.SimpleNamespace(
+        timeIntegration=types.SimpleNamespace(numberOfSteps=0, endTime=0.0),
+        staticSolver=types.SimpleNamespace(numberOfLoadSteps=0),
+        solutionSettings=types.SimpleNamespace(writeSolutionToFile=True),
+    )
+    fake_item_interface = _FakeItemInterface()
+
+    def fake_import_module(name: str):
+        if name == "exudyn":
+            return fake_exu
+        if name == "exudyn.itemInterface":
+            return fake_item_interface
+        raise ImportError(name)
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object() if name == "exudyn" else None)
+    monkeypatch.setattr(importlib, "import_module", fake_import_module)
+
+    app = ApplicationService()
+    app.new_project("JointFriction")
+    body1 = app.create_bar("Crank", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    body2 = app.create_bar("Rod", MarkerInput("100 mm", "0 mm", "C"), MarkerInput("200 mm", "0 mm", "D"))
+    joint_id = app.create_joint(
+        "Joint1",
+        "revolute",
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body1, marker_id=next(m.id for m in app._find_body(body1).markers if m.name == "B")),
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body2, marker_id=next(m.id for m in app._find_body(body2).markers if m.name == "C")),
+    )
+    app.update_property(joint_id, "friction_coulomb", PropertyValueInput("expression", "2.0"))
+    app.update_property(joint_id, "friction_viscous", PropertyValueInput("expression", "0.5"))
+
+    result = app.run_kinematic_simulation()
+
+    assert result.success is True
+    friction_objects = [
+        obj for obj in fake_sc.mbs.objects
+        if obj["kind"] == "ObjectConnectorCoordinateSpringDamper" and obj.get("name") == "Joint1_friction"
+    ]
+    assert friction_objects
+
+
+def test_slider_joint_friction_creates_coordinate_spring_damper(monkeypatch) -> None:
+    fake_sc = _FakeSystemContainer()
+    fake_exu = types.SimpleNamespace(
+        SystemContainer=lambda: fake_sc,
+        OutputVariableType=types.SimpleNamespace(Coordinates="Coordinates"),
+    )
+    fake_exu.SimulationSettings = lambda: types.SimpleNamespace(
+        timeIntegration=types.SimpleNamespace(numberOfSteps=0, endTime=0.0),
+        staticSolver=types.SimpleNamespace(numberOfLoadSteps=0),
+        solutionSettings=types.SimpleNamespace(writeSolutionToFile=True),
+    )
+    fake_item_interface = _FakeItemInterface()
+
+    def fake_import_module(name: str):
+        if name == "exudyn":
+            return fake_exu
+        if name == "exudyn.itemInterface":
+            return fake_item_interface
+        raise ImportError(name)
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object() if name == "exudyn" else None)
+    monkeypatch.setattr(importlib, "import_module", fake_import_module)
+
+    app = ApplicationService()
+    app.new_project("SliderFriction")
+    body = app.create_body("Block", [MarkerInput("0 mm", "0 mm", "P")])
+    slider_id = app.create_slider("Guide", SliderInput("0 mm", "0 mm", "0 deg"))
+    marker_id = next(m.id for m in app._find_body(body).markers if m.name == "P")
+    joint_id = app.connect_marker_to_slider(marker_id, slider_id, name="SliderJoint")
+    app.update_property(joint_id, "friction_coulomb", PropertyValueInput("expression", "4.0"))
+    app.update_property(joint_id, "friction_viscous", PropertyValueInput("expression", "0.2"))
+
+    result = app.run_kinematic_simulation()
+
+    assert result.success is True
+    friction_objects = [
+        obj for obj in fake_sc.mbs.objects
+        if obj["kind"] == "ObjectConnectorCoordinateSpringDamper" and obj.get("name") == "SliderJoint_friction"
+    ]
+    assert friction_objects
+
+
 def test_exudyn_adapter_returns_partial_frames_when_dynamic_solve_fails(monkeypatch) -> None:
     class _FailingPartialMbs(_FakeMbs):
         def SolveDynamic(self, simulationSettings=None):
@@ -701,6 +789,7 @@ def test_exudyn_script_includes_gravity() -> None:
     # Add mass to one body so gravity loads are generated
     for body in app.project.model.bodies:
         app.update_property(body.id, "mass", PropertyValueInput("expression", "1 kg"))
+    app.toggle_gravity(True)
     adapter = ExudynAdapter(app.expression_service)
     script = adapter.export_script(app.project, duration=1.0, steps=10)
 
@@ -739,7 +828,7 @@ def test_gravity_enabled_produces_loads() -> None:
     body_id = app.create_body("Body1", [MarkerInput("0 mm", "0 mm", "P")])
     app.update_property(body_id, "mass", PropertyValueInput("expression", "1 kg"))
 
-    # Gravity is enabled by default
+    app.toggle_gravity(True)
     assert app.project.model.gravity.enabled is True
 
     # Generate script
@@ -759,6 +848,7 @@ def test_custom_gravity_parameters_applied() -> None:
     app.new_project("CustomGravityTest")
     body_id = app.create_body("Body1", [MarkerInput("0 mm", "0 mm", "P")])
     app.update_property(body_id, "mass", PropertyValueInput("expression", "1 kg"))
+    app.toggle_gravity(True)
 
     # Set custom gravity
     app.update_property(
@@ -792,6 +882,7 @@ def test_gravity_with_zero_direction_components() -> None:
     app.new_project("ZeroGravityTest")
     body_id = app.create_body("Body1", [MarkerInput("0 mm", "0 mm", "P")])
     app.update_property(body_id, "mass", PropertyValueInput("expression", "1 kg"))
+    app.toggle_gravity(True)
 
     # Set gravity to all zeros (effectively disables it)
     app.update_property(
@@ -824,6 +915,7 @@ def test_gravity_direction_normalization() -> None:
     app.new_project("DirectionNormTest")
     body_id = app.create_body("Body1", [MarkerInput("0 mm", "0 mm", "P")])
     app.update_property(body_id, "mass", PropertyValueInput("expression", "2 kg"))
+    app.toggle_gravity(True)
 
     # Set custom gravity with non-unit direction vector
     app.update_property(

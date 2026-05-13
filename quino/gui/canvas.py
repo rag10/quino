@@ -108,6 +108,8 @@ class CanvasMode:
     CREATE_SKETCH_HORIZONTAL = "create_sketch_horizontal"
     CREATE_SKETCH_VERTICAL = "create_sketch_vertical"
     CREATE_SKETCH_DISTANCE = "create_sketch_distance"
+    CREATE_SKETCH_HORIZONTAL_DISTANCE = "create_sketch_horizontal_distance"
+    CREATE_SKETCH_VERTICAL_DISTANCE = "create_sketch_vertical_distance"
     CREATE_SKETCH_COINCIDENT = "create_sketch_coincident"
     CREATE_SKETCH_PARALLEL = "create_sketch_parallel"
     CREATE_SKETCH_PERPENDICULAR = "create_sketch_perpendicular"
@@ -127,6 +129,8 @@ _CONSTRAINT_MODE_TO_TYPE: dict[str, SketchConstraintType] = {
     CanvasMode.CREATE_SKETCH_HORIZONTAL:    SketchConstraintType.HORIZONTAL,
     CanvasMode.CREATE_SKETCH_VERTICAL:      SketchConstraintType.VERTICAL,
     CanvasMode.CREATE_SKETCH_DISTANCE:      SketchConstraintType.DISTANCE,
+    CanvasMode.CREATE_SKETCH_HORIZONTAL_DISTANCE: SketchConstraintType.HORIZONTAL_DISTANCE,
+    CanvasMode.CREATE_SKETCH_VERTICAL_DISTANCE: SketchConstraintType.VERTICAL_DISTANCE,
     CanvasMode.CREATE_SKETCH_COINCIDENT:    SketchConstraintType.COINCIDENT,
     CanvasMode.CREATE_SKETCH_PARALLEL:      SketchConstraintType.PARALLEL,
     CanvasMode.CREATE_SKETCH_PERPENDICULAR: SketchConstraintType.PERPENDICULAR,
@@ -162,12 +166,21 @@ _SEGMENT_PAIR_MODES: frozenset[str] = frozenset({
     CanvasMode.CREATE_SKETCH_PARALLEL,
     CanvasMode.CREATE_SKETCH_PERPENDICULAR,
     CanvasMode.CREATE_SKETCH_EQUAL_LENGTH,
+    CanvasMode.CREATE_SKETCH_COLLINEAR,
+})
+
+_LINE_TWO_POINT_CONSTRAINT_MODES: frozenset[str] = frozenset({
+    CanvasMode.CREATE_SKETCH_DISTANCE,
+    CanvasMode.CREATE_SKETCH_HORIZONTAL_DISTANCE,
+    CanvasMode.CREATE_SKETCH_VERTICAL_DISTANCE,
 })
 
 _SKETCH_CONSTRAINT_TYPE_STR: dict[str, str] = {
     CanvasMode.CREATE_SKETCH_HORIZONTAL:    "horizontal",
     CanvasMode.CREATE_SKETCH_VERTICAL:      "vertical",
     CanvasMode.CREATE_SKETCH_DISTANCE:      "distance",
+    CanvasMode.CREATE_SKETCH_HORIZONTAL_DISTANCE: "horizontal_distance",
+    CanvasMode.CREATE_SKETCH_VERTICAL_DISTANCE: "vertical_distance",
     CanvasMode.CREATE_SKETCH_COINCIDENT:    "coincident",
     CanvasMode.CREATE_SKETCH_PARALLEL:      "parallel",
     CanvasMode.CREATE_SKETCH_PERPENDICULAR: "perpendicular",
@@ -414,6 +427,8 @@ class MechanismCanvas(QtWidgets.QWidget):
             CanvasMode.CREATE_SKETCH_HORIZONTAL: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_SKETCH_VERTICAL: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_SKETCH_DISTANCE: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_HORIZONTAL_DISTANCE: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_SKETCH_VERTICAL_DISTANCE: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_SKETCH_COINCIDENT: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_SKETCH_PARALLEL: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_SKETCH_PERPENDICULAR: QtCore.Qt.CursorShape.CrossCursor,
@@ -734,6 +749,12 @@ class MechanismCanvas(QtWidgets.QWidget):
             anchor = self._sketch_entity_anchor(entity, point_map)
             if anchor is not None:
                 return self.screen_position_for_world(anchor[0], anchor[1])
+        if project.sketch is not None:
+            constraint = project.sketch.constraints.get(entity_id)
+            if constraint is not None:
+                anchor = self._sketch_constraint_anchor(constraint, point_map, self._current_transform())
+                if anchor is not None:
+                    return QtCore.QPoint(int(round(anchor.x())), int(round(anchor.y())))
         assembled = self._assembled_mechanism(project)
         markers = self._collect_markers(project, assembled)
         for marker in markers:
@@ -862,6 +883,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         clicked_joint = self._joint_at(clicked)
         clicked_driver = self._driver_at(clicked)
         clicked_load = self._load_at(clicked)
+        clicked_constraint = self._sketch_constraint_at(clicked)
         world = self._to_world(clicked, self._current_transform())
         additive_selection = bool(event.modifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier)
 
@@ -880,6 +902,9 @@ class MechanismCanvas(QtWidgets.QWidget):
                         clicked_sketch_point.y,
                     )
                 self.update()
+                return
+            if clicked_constraint is not None and self._interaction_mode in ("sketch", "all"):
+                self._select_canvas_entity(clicked_constraint, additive=additive_selection)
                 return
             if clicked_sketch_entity is not None and self._interaction_mode in ("sketch", "all"):
                 self._select_canvas_entity(clicked_sketch_entity.entity_id, additive=additive_selection)
@@ -932,9 +957,14 @@ class MechanismCanvas(QtWidgets.QWidget):
             self.set_mode(CanvasMode.SELECT)
             return
 
-        if self._mode == CanvasMode.CREATE_SKETCH_DISTANCE and self._pending_distance_constraint_refs:
+        if self._mode in {
+            CanvasMode.CREATE_SKETCH_DISTANCE,
+            CanvasMode.CREATE_SKETCH_HORIZONTAL_DISTANCE,
+            CanvasMode.CREATE_SKETCH_VERTICAL_DISTANCE,
+        } and self._pending_distance_constraint_refs:
+            constraint_type = _SKETCH_CONSTRAINT_TYPE_STR.get(self._mode, SketchConstraintType.DISTANCE.value)
             constraint_id = self.app_service.create_sketch_constraint(
-                SketchConstraintType.DISTANCE.value,
+                constraint_type,
                 list(self._pending_distance_constraint_refs),
             )
             constraint = self.app_service.project.sketch.constraints.get(constraint_id)
@@ -944,7 +974,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._sensor_marker_ids = []
             self._creation_points.clear()
             self.entitySelected.emit(constraint_id)
-            self.modelChanged.emit("Created sketch distance constraint")
+            self.modelChanged.emit(f"Created sketch {constraint_type.replace('_', ' ')} constraint")
             self.set_mode(CanvasMode.SELECT)
             return
 
@@ -1163,6 +1193,8 @@ class MechanismCanvas(QtWidgets.QWidget):
             CanvasMode.CREATE_SKETCH_HORIZONTAL,
             CanvasMode.CREATE_SKETCH_VERTICAL,
             CanvasMode.CREATE_SKETCH_DISTANCE,
+            CanvasMode.CREATE_SKETCH_HORIZONTAL_DISTANCE,
+            CanvasMode.CREATE_SKETCH_VERTICAL_DISTANCE,
             CanvasMode.CREATE_SKETCH_COINCIDENT,
             CanvasMode.CREATE_SKETCH_PARALLEL,
             CanvasMode.CREATE_SKETCH_PERPENDICULAR,
@@ -1274,11 +1306,16 @@ class MechanismCanvas(QtWidgets.QWidget):
             constraint_id = self._sketch_constraint_at(event.position())
             if constraint_id is not None:
                 constraint = self.app_service.project.sketch.constraints.get(constraint_id)
-                if constraint is not None and constraint.type is SketchConstraintType.DISTANCE and constraint.value is not None:
+                if constraint is not None and constraint.type in {
+                    SketchConstraintType.DISTANCE,
+                    SketchConstraintType.HORIZONTAL_DISTANCE,
+                    SketchConstraintType.VERTICAL_DISTANCE,
+                    SketchConstraintType.RADIUS,
+                } and constraint.value is not None:
                     value, accepted = QtWidgets.QInputDialog.getText(
                         self,
-                        "Edit Distance",
-                        "Distance:",
+                        "Edit Radius" if constraint.type is SketchConstraintType.RADIUS else "Edit Distance",
+                        "Radius:" if constraint.type is SketchConstraintType.RADIUS else "Distance:",
                         text=constraint.value.expression,
                     )
                     if accepted and value.strip():
@@ -2229,14 +2266,28 @@ class MechanismCanvas(QtWidgets.QWidget):
             if self._selected_entity_id == constraint.id:
                 color = QtGui.QColor("#c75b12")
             painter.setPen(QtGui.QPen(color, 1.1, QtCore.Qt.PenStyle.DashLine))
-            if constraint.type is SketchConstraintType.DISTANCE and len(constraint.references) == 2:
+            if constraint.type in {
+                SketchConstraintType.DISTANCE,
+                SketchConstraintType.HORIZONTAL_DISTANCE,
+                SketchConstraintType.VERTICAL_DISTANCE,
+            } and len(constraint.references) == 2:
                 p1 = point_map.get(constraint.references[0])
                 p2 = point_map.get(constraint.references[1])
                 if p1 is not None and p2 is not None:
                     s1 = self._to_screen(p1.x, p1.y, transform)
                     s2 = self._to_screen(p2.x, p2.y, transform)
-                    painter.drawLine(s1, s2)
-                    self._draw_distance_annotation(painter, s1, s2, constraint, color, transform)
+                    if constraint.type is SketchConstraintType.HORIZONTAL_DISTANCE:
+                        self._draw_projected_distance_annotation(painter, s1, s2, constraint, color, transform, axis=0)
+                    elif constraint.type is SketchConstraintType.VERTICAL_DISTANCE:
+                        self._draw_projected_distance_annotation(painter, s1, s2, constraint, color, transform, axis=1)
+                    else:
+                        painter.drawLine(s1, s2)
+                        self._draw_distance_annotation(painter, s1, s2, constraint, color, transform)
+            elif constraint.type is SketchConstraintType.RADIUS and len(constraint.references) == 1 and len(constraint.entity_references) == 1:
+                center = point_map.get(constraint.references[0])
+                entity = project.sketch.entities.get(constraint.entity_references[0]) if project.sketch is not None else None
+                if center is not None and isinstance(entity, (SketchCircle, SketchArc)):
+                    self._draw_radius_annotation(painter, center, entity, constraint, color, transform)
             elif constraint.type is SketchConstraintType.FIX and constraint.references:
                 point = point_map.get(constraint.references[0])
                 if point is not None:
@@ -2247,7 +2298,6 @@ class MechanismCanvas(QtWidgets.QWidget):
                 SketchConstraintType.PERPENDICULAR,
                 SketchConstraintType.EQUAL_LENGTH,
             } and len(constraint.references) == 4:
-                # Draw dashed line between midpoints of the two line segments
                 refs4 = [point_map.get(pid) for pid in constraint.references]
                 if all(p is not None for p in refs4):
                     mid1 = self._to_screen(
@@ -2258,7 +2308,10 @@ class MechanismCanvas(QtWidgets.QWidget):
                         0.5 * (refs4[2].x + refs4[3].x),
                         0.5 * (refs4[2].y + refs4[3].y), transform,
                     )
-                    painter.drawLine(mid1, mid2)
+                    self._draw_constraint_icon(painter, mid1, constraint.type, color)
+                    self._draw_constraint_icon(painter, mid2, constraint.type, color)
+                    self._screen_sketch_constraints.append((constraint.id, mid1))
+                    self._screen_sketch_constraints.append((constraint.id, mid2))
             elif constraint.type is SketchConstraintType.ANGLE and len(constraint.references) == 3:
                 vertex = point_map.get(constraint.references[0])
                 arm1 = point_map.get(constraint.references[1])
@@ -2328,8 +2381,13 @@ class MechanismCanvas(QtWidgets.QWidget):
                     mid = QtCore.QPointF(0.5 * (p1s.x() + p2s.x()), 0.5 * (p1s.y() + p2s.y()))
                     painter.drawRect(QtCore.QRectF(mid.x() - 3, mid.y() - 3, 6, 6))
 
-            self._draw_constraint_icon(painter, anchor, constraint.type, color)
-            self._screen_sketch_constraints.append((constraint.id, anchor))
+            if constraint.type not in {
+                SketchConstraintType.PARALLEL,
+                SketchConstraintType.PERPENDICULAR,
+                SketchConstraintType.EQUAL_LENGTH,
+            }:
+                self._draw_constraint_icon(painter, anchor, constraint.type, color)
+                self._screen_sketch_constraints.append((constraint.id, anchor))
 
     def _draw_bodies(
         self,
@@ -2782,11 +2840,20 @@ class MechanismCanvas(QtWidgets.QWidget):
             _line(7, 2, 7, 12)
             _line(4, 6, 7, 2)
             _line(10, 6, 7, 2)
-        elif constraint_type is SketchConstraintType.DISTANCE:
+        elif constraint_type in {
+            SketchConstraintType.DISTANCE,
+            SketchConstraintType.HORIZONTAL_DISTANCE,
+            SketchConstraintType.VERTICAL_DISTANCE,
+            SketchConstraintType.RADIUS,
+        }:
             _line(3, 5, 11, 5)
             _line(3, 9, 11, 9)
             _line(2, 3, 2, 7)
             _line(12, 7, 12, 11)
+            if constraint_type is SketchConstraintType.HORIZONTAL_DISTANCE:
+                _line(4, 11, 10, 11)
+            elif constraint_type is SketchConstraintType.VERTICAL_DISTANCE:
+                _line(11, 4, 11, 10)
         elif constraint_type is SketchConstraintType.COINCIDENT:
             painter.drawEllipse(QtCore.QRectF(r.x() + 2, r.y() + 4, 6, 6))
             painter.drawEllipse(QtCore.QRectF(r.x() + 6, r.y() + 4, 6, 6))
@@ -2843,6 +2910,12 @@ class MechanismCanvas(QtWidgets.QWidget):
         ux = dx / length
         uy = dy / length
         offset = 18.0
+        label_position = constraint.metadata.values.get("label_position")
+        if isinstance(label_position, list) and len(label_position) == 2:
+            label_screen = self._to_screen(float(label_position[0]), float(label_position[1]), transform)
+            mx = 0.5 * (s1.x() + s2.x())
+            my = 0.5 * (s1.y() + s2.y())
+            offset = -(label_screen.x() - mx) * uy + (label_screen.y() - my) * ux
         # Extension-line end points on the dimension line
         d1 = QtCore.QPointF(s1.x() - uy * offset, s1.y() + ux * offset)
         d2 = QtCore.QPointF(s2.x() - uy * offset, s2.y() + ux * offset)
@@ -2866,6 +2939,101 @@ class MechanismCanvas(QtWidgets.QWidget):
             except Exception:
                 pass
         mid = QtCore.QPointF(0.5 * (d1.x() + d2.x()), 0.5 * (d1.y() + d2.y()))
+        painter.setPen(QtGui.QPen(color))
+        painter.drawText(mid + QtCore.QPointF(4, -4), text)
+
+    def _draw_radius_annotation(
+        self,
+        painter: QtGui.QPainter,
+        center: CanvasSketchPoint,
+        entity: CanvasSketchEntity,
+        constraint: SketchConstraint,
+        color: QtGui.QColor,
+        transform,
+    ) -> None:
+        if entity.radius is None or entity.radius <= 1e-9:
+            return
+        center_screen = self._to_screen(center.x, center.y, transform)
+        label_position = constraint.metadata.values.get("label_position")
+        if isinstance(label_position, list) and len(label_position) == 2:
+            label_world = (float(label_position[0]), float(label_position[1]))
+            dx = label_world[0] - center.x
+            dy = label_world[1] - center.y
+        else:
+            dx = 1.0
+            dy = -0.6
+        length = math.hypot(dx, dy)
+        if length <= 1e-9:
+            dx, dy, length = 1.0, 0.0, 1.0
+        ux = dx / length
+        uy = dy / length
+        rim_world = (center.x + ux * entity.radius, center.y + uy * entity.radius)
+        rim_screen = self._to_screen(rim_world[0], rim_world[1], transform)
+        painter.setPen(QtGui.QPen(color, 1.0))
+        painter.drawLine(center_screen, rim_screen)
+        self._draw_arrow(painter, rim_screen, -ux, uy, color)
+        text = "R ?"
+        if constraint.value is not None:
+            try:
+                project = self.app_service.project
+                result = self.app_service.expression_service.evaluate_property(
+                    constraint.value, project.parameters
+                )
+                text = f"R {result.value:.4g} {result.unit}"
+            except Exception:
+                pass
+        text_anchor = rim_screen + QtCore.QPointF(8.0 * ux, -8.0 * uy)
+        painter.setPen(QtGui.QPen(color))
+        painter.drawText(text_anchor, text)
+
+    def _draw_projected_distance_annotation(
+        self,
+        painter: QtGui.QPainter,
+        s1: QtCore.QPointF,
+        s2: QtCore.QPointF,
+        constraint: SketchConstraint,
+        color: QtGui.QColor,
+        transform,
+        *,
+        axis: int,
+    ) -> None:
+        label_position = constraint.metadata.values.get("label_position")
+        if isinstance(label_position, list) and len(label_position) == 2:
+            label_screen = self._to_screen(float(label_position[0]), float(label_position[1]), transform)
+            label_axis = label_screen.y() if axis == 0 else label_screen.x()
+        else:
+            label_axis = 0.5 * (s1.y() + s2.y()) - 18.0 if axis == 0 else 0.5 * (s1.x() + s2.x()) + 18.0
+        painter.setPen(QtGui.QPen(color, 0.8, QtCore.Qt.PenStyle.DashLine))
+        if axis == 0:
+            d1 = QtCore.QPointF(s1.x(), label_axis)
+            d2 = QtCore.QPointF(s2.x(), label_axis)
+            painter.drawLine(s1, d1)
+            painter.drawLine(s2, d2)
+            painter.setPen(QtGui.QPen(color, 1.0))
+            painter.drawLine(d1, d2)
+            self._draw_arrow(painter, d1, 1.0, 0.0, color)
+            self._draw_arrow(painter, d2, -1.0, 0.0, color)
+            mid = QtCore.QPointF(0.5 * (d1.x() + d2.x()), label_axis)
+        else:
+            d1 = QtCore.QPointF(label_axis, s1.y())
+            d2 = QtCore.QPointF(label_axis, s2.y())
+            painter.drawLine(s1, d1)
+            painter.drawLine(s2, d2)
+            painter.setPen(QtGui.QPen(color, 1.0))
+            painter.drawLine(d1, d2)
+            self._draw_arrow(painter, d1, 0.0, 1.0, color)
+            self._draw_arrow(painter, d2, 0.0, -1.0, color)
+            mid = QtCore.QPointF(label_axis, 0.5 * (d1.y() + d2.y()))
+        text = "?"
+        if constraint.value is not None:
+            try:
+                project = self.app_service.project
+                result = self.app_service.expression_service.evaluate_property(
+                    constraint.value, project.parameters
+                )
+                text = f"{result.value:.4g} {result.unit}"
+            except Exception:
+                pass
         painter.setPen(QtGui.QPen(color))
         painter.drawText(mid + QtCore.QPointF(4, -4), text)
 
@@ -3100,6 +3268,22 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._creation_points.append((clicked_sketch_point.x, clicked_sketch_point.y))
                 self._sensor_marker_ids.append(clicked_sketch_point.entity_id)
 
+        elif self._mode == CanvasMode.CREATE_SKETCH_COINCIDENT:
+            if (
+                clicked_sketch_entity is not None
+                and clicked_sketch_entity.entity_type in (
+                    SketchEntityType.CIRCLE,
+                    SketchEntityType.ARC,
+                    SketchEntityType.LINE_SEGMENT,
+                    SketchEntityType.INFINITE_LINE,
+                )
+                and not self._creation_entity_ids
+            ):
+                self._creation_entity_ids.append(clicked_sketch_entity.entity_id)
+            elif clicked_sketch_point is not None and pts_left > 0:
+                self._creation_points.append((clicked_sketch_point.x, clicked_sketch_point.y))
+                self._sensor_marker_ids.append(clicked_sketch_point.entity_id)
+
         # Constraints expecting entity refs (ON_CIRCLE, TANGENT)
         elif n_ent > 0:
             if (clicked_sketch_entity is not None
@@ -3119,10 +3303,12 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._sensor_marker_ids.append(clicked_sketch_point.entity_id)
 
         # DISTANCE on circle: clicking a circle = radius constraint (1 pt + 1 entity)
-        elif (self._mode == CanvasMode.CREATE_SKETCH_DISTANCE
-              and clicked_sketch_entity is not None
-              and clicked_sketch_entity.entity_type is SketchEntityType.CIRCLE
-              and not self._sensor_marker_ids):
+        elif (
+            self._mode == CanvasMode.CREATE_SKETCH_DISTANCE
+            and clicked_sketch_entity is not None
+            and clicked_sketch_entity.entity_type is SketchEntityType.CIRCLE
+            and not self._sensor_marker_ids
+        ):
             center_id = clicked_sketch_entity.point_ids[0]
             cpt = self._canvas_sketch_point_by_id(center_id)
             if cpt:
@@ -3144,6 +3330,13 @@ class MechanismCanvas(QtWidgets.QWidget):
                         if cpt:
                             self._creation_points.append((cpt.x, cpt.y))
                             self._sensor_marker_ids.append(pid)
+                elif self._mode in _LINE_TWO_POINT_CONSTRAINT_MODES and pts_left >= 2:
+                    # Distance-like constraints can be applied directly to a segment/axis.
+                    for pid in clicked_sketch_entity.point_ids[:2]:
+                        cpt = self._canvas_sketch_point_by_id(pid)
+                        if cpt:
+                            self._creation_points.append((cpt.x, cpt.y))
+                            self._sensor_marker_ids.append(pid)
                 else:
                     nearest_id = self._nearest_endpoint_of_entity(
                         clicked_sketch_entity, self._last_mouse_screen
@@ -3157,12 +3350,14 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._creation_points.append((clicked_sketch_point.x, clicked_sketch_point.y))
                 self._sensor_marker_ids.append(clicked_sketch_point.entity_id)
 
-        collected_pts = min(len(self._sensor_marker_ids), n_pts)
-        collected_ents = min(len(self._creation_entity_ids), n_ent)
-        if n_ent > 0:
+        target_pts = 1 if self._mode == CanvasMode.CREATE_SKETCH_COINCIDENT and self._creation_entity_ids else n_pts
+        target_ents = 1 if self._mode == CanvasMode.CREATE_SKETCH_COINCIDENT and self._creation_entity_ids else n_ent
+        collected_pts = min(len(self._sensor_marker_ids), target_pts)
+        collected_ents = min(len(self._creation_entity_ids), target_ents)
+        if target_ents > 0:
             self.modelChanged.emit(
                 f"{_CONSTRAINT_LABEL.get(self._mode, 'Constraint')}: "
-                f"{collected_pts}/{n_pts} points, {collected_ents}/{n_ent} curves"
+                f"{collected_pts}/{target_pts} points, {collected_ents}/{target_ents} curves"
             )
         elif self._mode in _SEGMENT_PAIR_MODES:
             segments_done = len(self._sensor_marker_ids) // 2
@@ -3173,12 +3368,18 @@ class MechanismCanvas(QtWidgets.QWidget):
         else:
             self.modelChanged.emit(
                 f"{_CONSTRAINT_LABEL.get(self._mode, 'Constraint')}: "
-                f"{collected_pts}/{n_pts} points"
+                f"{collected_pts}/{target_pts} points"
             )
-        if len(self._sensor_marker_ids) >= n_pts and len(self._creation_entity_ids) >= n_ent:
-            if self._mode == CanvasMode.CREATE_SKETCH_DISTANCE and n_ent == 0:
+        required_pts = target_pts
+        required_ents = target_ents
+        if len(self._sensor_marker_ids) >= required_pts and len(self._creation_entity_ids) >= required_ents:
+            if self._mode in {
+                CanvasMode.CREATE_SKETCH_DISTANCE,
+                CanvasMode.CREATE_SKETCH_HORIZONTAL_DISTANCE,
+                CanvasMode.CREATE_SKETCH_VERTICAL_DISTANCE,
+            } and n_ent == 0:
                 self._pending_distance_constraint_refs = list(self._sensor_marker_ids[:n_pts])
-                self.modelChanged.emit("Distance: click label position")
+                self.modelChanged.emit(f"{_CONSTRAINT_LABEL.get(self._mode, 'Distance')}: click label position")
                 return
             self._finalize_sketch_constraint_creation()
 
@@ -3188,6 +3389,9 @@ class MechanismCanvas(QtWidgets.QWidget):
         actual_n_pts = (
             1
             if (self._mode == CanvasMode.CREATE_SKETCH_DISTANCE
+                and len(self._creation_entity_ids) == 1
+                and len(self._sensor_marker_ids) == 1)
+            or (self._mode == CanvasMode.CREATE_SKETCH_COINCIDENT
                 and len(self._creation_entity_ids) == 1
                 and len(self._sensor_marker_ids) == 1)
             else n_pts
@@ -3537,6 +3741,8 @@ class MechanismCanvas(QtWidgets.QWidget):
                 CanvasMode.CREATE_SKETCH_HORIZONTAL,
                 CanvasMode.CREATE_SKETCH_VERTICAL,
                 CanvasMode.CREATE_SKETCH_DISTANCE,
+                CanvasMode.CREATE_SKETCH_HORIZONTAL_DISTANCE,
+                CanvasMode.CREATE_SKETCH_VERTICAL_DISTANCE,
                 CanvasMode.CREATE_SKETCH_COINCIDENT,
             }:
                 polyline_points.append(self._to_screen(self._hover_world[0], self._hover_world[1], transform))
@@ -3573,7 +3779,12 @@ class MechanismCanvas(QtWidgets.QWidget):
                 painter.setPen(QtGui.QPen(QtGui.QColor("#2f80ed"), 1.2, QtCore.Qt.PenStyle.DashLine))
                 painter.drawLine(s1, label)
                 painter.drawLine(s2, label)
-                painter.drawText(label + QtCore.QPointF(6.0, -6.0), f"{QtCore.QLineF(s1, s2).length() / max(transform[0], 1e-9):.3g} mm")
+                preview_value = QtCore.QLineF(s1, s2).length() / max(transform[0], 1e-9)
+                if self._mode == CanvasMode.CREATE_SKETCH_HORIZONTAL_DISTANCE:
+                    preview_value = abs(p2.x - p1.x)
+                elif self._mode == CanvasMode.CREATE_SKETCH_VERTICAL_DISTANCE:
+                    preview_value = abs(p2.y - p1.y)
+                painter.drawText(label + QtCore.QPointF(6.0, -6.0), f"{preview_value:.3g} mm")
         if self._mode in {
             CanvasMode.CREATE_SKETCH_POINT,
             CanvasMode.CREATE_SKETCH_LINE_SEGMENT,
@@ -3744,10 +3955,16 @@ class MechanismCanvas(QtWidgets.QWidget):
         point_map: dict[str, CanvasSketchPoint],
         transform,
     ) -> QtCore.QPointF | None:
+        label_position = constraint.metadata.values.get("label_position")
+        if isinstance(label_position, list) and len(label_position) == 2:
+            return self._to_screen(float(label_position[0]), float(label_position[1]), transform)
         refs = [point_map.get(point_id) for point_id in constraint.references]
         refs = [point for point in refs if point is not None]
         if not refs:
             return None
+        if constraint.type is SketchConstraintType.RADIUS and len(refs) == 1:
+            point = refs[0]
+            return self._to_screen(point.x, point.y, transform) + QtCore.QPointF(24.0, -18.0)
         if len(refs) == 1:
             point = refs[0]
             return self._to_screen(point.x, point.y, transform) + QtCore.QPointF(10.0, 18.0)
