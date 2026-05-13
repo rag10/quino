@@ -244,7 +244,13 @@
       }
     ],
     "drivers": [],
-    "sensors": []
+    "sensors": [],
+    "gravity": {
+      "enabled": true,
+      "magnitude": 9.81,
+      "direction_x": 0.0,
+      "direction_y": -1.0
+    }
   },
   "view_state": {
     "zoom": 1.0,

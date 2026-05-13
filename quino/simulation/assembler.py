@@ -135,8 +135,13 @@ class MechanismAssembler:
             mass = 0.0
         if mass == 0.0:
             inertia_default = 0.0
+        elif len(structural_global) >= 2:
+            dx = structural_global[1].global_x - structural_global[0].global_x
+            dy = structural_global[1].global_y - structural_global[0].global_y
+            L_sq_mm2 = dx * dx + dy * dy
+            inertia_default = max(mass * L_sq_mm2 / 12.0, 1e-6)
         else:
-            inertia_default = max(mass * 0.01, 1e-6)
+            inertia_default = max(mass * 1.0, 1e-6)
         inertia = self._eval_optional(project, body.inertia, default=inertia_default)
         if inertia is None:
             inertia = inertia_default

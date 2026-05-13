@@ -294,8 +294,9 @@ def test_translation_driver_is_relative_to_initial_slider_coordinate(monkeypatch
         if obj["kind"] == "CoordinateConstraint" and obj.get("name") == "SliderDrive"
     )
     assert result.success is True
-    assert driver_constraint["offsetUserFunction"](None, 0.0, 0, 0.0) == pytest.approx(-50.0)
-    assert driver_constraint["offsetUserFunction"](None, 1.0, 0, 0.0) == pytest.approx(-60.0)
+    # With positions in metres: initial_coord = 50mm * 1e-3 = 0.05m, driver at t=1 adds 10mm = 0.01m
+    assert driver_constraint["offsetUserFunction"](None, 0.0, 0, 0.0) == pytest.approx(-0.05)
+    assert driver_constraint["offsetUserFunction"](None, 1.0, 0, 0.0) == pytest.approx(-0.06)
 
 
 def test_revolute_joint_friction_creates_coordinate_spring_damper(monkeypatch) -> None:
@@ -741,7 +742,8 @@ def test_assembler_inertia_defaults_to_mass_based_when_mass_is_set() -> None:
     assembled = app.simulation_runner.adapter.assembler.assemble(app.project)
     body = assembled.bodies[body_id]
     assert body.mass == pytest.approx(2.0)
-    assert body.inertia == pytest.approx(max(2.0 * 0.01, 1e-6))
+    # Length = 100 mm; inertia default = m * L² / 12 (kgmm²)
+    assert body.inertia == pytest.approx(2.0 * 100.0**2 / 12.0)
 
 
 def test_dynamic_simulation_runs_without_drivers_when_bodies_have_mass(monkeypatch) -> None:
@@ -772,6 +774,7 @@ def test_dynamic_simulation_runs_without_drivers_when_bodies_have_mass(monkeypat
     arm = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
     app.update_property(arm, "mass", PropertyValueInput("expression", "1 kg"))
     app.connect_marker_to_ground(next(m.id for m in app._find_body(arm).markers if m.name == "A"))
+    app.toggle_gravity(True)
 
     result = app.run_kinematic_simulation()
 

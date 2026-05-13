@@ -203,6 +203,7 @@ class ValidationService:
                 report.messages.append(
                     ValidationMessage("error", "broken_sketch_constraint_reference", "Sketch constraint references an unknown point", constraint.id)
                 )
+        point_entity_coincident = False
         if constraint.type is SketchConstraintType.FIX:
             if len(constraint.references) != 1:
                 report.messages.append(

@@ -20,6 +20,10 @@ from quino.simulation.assembler import (
 from quino.solver_adapters.base import SolverAdapter
 from quino.solver_adapters.exudyn_script_generator import generate_exudyn_script
 
+_MM_TO_M = 1e-3       # assembled positions are in mm; Exudyn expects SI metres
+_KGMM2_TO_KGM2 = 1e-6  # assembled inertia is in kgmm²; Exudyn expects kg·m²
+_M_TO_MM = 1e3          # convert Exudyn ODE2 displacements (m) back to mm for output
+
 
 class ExudynAdapter(SolverAdapter):
     name = "exudyn"
@@ -261,15 +265,15 @@ class ExudynAdapter(SolverAdapter):
         for body in assembled.bodies.values():
             node = mbs.AddNode(
                 item_interface.NodeRigidBody2D(
-                    referenceCoordinates=[body.origin_x, body.origin_y, body.angle]
+                    referenceCoordinates=[body.origin_x * _MM_TO_M, body.origin_y * _MM_TO_M, body.angle]
                 )
             )
             body_object = mbs.AddObject(
                 item_interface.ObjectRigidBody2D(
                     nodeNumber=node,
                     physicsMass=body.mass,
-                    physicsInertia=body.inertia,
-                    physicsCenterOfMass=[body.com_local_x, body.com_local_y],
+                    physicsInertia=body.inertia * _KGMM2_TO_KGM2,
+                    physicsCenterOfMass=[body.com_local_x * _MM_TO_M, body.com_local_y * _MM_TO_M],
                 )
             )
             if body.mass > 0 and assembled.gravity.enabled:
@@ -322,7 +326,7 @@ class ExudynAdapter(SolverAdapter):
         load_marker = mbs.AddMarker(
             item_interface.MarkerBodyRigid(
                 bodyNumber=body_objects[body.body_id],
-                localPosition=[marker.local_x, marker.local_y, 0.0],
+                localPosition=[marker.local_x * _MM_TO_M, marker.local_y * _MM_TO_M, 0.0],
             )
         )
         mbs.AddLoad(
@@ -340,13 +344,13 @@ class ExudynAdapter(SolverAdapter):
         marker_number_a = mbs.AddMarker(
             item_interface.MarkerBodyRigid(
                 bodyNumber=body_objects[body_a.body_id],
-                localPosition=[marker_a.local_x, marker_a.local_y, 0.0],
+                localPosition=[marker_a.local_x * _MM_TO_M, marker_a.local_y * _MM_TO_M, 0.0],
             )
         )
         marker_number_b = mbs.AddMarker(
             item_interface.MarkerBodyRigid(
                 bodyNumber=body_objects[body_b.body_id],
-                localPosition=[marker_b.local_x, marker_b.local_y, 0.0],
+                localPosition=[marker_b.local_x * _MM_TO_M, marker_b.local_y * _MM_TO_M, 0.0],
             )
         )
         mbs.AddObject(item_interface.ObjectJointRevolute2D(markerNumbers=[marker_number_a, marker_number_b]))
@@ -365,13 +369,13 @@ class ExudynAdapter(SolverAdapter):
         ground_marker = mbs.AddMarker(
             item_interface.MarkerBodyRigid(
                 bodyNumber=ground_object,
-                localPosition=[marker.global_x, marker.global_y, 0.0],
+                localPosition=[marker.global_x * _MM_TO_M, marker.global_y * _MM_TO_M, 0.0],
             )
         )
         body_marker = mbs.AddMarker(
             item_interface.MarkerBodyRigid(
                 bodyNumber=body_objects[body.body_id],
-                localPosition=[marker.local_x, marker.local_y, 0.0],
+                localPosition=[marker.local_x * _MM_TO_M, marker.local_y * _MM_TO_M, 0.0],
             )
         )
         mbs.AddObject(item_interface.ObjectJointRevolute2D(markerNumbers=[ground_marker, body_marker]))
@@ -391,8 +395,8 @@ class ExudynAdapter(SolverAdapter):
         normal_translation_marker = mbs.AddMarker(
             item_interface.MarkerBodiesRelativeTranslationCoordinate(
                 bodyNumbers=[ground_object, body_objects[body.body_id]],
-                localPosition0=[slider.origin_x, slider.origin_y, 0.0],
-                localPosition1=[marker.local_x, marker.local_y, 0.0],
+                localPosition0=[slider.origin_x * _MM_TO_M, slider.origin_y * _MM_TO_M, 0.0],
+                localPosition1=[marker.local_x * _MM_TO_M, marker.local_y * _MM_TO_M, 0.0],
                 axis0=[slider.normal_x, slider.normal_y, 0.0],
                 offset=0.0,
             )
@@ -457,8 +461,8 @@ class ExudynAdapter(SolverAdapter):
             relative_translation_marker = mbs.AddMarker(
                 item_interface.MarkerBodiesRelativeTranslationCoordinate(
                     bodyNumbers=[ground_object, body_objects[body.body_id]],
-                    localPosition0=[slider.origin_x, slider.origin_y, 0.0],
-                    localPosition1=[marker.local_x, marker.local_y, 0.0],
+                    localPosition0=[slider.origin_x * _MM_TO_M, slider.origin_y * _MM_TO_M, 0.0],
+                    localPosition1=[marker.local_x * _MM_TO_M, marker.local_y * _MM_TO_M, 0.0],
                     axis0=[slider.axis_x, slider.axis_y, 0.0],
                     offset=0.0,
                 )
@@ -491,8 +495,8 @@ class ExudynAdapter(SolverAdapter):
         relative_translation_marker = mbs.AddMarker(
             item_interface.MarkerBodiesRelativeTranslationCoordinate(
                 bodyNumbers=[ground_object, body_object],
-                localPosition0=[slider.origin_x, slider.origin_y, 0.0],
-                localPosition1=[marker.local_x, marker.local_y, 0.0],
+                localPosition0=[slider.origin_x * _MM_TO_M, slider.origin_y * _MM_TO_M, 0.0],
+                localPosition1=[marker.local_x * _MM_TO_M, marker.local_y * _MM_TO_M, 0.0],
                 axis0=[slider.axis_x, slider.axis_y, 0.0],
                 offset=0.0,
             )
@@ -516,8 +520,8 @@ class ExudynAdapter(SolverAdapter):
                 stiffness=0.0,
                 damping=0.0,
                 useLimitStops=True,
-                limitStopsLower=slider.travel_min if slider.travel_min is not None else -1e30,
-                limitStopsUpper=slider.travel_max if slider.travel_max is not None else 1e30,
+                limitStopsLower=slider.travel_min * _MM_TO_M if slider.travel_min is not None else -1e30,
+                limitStopsUpper=slider.travel_max * _MM_TO_M if slider.travel_max is not None else 1e30,
                 limitStopsStiffness=1e6,
                 limitStopsDamping=1e3,
             )
@@ -588,12 +592,12 @@ class ExudynAdapter(SolverAdapter):
         initial_coordinate = (
             (marker.global_x - slider.origin_x) * slider.axis_x
             + (marker.global_y - slider.origin_y) * slider.axis_y
-        )
+        ) * _MM_TO_M
         relative_translation_marker = mbs.AddMarker(
             item_interface.MarkerBodiesRelativeTranslationCoordinate(
                 bodyNumbers=[ground_object, body_objects[body.body_id]],
-                localPosition0=[slider.origin_x, slider.origin_y, 0.0],
-                localPosition1=[marker.local_x, marker.local_y, 0.0],
+                localPosition0=[slider.origin_x * _MM_TO_M, slider.origin_y * _MM_TO_M, 0.0],
+                localPosition1=[marker.local_x * _MM_TO_M, marker.local_y * _MM_TO_M, 0.0],
                 axis0=[slider.axis_x, slider.axis_y, 0.0],
                 offset=0.0,
             )
@@ -703,7 +707,12 @@ class ExudynAdapter(SolverAdapter):
             raise ValueError(
                 f"Driver {driver.name} expected {expected_dimension.value} but got {quantity.dimension_text}"
             )
-        output_unit = "rad" if expected_dimension is Dimension.ANGLE else driver.unit
+        if expected_dimension is Dimension.ANGLE:
+            output_unit = "rad"
+        elif expected_dimension is Dimension.LENGTH:
+            output_unit = "m"
+        else:
+            output_unit = driver.unit
         return self.expression_service.unit_service.convert(quantity, output_unit)
 
     def _evaluate_driver_rate(self, project: Project, driver: AssembledDriver, expected_dimension: Dimension, time_value: float) -> float:
@@ -757,8 +766,8 @@ class ExudynAdapter(SolverAdapter):
         for body_id, node_number in node_numbers.items():
             coordinates = mbs.GetNodeOutput(node_number, exu.OutputVariableType.Coordinates)
             body = assembled.bodies[body_id]
-            state[f"{body_id}.x"] = body.origin_x + float(coordinates[0])
-            state[f"{body_id}.y"] = body.origin_y + float(coordinates[1])
+            state[f"{body_id}.x"] = body.origin_x + float(coordinates[0]) * _M_TO_MM
+            state[f"{body_id}.y"] = body.origin_y + float(coordinates[1]) * _M_TO_MM
             if len(coordinates) > 2:
                 state[f"{body_id}.angle"] = self._equivalent_angle_near(
                     body.angle + float(coordinates[2]),
@@ -802,8 +811,8 @@ class ExudynAdapter(SolverAdapter):
                 if start + 2 > n_ode2:
                     break
                 body = assembled.bodies[body_id]
-                frame[f"{body_id}.x"] = body.origin_x + float(row[start])
-                frame[f"{body_id}.y"] = body.origin_y + float(row[start + 1])
+                frame[f"{body_id}.x"] = body.origin_x + float(row[start]) * _M_TO_MM
+                frame[f"{body_id}.y"] = body.origin_y + float(row[start + 1]) * _M_TO_MM
                 raw_angle = body.angle + float(row[start + 2])
                 previous_angle = frames[-1].get(f"{body_id}.angle", body.angle) if frames else body.angle
                 frame[f"{body_id}.angle"] = self._equivalent_angle_near(raw_angle, previous_angle)
