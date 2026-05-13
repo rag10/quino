@@ -9,6 +9,19 @@ from quino.services.expressions import ExpressionService
 from quino.simulation.assembler import AssembledBody, AssembledLoad, AssembledMechanism, AssembledSlider
 
 
+def _body_com_global(body: AssembledBody) -> tuple[float, float]:
+    cos_a = math.cos(body.angle)
+    sin_a = math.sin(body.angle)
+    return (
+        body.origin_x + cos_a * body.com_local_x - sin_a * body.com_local_y,
+        body.origin_y + sin_a * body.com_local_x + cos_a * body.com_local_y,
+    )
+
+
+def _com_rel(body: AssembledBody, marker) -> tuple[float, float]:
+    return (marker.local_x - body.com_local_x, marker.local_y - body.com_local_y)
+
+
 def _safe_var(name: str) -> str:
     """Sanitize a string so it can be used as a Python variable name."""
     safe = name.replace("-", "_").replace(" ", "_").replace(".", "_")
@@ -113,7 +126,8 @@ def _generate_bodies(project: Project, assembled: AssembledMechanism) -> list[st
             for marker_id in domain_body.edge_order:
                 marker = body.markers.get(marker_id)
                 if marker is not None:
-                    points.append([marker.local_x * 1e-3, marker.local_y * 1e-3, 0.0])
+                    lx, ly = _com_rel(body, marker)
+                    points.append([lx * 1e-3, ly * 1e-3, 0.0])
             if domain_body.closed_shape and points:
                 points.append(points[0])
             if points:
@@ -123,14 +137,15 @@ def _generate_bodies(project: Project, assembled: AssembledMechanism) -> list[st
                 lines.append(f"graphics_{b} = []")
         else:
             lines.append(f"graphics_{b} = []")
+        com_x, com_y = _body_com_global(body)
         lines.append(
             f"node_{b} = mbs.AddNode(item_interface.NodeRigidBody2D("
-            f"referenceCoordinates=[{body.origin_x * 1e-3}, {body.origin_y * 1e-3}, {body.angle}]))"
+            f"referenceCoordinates=[{com_x * 1e-3}, {com_y * 1e-3}, {body.angle}]))"
         )
         lines.append(
             f"body_{b} = mbs.AddObject(item_interface.ObjectRigidBody2D("
             f"nodeNumber=node_{b}, physicsMass={body.mass}, physicsInertia={body.inertia * 1e-6}, "
-            f"physicsCenterOfMass=[{body.com_local_x * 1e-3}, {body.com_local_y * 1e-3}], "
+            f"physicsCenterOfMass=[0.0, 0.0], "
             f"visualization=item_interface.VObjectRigidBody2D(graphicsData=graphics_{b})))"
         )
         if body.mass > 0 and assembled.gravity.enabled:
@@ -178,13 +193,15 @@ def _marker_to_marker_joint(assembled: AssembledMechanism, joint, endpoint_a, en
     mb = _safe_var(f"m_{endpoint_b.body_id}_{endpoint_b.marker_id}")
     ba = _safe_var(body_a.body_id)
     bb = _safe_var(body_b.body_id)
+    lx_a, ly_a = _com_rel(body_a, marker_a)
+    lx_b, ly_b = _com_rel(body_b, marker_b)
     lines.append(
         f"{ma} = mbs.AddMarker(item_interface.MarkerBodyRigid(bodyNumber=body_{ba}, "
-        f"localPosition=[{marker_a.local_x * 1e-3}, {marker_a.local_y * 1e-3}, 0.0]))"
+        f"localPosition=[{lx_a * 1e-3}, {ly_a * 1e-3}, 0.0]))"
     )
     lines.append(
         f"{mb} = mbs.AddMarker(item_interface.MarkerBodyRigid(bodyNumber=body_{bb}, "
-        f"localPosition=[{marker_b.local_x * 1e-3}, {marker_b.local_y * 1e-3}, 0.0]))"
+        f"localPosition=[{lx_b * 1e-3}, {ly_b * 1e-3}, 0.0]))"
     )
     lines.append(
         f"mbs.AddObject(item_interface.ObjectJointRevolute2D("
@@ -210,9 +227,10 @@ def _marker_to_ground_joint(assembled: AssembledMechanism, joint, endpoint, join
         f"{gm} = mbs.AddMarker(item_interface.MarkerBodyRigid(bodyNumber=ground_object, "
         f"localPosition=[{marker.global_x * 1e-3}, {marker.global_y * 1e-3}, 0.0]))"
     )
+    lx_bm, ly_bm = _com_rel(body, marker)
     lines.append(
         f"{bm} = mbs.AddMarker(item_interface.MarkerBodyRigid(bodyNumber=body_{b}, "
-        f"localPosition=[{marker.local_x * 1e-3}, {marker.local_y * 1e-3}, 0.0]))"
+        f"localPosition=[{lx_bm * 1e-3}, {ly_bm * 1e-3}, 0.0]))"
     )
     lines.append(
         f"mbs.AddObject(item_interface.ObjectJointRevolute2D("
@@ -236,11 +254,12 @@ def _marker_to_slider_joint(
     slider = assembled.sliders[endpoint_b.slider_id]
     b = _safe_var(body.body_id)
     j = _safe_var(joint_name)
+    lx_nm, ly_nm = _com_rel(body, marker)
     lines.append(
         f"nm_{j} = mbs.AddMarker(item_interface.MarkerBodiesRelativeTranslationCoordinate("
         f"bodyNumbers=[ground_object, body_{b}], "
         f"localPosition0=[{slider.origin_x * 1e-3}, {slider.origin_y * 1e-3}, 0.0], "
-        f"localPosition1=[{marker.local_x * 1e-3}, {marker.local_y * 1e-3}, 0.0], "
+        f"localPosition1=[{lx_nm * 1e-3}, {ly_nm * 1e-3}, 0.0], "
         f"axis0=[{slider.normal_x}, {slider.normal_y}, 0.0], offset=0.0))"
     )
     lines.append(
@@ -284,11 +303,12 @@ def _joint_friction_lines(assembled: AssembledMechanism, joint) -> list[str]:
         marker = body.markers[marker_endpoint.marker_id]
         slider = assembled.sliders[slider_endpoint.slider_id]
         b = _safe_var(body.body_id)
+        lx_fr, ly_fr = _com_rel(body, marker)
         lines.append(
             f"frtm_{safe_joint} = mbs.AddMarker(item_interface.MarkerBodiesRelativeTranslationCoordinate("
             f"bodyNumbers=[ground_object, body_{b}], "
             f"localPosition0=[{slider.origin_x * 1e-3}, {slider.origin_y * 1e-3}, 0.0], "
-            f"localPosition1=[{marker.local_x * 1e-3}, {marker.local_y * 1e-3}, 0.0], "
+            f"localPosition1=[{lx_fr * 1e-3}, {ly_fr * 1e-3}, 0.0], "
             f"axis0=[{slider.axis_x}, {slider.axis_y}, 0.0], offset=0.0))"
         )
         lines.append(
@@ -323,11 +343,12 @@ def _slider_limit_stops(
         return lines
     b = _safe_var(body_id)
     j = _safe_var(joint_name)
+    lx_rt, ly_rt = _com_rel(body, marker)
     lines.append(
         f"rtm_{j} = mbs.AddMarker(item_interface.MarkerBodiesRelativeTranslationCoordinate("
         f"bodyNumbers=[ground_object, body_{b}], "
         f"localPosition0=[{slider.origin_x * 1e-3}, {slider.origin_y * 1e-3}, 0.0], "
-        f"localPosition1=[{marker.local_x * 1e-3}, {marker.local_y * 1e-3}, 0.0], "
+        f"localPosition1=[{lx_rt * 1e-3}, {ly_rt * 1e-3}, 0.0], "
         f"axis0=[{slider.axis_x}, {slider.axis_y}, 0.0], offset=0.0))"
     )
     lines.append(
@@ -393,11 +414,12 @@ def _translation_driver(assembled: AssembledMechanism, driver, joint, safe_id: s
         (marker.global_x - slider.origin_x) * slider.axis_x
         + (marker.global_y - slider.origin_y) * slider.axis_y
     ) * 1e-3
+    lx_td, ly_td = _com_rel(body, marker)
     lines.append(
         f"rtm_{safe_id} = mbs.AddMarker(item_interface.MarkerBodiesRelativeTranslationCoordinate("
         f"bodyNumbers=[ground_object, body_{b}], "
         f"localPosition0=[{slider.origin_x * 1e-3}, {slider.origin_y * 1e-3}, 0.0], "
-        f"localPosition1=[{marker.local_x * 1e-3}, {marker.local_y * 1e-3}, 0.0], "
+        f"localPosition1=[{lx_td * 1e-3}, {ly_td * 1e-3}, 0.0], "
         f"axis0=[{slider.axis_x}, {slider.axis_y}, 0.0], offset=0.0))"
     )
     lines.append(
@@ -473,9 +495,10 @@ def _generate_loads(assembled: AssembledMechanism) -> list[str]:
         marker = body.markers[load.target_marker_id]
         b = _safe_var(body.body_id)
         lm = _safe_var(f"lm_{load.load_id}")
+        lx_load, ly_load = _com_rel(body, marker)
         lines.append(
             f"{lm} = mbs.AddMarker(item_interface.MarkerBodyRigid("
-            f"bodyNumber=body_{b}, localPosition=[{marker.local_x}, {marker.local_y}, 0.0]))"
+            f"bodyNumber=body_{b}, localPosition=[{lx_load * 1e-3}, {ly_load * 1e-3}, 0.0]))"
         )
         lines.append(
             f"mbs.AddLoad(item_interface.LoadForceVector("
