@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import math
 import re
-import tempfile
-import threading
 from pathlib import Path
 
 from quino.gui.icons import get_icon
@@ -58,86 +56,6 @@ _PROPERTY_DIMENSION_HINTS: dict[str, str] = {
     "law": "angle or length (e.g. 90 deg * t / 1 s)",
     "friction_pin_radius": "pin radius in mm (e.g. 5 mm)",
 }
-
-
-class SimulationWorker(QtCore.QThread):
-    finished = QtCore.Signal(object)  # SimulationResult
-
-    def __init__(self, app_service, duration: float, steps: int, cancel_event: threading.Event, log_path: Path):
-        super().__init__()
-        self._app_service = app_service
-        self._duration = duration
-        self._steps = steps
-        self._cancel_event = cancel_event
-        self._log_path = log_path
-
-    def run(self):
-        result = self._app_service.run_kinematic_simulation(
-            duration=self._duration,
-            steps=self._steps,
-            cancel_event=self._cancel_event,
-            log_path=self._log_path,
-        )
-        self.finished.emit(result)
-
-
-class SimulationProgressDialog(QtWidgets.QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Running Simulation")
-        self.setMinimumWidth(520)
-        self.setMinimumHeight(320)
-        self.setWindowFlags(self.windowFlags() & ~QtCore.Qt.WindowType.WindowContextHelpButtonHint)
-        self._cancelled = False
-
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setSpacing(8)
-
-        self._status_label = QtWidgets.QLabel("Assembling model…")
-        layout.addWidget(self._status_label)
-
-        self._progress_bar = QtWidgets.QProgressBar()
-        self._progress_bar.setMinimum(0)
-        self._progress_bar.setMaximum(0)  # indeterminate
-        layout.addWidget(self._progress_bar)
-
-        self._log = QtWidgets.QPlainTextEdit()
-        self._log.setReadOnly(True)
-        self._log.setMaximumBlockCount(500)
-        font = QtGui.QFont("Courier New", 8)
-        self._log.setFont(font)
-        layout.addWidget(self._log, stretch=1)
-
-        btn_layout = QtWidgets.QHBoxLayout()
-        btn_layout.addStretch()
-        self._cancel_btn = QtWidgets.QPushButton("Cancel")
-        self._cancel_btn.clicked.connect(self._on_cancel)
-        btn_layout.addWidget(self._cancel_btn)
-        layout.addLayout(btn_layout)
-
-    def _on_cancel(self):
-        self._cancelled = True
-        self._cancel_btn.setEnabled(False)
-        self._status_label.setText("Cancelling…")
-
-    def append_log(self, text: str):
-        self._log.appendPlainText(text.rstrip())
-        self._log.verticalScrollBar().setValue(self._log.verticalScrollBar().maximum())
-
-    def set_status(self, text: str):
-        self._status_label.setText(text)
-
-    def mark_done(self):
-        self._progress_bar.setMaximum(1)
-        self._progress_bar.setValue(1)
-        self._cancel_btn.setText("Close")
-        self._cancel_btn.setEnabled(True)
-        self._cancel_btn.clicked.disconnect()
-        self._cancel_btn.clicked.connect(self.accept)
-
-    @property
-    def cancelled(self) -> bool:
-        return self._cancelled
 
 
 class InspectorPropertyWidget(QtWidgets.QWidget):
@@ -1233,80 +1151,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def run_simulation(self) -> None:
         self._playback_timer.stop()
         self._sync_play_pause_icon()
-
-        cancel_event = threading.Event()
-        tmp_dir = tempfile.mkdtemp(prefix="quino_sim_")
-        log_path = Path(tmp_dir) / "solver.log"
-
-        dialog = SimulationProgressDialog(self)
-        dialog.set_status("Assembling model and running solver…")
-
-        worker = SimulationWorker(
-            self.app_service,
+        result = self.app_service.run_kinematic_simulation(
             duration=float(self.duration_spin.value()),
             steps=int(self.steps_spin.value()),
-            cancel_event=cancel_event,
-            log_path=log_path,
         )
-
-        # Poll log file every 200ms
-        log_offset = [0]
-
-        def _poll_log():
-            if not log_path.exists():
-                return
-            try:
-                with log_path.open("r", encoding="utf-8", errors="replace") as f:
-                    f.seek(log_offset[0])
-                    new_text = f.read()
-                    if new_text:
-                        log_offset[0] = f.tell()
-                        for line in new_text.splitlines():
-                            if line.strip():
-                                dialog.append_log(line)
-            except OSError:
-                pass
-
-        poll_timer = QtCore.QTimer(self)
-        poll_timer.setInterval(200)
-        poll_timer.timeout.connect(_poll_log)
-
-        def _on_cancel_clicked():
-            cancel_event.set()
-
-        # Wire cancel button to set the event (dialog handles UI state internally)
-        dialog._cancel_btn.clicked.connect(_on_cancel_clicked)
-
-        def _on_finished(result):
-            poll_timer.stop()
-            _poll_log()  # flush remaining log
-            dialog.mark_done()
-            if result.error == "Simulation cancelled by user":
-                dialog.set_status("Cancelled.")
-            elif result.error:
-                dialog.set_status(f"Simulation failed: {result.error}")
-            else:
-                dialog.set_status(f"Done — {len(result.frames)} frame(s).")
-            self._apply_simulation_result(result)
-
-        worker.finished.connect(_on_finished)
-        poll_timer.start()
-        worker.start()
-        dialog.exec()
-
-        # If user closed dialog before worker finished, wait for it
-        if worker.isRunning():
-            cancel_event.set()
-            worker.wait(5000)
-
-        # Clean up temp dir
-        try:
-            import shutil
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-        except Exception:
-            pass
-
-    def _apply_simulation_result(self, result) -> None:
         self._last_simulation_result = result
         self._current_frame_index = 0
         self.validation_view.setPlainText(
@@ -1326,7 +1174,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_current_frame()
         self._update_trajectories()
         self.refresh_all()
-        if result.error and result.error != "Simulation cancelled by user":
+        if result.error:
             self._append_message(f"  ERROR: {result.error}")
             detail = ""
             icon = QtWidgets.QMessageBox.Icon.Critical
