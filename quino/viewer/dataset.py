@@ -3,16 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from quino.domain.model import Project, SensorOutput
+from quino.domain.model import Project, ReactionOutput, SensorOutput
 
 
 class SensorDataset:
-    """Converts SensorOutput objects into plottable matrices (numpy arrays + headers)."""
+    """Converts SensorOutput and ReactionOutput objects into plottable matrices."""
 
     def __init__(self, project: Project):
         self.project = project
         self._matrices: dict[str, dict] = {}
         self._load_sensor_outputs()
+        self._load_reaction_outputs()
 
     def _load_sensor_outputs(self) -> None:
         """Load sensor outputs recorded during the last simulation run."""
@@ -27,6 +28,20 @@ class SensorDataset:
                 "time": np.array(output.time),
                 "columns": output.columns,
                 "data": data,
+            }
+
+    def _load_reaction_outputs(self) -> None:
+        """Load reaction outputs recorded during the last simulation run."""
+        for rxn in self.project.reaction_outputs.values():
+            if not rxn.data:
+                continue
+            name = f"[R] {rxn.joint_name}"
+            self._matrices[name] = {
+                "sensor_id": f"__reaction__{rxn.joint_id}",
+                "sensor_type": "reaction",
+                "time": np.array(rxn.time),
+                "columns": rxn.columns,
+                "data": np.array(rxn.data),
             }
 
     def get_matrix_names(self) -> list[str]:
