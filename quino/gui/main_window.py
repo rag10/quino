@@ -2054,7 +2054,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _populate_inspector(self) -> None:
         self._suspend_property_updates = True
         try:
-            self.inspector.setRowCount(0)
+            self.inspector.clear_properties()
             self.inspector_title.setText("")
             # clear old relation widgets
             while self.relations_vbox.count() > 1:  # keep trailing stretch
@@ -2904,12 +2904,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 | QtWidgets.QAbstractItemView.EditTrigger.EditKeyPressed
                 | QtWidgets.QAbstractItemView.EditTrigger.SelectedClicked
             )
-            self.inspector.setEditTriggers(edit_triggers)
             self.parameters_table.setEditTriggers(edit_triggers)
         else:
-            self.inspector.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
             self.parameters_table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
-            self.inspector.clearFocus()
             self.parameters_table.clearFocus()
         self._update_status_message()
 
