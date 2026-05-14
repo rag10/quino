@@ -93,6 +93,10 @@ class _FakeItemInterface:
     def LoadMassProportional(**kwargs):
         return {"kind": "LoadMassProportional", **kwargs}
 
+    @staticmethod
+    def LoadForceVector(**kwargs):
+        return {"kind": "LoadForceVector", **kwargs}
+
 
 class _FakeMbs:
     def __init__(self) -> None:
@@ -297,6 +301,85 @@ def test_translation_driver_is_relative_to_initial_slider_coordinate(monkeypatch
     # With positions in metres: initial_coord = 50mm * 1e-3 = 0.05m, driver at t=1 adds 10mm = 0.01m
     assert driver_constraint["offsetUserFunction"](None, 0.0, 0, 0.0) == pytest.approx(-0.05)
     assert driver_constraint["offsetUserFunction"](None, 1.0, 0, 0.0) == pytest.approx(-0.06)
+
+
+def test_time_dependent_load_creates_force_user_function(monkeypatch) -> None:
+    fake_sc = _FakeSystemContainer()
+    fake_exu = types.SimpleNamespace(
+        SystemContainer=lambda: fake_sc,
+        OutputVariableType=types.SimpleNamespace(Coordinates="Coordinates"),
+    )
+    fake_exu.SimulationSettings = lambda: types.SimpleNamespace(
+        timeIntegration=types.SimpleNamespace(numberOfSteps=0, endTime=0.0),
+        staticSolver=types.SimpleNamespace(numberOfLoadSteps=0),
+        solutionSettings=types.SimpleNamespace(writeSolutionToFile=True),
+    )
+    fake_item_interface = _FakeItemInterface()
+
+    def fake_import_module(name: str):
+        if name == "exudyn":
+            return fake_exu
+        if name == "exudyn.itemInterface":
+            return fake_item_interface
+        raise ImportError(name)
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object() if name == "exudyn" else None)
+    monkeypatch.setattr(importlib, "import_module", fake_import_module)
+
+    app = ApplicationService()
+    app.new_project("LoadWithTime")
+    body_id = app.create_body("Block", [MarkerInput("0 mm", "0 mm", "P")])
+    marker_id = next(m.id for m in app._find_body(body_id).markers if m.name == "P")
+    app.create_load("Wind", marker_id, "10 N * t / 1 s", "0 N")
+
+    result = app.run_kinematic_simulation()
+
+    assert result.success is True
+    force_load = next(load for load in fake_sc.mbs.loads if load["kind"] == "LoadForceVector")
+    assert "loadVectorUserFunction" in force_load
+    assert force_load["loadVectorUserFunction"](fake_sc.mbs, 2.0, [0.0, 0.0, 0.0]) == pytest.approx([20.0, 0.0, 0.0])
+
+
+def test_sensor_dependent_load_creates_force_user_function(monkeypatch) -> None:
+    fake_sc = _FakeSystemContainer()
+    fake_exu = types.SimpleNamespace(
+        SystemContainer=lambda: fake_sc,
+        OutputVariableType=types.SimpleNamespace(Coordinates="Coordinates"),
+    )
+    fake_exu.SimulationSettings = lambda: types.SimpleNamespace(
+        timeIntegration=types.SimpleNamespace(numberOfSteps=0, endTime=0.0),
+        staticSolver=types.SimpleNamespace(numberOfLoadSteps=0),
+        solutionSettings=types.SimpleNamespace(writeSolutionToFile=True),
+    )
+    fake_item_interface = _FakeItemInterface()
+
+    def fake_import_module(name: str):
+        if name == "exudyn":
+            return fake_exu
+        if name == "exudyn.itemInterface":
+            return fake_item_interface
+        raise ImportError(name)
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object() if name == "exudyn" else None)
+    monkeypatch.setattr(importlib, "import_module", fake_import_module)
+
+    app = ApplicationService()
+    app.new_project("LoadWithSensor")
+    body_id = app.create_body(
+        "Block",
+        [MarkerInput("0 mm", "0 mm", "A"), MarkerInput("30 mm", "40 mm", "B")],
+    )
+    marker_a = next(m.id for m in app._find_body(body_id).markers if m.name == "A")
+    marker_b = next(m.id for m in app._find_body(body_id).markers if m.name == "B")
+    app.create_sensor("Gap", "distance", [marker_a, marker_b])
+    app.create_load("Springish", marker_b, "2 N/mm * Gap.d", "0 N")
+
+    result = app.run_kinematic_simulation()
+
+    assert result.success is True
+    force_load = next(load for load in fake_sc.mbs.loads if load["kind"] == "LoadForceVector")
+    assert "loadVectorUserFunction" in force_load
+    assert force_load["loadVectorUserFunction"](fake_sc.mbs, 0.0, [0.0, 0.0, 0.0]) == pytest.approx([100.0, 0.0, 0.0])
 
 
 def test_revolute_joint_friction_creates_coordinate_spring_damper(monkeypatch) -> None:
@@ -774,7 +857,7 @@ def test_dynamic_simulation_runs_without_drivers_when_bodies_have_mass(monkeypat
     arm = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
     app.update_property(arm, "mass", PropertyValueInput("expression", "1 kg"))
     app.connect_marker_to_ground(next(m.id for m in app._find_body(arm).markers if m.name == "A"))
-    app.toggle_gravity(True)
+    app.add_gravity()
 
     result = app.run_kinematic_simulation()
 
@@ -792,7 +875,7 @@ def test_exudyn_script_includes_gravity() -> None:
     # Add mass to one body so gravity loads are generated
     for body in app.project.model.bodies:
         app.update_property(body.id, "mass", PropertyValueInput("expression", "1 kg"))
-    app.toggle_gravity(True)
+    app.add_gravity()
     adapter = ExudynAdapter(app.expression_service)
     script = adapter.export_script(app.project, duration=1.0, steps=10)
 
@@ -811,7 +894,7 @@ def test_gravity_disabled_produces_no_load() -> None:
     app.update_property(body_id, "mass", PropertyValueInput("expression", "1 kg"))
 
     # Disable gravity
-    app.project.model.gravity.enabled = False
+    app.delete_gravity()
 
     # Generate script
     adapter = ExudynAdapter(app.expression_service)
@@ -831,8 +914,8 @@ def test_gravity_enabled_produces_loads() -> None:
     body_id = app.create_body("Body1", [MarkerInput("0 mm", "0 mm", "P")])
     app.update_property(body_id, "mass", PropertyValueInput("expression", "1 kg"))
 
-    app.toggle_gravity(True)
-    assert app.project.model.gravity.enabled is True
+    app.add_gravity()
+    assert app.project.model.gravity is not None
 
     # Generate script
     adapter = ExudynAdapter(app.expression_service)
@@ -851,7 +934,7 @@ def test_custom_gravity_parameters_applied() -> None:
     app.new_project("CustomGravityTest")
     body_id = app.create_body("Body1", [MarkerInput("0 mm", "0 mm", "P")])
     app.update_property(body_id, "mass", PropertyValueInput("expression", "1 kg"))
-    app.toggle_gravity(True)
+    app.add_gravity()
 
     # Set custom gravity
     app.update_property(
@@ -885,7 +968,7 @@ def test_gravity_with_zero_direction_components() -> None:
     app.new_project("ZeroGravityTest")
     body_id = app.create_body("Body1", [MarkerInput("0 mm", "0 mm", "P")])
     app.update_property(body_id, "mass", PropertyValueInput("expression", "1 kg"))
-    app.toggle_gravity(True)
+    app.add_gravity()
 
     # Set gravity to all zeros (effectively disables it)
     app.update_property(
@@ -918,7 +1001,7 @@ def test_gravity_direction_normalization() -> None:
     app.new_project("DirectionNormTest")
     body_id = app.create_body("Body1", [MarkerInput("0 mm", "0 mm", "P")])
     app.update_property(body_id, "mass", PropertyValueInput("expression", "2 kg"))
-    app.toggle_gravity(True)
+    app.add_gravity()
 
     # Set custom gravity with non-unit direction vector
     app.update_property(

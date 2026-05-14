@@ -13,6 +13,8 @@ from quino.domain.types import (
     SensorType,
     SketchConstraintType,
     SketchEntityType,
+    SpringEndpointKind,
+    SpringType,
 )
 
 
@@ -128,6 +130,28 @@ class Joint:
     type: JointType
     endpoint_a: JointEndpoint
     endpoint_b: JointEndpoint
+    style: Style = field(default_factory=Style)
+    metadata: Metadata = field(default_factory=Metadata)
+
+
+@dataclass(slots=True)
+class SpringEndpoint:
+    kind: SpringEndpointKind
+    body_id: str | None = None
+    marker_id: str | None = None
+    ground_x: ScalarProperty | None = None
+    ground_y: ScalarProperty | None = None
+
+
+@dataclass(slots=True)
+class Spring:
+    id: str
+    name: str
+    spring_type: SpringType
+    endpoint_a: SpringEndpoint
+    endpoint_b: SpringEndpoint
+    rest_value: ScalarProperty | None = None
+    law: ScalarProperty | None = None
     style: Style = field(default_factory=Style)
     metadata: Metadata = field(default_factory=Metadata)
 
@@ -293,7 +317,6 @@ class SketchAnalysis:
 
 @dataclass(slots=True)
 class GravityLoad:
-    enabled: bool = False
     magnitude: float = 9.81
     direction_x: float = 0.0
     direction_y: float = -1.0
@@ -307,7 +330,8 @@ class Model:
     drivers: list[Driver] = field(default_factory=list)
     loads: list[Load] = field(default_factory=list)
     sensors: list[Sensor] = field(default_factory=list)
-    gravity: GravityLoad = field(default_factory=GravityLoad)
+    springs: list[Spring] = field(default_factory=list)
+    gravity: GravityLoad | None = None
 
 
 @dataclass(slots=True)

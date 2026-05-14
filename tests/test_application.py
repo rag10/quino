@@ -668,144 +668,170 @@ def test_validate_model_reports_unreachable_four_bar_loop() -> None:
 # Gravity feature tests
 
 
-def test_gravity_defaults_to_disabled() -> None:
-    """New project has gravity disabled by default."""
+def test_gravity_absent_by_default() -> None:
     app = make_app()
-    assert app.project.model.gravity.enabled is False
-    assert app.project.model.gravity.magnitude == 9.81
-    assert app.project.model.gravity.direction_x == 0.0
-    assert app.project.model.gravity.direction_y == -1.0
+    assert app.project.model.gravity is None
 
 
-def test_toggle_gravity_disables_gravity() -> None:
-    """toggle_gravity(False) disables gravity."""
+def test_add_gravity_creates_with_defaults() -> None:
     app = make_app()
-    assert app.project.model.gravity.enabled is False
-    app.toggle_gravity(False)
-    assert app.project.model.gravity.enabled is False
+    app.add_gravity()
+    g = app.project.model.gravity
+    assert g is not None
+    assert g.magnitude == 9.81
+    assert g.direction_x == 0.0
+    assert g.direction_y == -1.0
 
 
-def test_toggle_gravity_enables_gravity() -> None:
-    """toggle_gravity(True) enables gravity."""
+def test_add_gravity_is_idempotent() -> None:
     app = make_app()
-    app.project.model.gravity.enabled = False
-    app.toggle_gravity(True)
-    assert app.project.model.gravity.enabled is True
+    app.add_gravity()
+    app.add_gravity()
+    assert app.project.model.gravity is not None
+
+
+def test_delete_gravity() -> None:
+    app = make_app()
+    app.add_gravity()
+    app.delete_gravity()
+    assert app.project.model.gravity is None
+
+
+def test_delete_entity_gravity() -> None:
+    app = make_app()
+    app.add_gravity()
+    app.delete_entity("__gravity__")
+    assert app.project.model.gravity is None
 
 
 def test_update_gravity_magnitude() -> None:
-    """Updating magnitude via update_property works."""
     app = make_app()
-    app.update_property(
-        "__gravity__",
-        "magnitude",
-        PropertyValueInput("expression", "5.0")
-    )
+    app.add_gravity()
+    app.update_property("__gravity__", "magnitude", PropertyValueInput("expression", "5.0"))
     assert app.project.model.gravity.magnitude == 5.0
 
 
 def test_update_gravity_direction() -> None:
-    """Updating direction_x and direction_y via update_property works."""
     app = make_app()
-    app.update_property(
-        "__gravity__",
-        "direction_x",
-        PropertyValueInput("expression", "1.0")
-    )
-    app.update_property(
-        "__gravity__",
-        "direction_y",
-        PropertyValueInput("expression", "0.0")
-    )
+    app.add_gravity()
+    app.update_property("__gravity__", "direction_x", PropertyValueInput("expression", "1.0"))
+    app.update_property("__gravity__", "direction_y", PropertyValueInput("expression", "0.0"))
     assert app.project.model.gravity.direction_x == 1.0
     assert app.project.model.gravity.direction_y == 0.0
 
 
 def test_update_gravity_rejects_non_numeric() -> None:
-    """Updating with non-numeric value raises ValueError."""
     app = make_app()
+    app.add_gravity()
     with pytest.raises(ValueError, match="must be a number"):
-        app.update_property(
-            "__gravity__",
-            "magnitude",
-            PropertyValueInput("expression", "abc")
-        )
+        app.update_property("__gravity__", "magnitude", PropertyValueInput("expression", "abc"))
 
 
-def test_gravity_serialization() -> None:
-    """Gravity settings are serialized and deserialized correctly."""
+def test_gravity_serialization_roundtrip() -> None:
     from quino.serialization.json_io import JsonMapper
 
     app = make_app()
+    app.add_gravity()
     app.project.model.gravity.magnitude = 5.0
     app.project.model.gravity.direction_y = -0.5
-    app.project.model.gravity.enabled = False
 
     mapper = JsonMapper()
-    data = mapper.dump(app.project)
-    loaded = mapper.load(data)
-
-    assert loaded.model.gravity.enabled is False
+    loaded = mapper.load(mapper.dump(app.project))
+    assert loaded.model.gravity is not None
     assert loaded.model.gravity.magnitude == 5.0
     assert loaded.model.gravity.direction_y == -0.5
 
 
-def test_backward_compat_old_project_without_gravity() -> None:
-    """Old project files without gravity key load with default gravity."""
+def test_gravity_none_serialization_roundtrip() -> None:
     from quino.serialization.json_io import JsonMapper
 
-    # Create a project dict without "gravity" key (simulating old format)
+    app = make_app()
+    assert app.project.model.gravity is None
+    mapper = JsonMapper()
+    loaded = mapper.load(mapper.dump(app.project))
+    assert loaded.model.gravity is None
+
+
+def test_backward_compat_old_project_without_gravity() -> None:
+    from quino.serialization.json_io import JsonMapper
+
     data = {
         "schema_version": "1.0",
-        "project": {
-            "id": "test-project",
-            "name": "TestModel",
-            "metadata": {},
-        },
+        "project": {"id": "test-project", "name": "TestModel", "metadata": {}},
+        "model": {"bodies": [], "sliders": [], "joints": [], "drivers": [], "sensors": {}},
+        "parameters": [],
+        "sketch": None,
+        "view_state": {},
+    }
+    project = JsonMapper().load(data)
+    assert project.model.gravity is None
+
+
+def test_backward_compat_old_gravity_enabled_true() -> None:
+    from quino.serialization.json_io import JsonMapper
+
+    data = {
+        "schema_version": "1.0",
+        "project": {"id": "p", "name": "N", "metadata": {}},
         "model": {
-            "bodies": [],
-            "sliders": [],
-            "joints": [],
-            "drivers": [],
-            "sensors": {},
-            # Note: no "gravity" key
+            "bodies": [], "sliders": [], "joints": [], "drivers": [], "sensors": {},
+            "gravity": {"enabled": True, "magnitude": 5.0, "direction_x": 0.0, "direction_y": -1.0},
         },
         "parameters": [],
         "sketch": None,
         "view_state": {},
     }
-
-    mapper = JsonMapper()
-    project = mapper.load(data)
-    assert project.model.gravity.enabled is False
-    assert project.model.gravity.magnitude == 9.81
+    project = JsonMapper().load(data)
+    assert project.model.gravity is not None
+    assert project.model.gravity.magnitude == 5.0
 
 
-def test_gravity_update_undoable() -> None:
-    """Gravity changes are tracked by undo/redo."""
+def test_backward_compat_old_gravity_enabled_false() -> None:
+    from quino.serialization.json_io import JsonMapper
+
+    data = {
+        "schema_version": "1.0",
+        "project": {"id": "p", "name": "N", "metadata": {}},
+        "model": {
+            "bodies": [], "sliders": [], "joints": [], "drivers": [], "sensors": {},
+            "gravity": {"enabled": False, "magnitude": 9.81, "direction_x": 0.0, "direction_y": -1.0},
+        },
+        "parameters": [],
+        "sketch": None,
+        "view_state": {},
+    }
+    project = JsonMapper().load(data)
+    assert project.model.gravity is None
+
+
+def test_gravity_add_undoable() -> None:
     app = make_app()
-    assert app.project.model.gravity.enabled is False
-
-    app.toggle_gravity(True)
-    assert app.project.model.gravity.enabled is True
-
+    assert app.project.model.gravity is None
+    app.add_gravity()
+    assert app.project.model.gravity is not None
     assert app.undo() is True
-    assert app.project.model.gravity.enabled is False
-
+    assert app.project.model.gravity is None
     assert app.redo() is True
-    assert app.project.model.gravity.enabled is True
+    assert app.project.model.gravity is not None
+
+
+def test_gravity_delete_undoable() -> None:
+    app = make_app()
+    app.add_gravity()
+    app.delete_gravity()
+    assert app.project.model.gravity is None
+    assert app.undo() is True
+    assert app.project.model.gravity is not None
+    assert app.redo() is True
+    assert app.project.model.gravity is None
 
 
 def test_update_gravity_magnitude_undoable() -> None:
-    """Gravity magnitude changes are undoable."""
     app = make_app()
+    app.add_gravity()
     original = app.project.model.gravity.magnitude
 
-    app.update_property(
-        "__gravity__",
-        "magnitude",
-        PropertyValueInput("expression", "3.5")
-    )
+    app.update_property("__gravity__", "magnitude", PropertyValueInput("expression", "3.5"))
     assert app.project.model.gravity.magnitude == 3.5
 
     assert app.undo() is True
@@ -1071,6 +1097,63 @@ def test_sketch_solver_handles_tangent_constraint() -> None:
     by = float(point_b.y.text.split()[0])
     distance = abs((by - ay) * 0.0 - (bx - ax) * 10.0 + bx * ay - by * ax) / math.hypot(by - ay, bx - ax)
     assert abs(distance - 5.0) < 1e-2
+
+
+def test_tangent_constraint_creates_helper_point_on_line_and_curve() -> None:
+    app = make_app()
+    app.new_project("SketchTangentHelper")
+
+    line_a = app.create_sketch_point("-10 mm", "0 mm", "L1")
+    line_b = app.create_sketch_point("10 mm", "0 mm", "L2")
+    app.create_sketch_line_segment(line_a, line_b, "Line1")
+    center = app.create_sketch_point("0 mm", "10 mm", "O")
+    circle_id = app.create_sketch_circle(center, "5 mm", "C1")
+
+    before_points = {entity.id for entity in app.project.sketch.points()}
+    app.create_sketch_constraint(
+        "tangent",
+        [line_a, line_b],
+        value="1",
+        name="Tan1",
+        entity_references=[circle_id],
+    )
+
+    after_points = {entity.id for entity in app.project.sketch.points()}
+    helper_ids = after_points - before_points
+    assert len(helper_ids) == 1
+    helper = app._find_sketch_point(next(iter(helper_ids)))
+    assert helper.construction is True
+    helper_constraints = [
+        constraint for constraint in app.project.sketch.constraints.values()
+        if helper.id in constraint.references and constraint.type.value == "coincident"
+    ]
+    assert len(helper_constraints) == 2
+
+
+def test_sketch_solver_handles_curve_curve_tangent_constraint() -> None:
+    app = make_app()
+    app.new_project("SketchCurveTangent")
+
+    c1 = app.create_sketch_point("0 mm", "0 mm", "O1")
+    c2 = app.create_sketch_point("15 mm", "0 mm", "O2")
+    circle_1 = app.create_sketch_circle(c1, "10 mm", "C1")
+    circle_2 = app.create_sketch_circle(c2, "4 mm", "C2")
+
+    app.create_sketch_constraint(
+        "tangent",
+        [],
+        value="1",
+        name="TanCC",
+        entity_references=[circle_1, circle_2],
+    )
+
+    point_1 = app._find_sketch_point(c1)
+    point_2 = app._find_sketch_point(c2)
+    x1 = float(point_1.x.text.split()[0])
+    y1 = float(point_1.y.text.split()[0])
+    x2 = float(point_2.x.text.split()[0])
+    y2 = float(point_2.y.text.split()[0])
+    assert abs(math.hypot(x2 - x1, y2 - y1) - 14.0) < 1e-3
 
 
 
@@ -1617,6 +1700,32 @@ def test_create_load_and_assemble() -> None:
     assert assembled.loads[0].fx == pytest.approx(10.0)
     assert assembled.loads[0].fy == pytest.approx(-5.0)
     assert assembled.loads[0].target_marker_id == marker_id
+    assert assembled.loads[0].fx_expression == "10 N"
+    assert assembled.loads[0].fy_expression == "-5 N"
+
+
+def test_create_load_accepts_time_expression() -> None:
+    app = make_app()
+    body_id = app.create_body("Block", [MarkerInput("0 mm", "0 mm", "P")])
+    marker_id = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "P")
+
+    load_id = app.create_load("Pulse", marker_id, "5 N * t / 1 s", "0 N")
+
+    load = next(ld for ld in app.project.model.loads if ld.id == load_id)
+    assert load.fx.expression == "5 N * t / 1 s"
+
+
+def test_create_load_accepts_distance_sensor_expression() -> None:
+    app = make_app()
+    body_id = app.create_body("Block", [MarkerInput("0 mm", "0 mm", "A"), MarkerInput("30 mm", "40 mm", "B")])
+    marker_a = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "A")
+    marker_b = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "B")
+    app.create_sensor("Gap", "distance", [marker_a, marker_b])
+
+    load_id = app.create_load("Springish", marker_b, "2 N/mm * Gap.d", "0 N")
+
+    load = next(ld for ld in app.project.model.loads if ld.id == load_id)
+    assert load.fx.expression == "2 N/mm * Gap.d"
 
 
 def test_delete_load() -> None:
@@ -1664,3 +1773,45 @@ def test_update_load_property() -> None:
     assert app.project.model.loads[0].fx.expression == "20 N"
     app.update_load_property(load_id, "fy", "0 N")
     assert app.project.model.loads[0].fy.expression == "0 N"
+
+
+def test_get_marker_deletion_consequence_to_bar() -> None:
+    app = make_app()
+    body_id = app.create_body("T", [MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"), MarkerInput("50 mm", "50 mm", "C")])
+    body = app._find_body(body_id)
+    marker_c = next(m for m in body.markers if m.name == "C")
+    assert app.get_marker_deletion_consequence(marker_c.id) == "to_bar"
+
+
+def test_get_marker_deletion_consequence_to_point_mass() -> None:
+    app = make_app()
+    body_id = app.create_bar("B", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    body = app._find_body(body_id)
+    marker_b = next(m for m in body.markers if m.name == "B")
+    assert app.get_marker_deletion_consequence(marker_b.id) == "to_point_mass"
+
+
+def test_get_marker_deletion_consequence_normal() -> None:
+    app = make_app()
+    body_id = app.create_body("Q", [MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"), MarkerInput("50 mm", "50 mm", "C"), MarkerInput("0 mm", "50 mm", "D")])
+    body = app._find_body(body_id)
+    marker_d = next(m for m in body.markers if m.name == "D")
+    assert app.get_marker_deletion_consequence(marker_d.id) == "normal"
+
+
+def test_delete_structural_marker_convert_to_bar() -> None:
+    from quino.domain.types import BodyType
+    app = make_app()
+    body_id = app.create_body("T", [MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"), MarkerInput("50 mm", "50 mm", "C")])
+    body = app._find_body(body_id)
+    marker_c = next(m for m in body.markers if m.name == "C")
+    app.delete_structural_marker_convert_to_bar(marker_c.id)
+    assert body.type is BodyType.BAR
+    assert not body.closed_shape
+    assert len(body.structural_markers()) == 2
+    com = body.com_marker()
+    assert com.metadata.values.get("position_percent") == 50.0
+    cx = app.expression_service.evaluate_property(com.x, app.project.parameters).value
+    cy = app.expression_service.evaluate_property(com.y, app.project.parameters).value
+    assert abs(cx - 50.0) < 1e-6
+    assert abs(cy - 0.0) < 1e-6

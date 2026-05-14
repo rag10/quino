@@ -11,6 +11,7 @@ from quino.domain.model import (
     Body,
     Driver,
     Expression,
+    GravityLoad,
     Joint,
     JointEndpoint,
     Load,
@@ -32,6 +33,8 @@ from quino.domain.model import (
     SketchPoint,
     SketchSpline,
     Slider,
+    Spring,
+    SpringEndpoint,
     Style,
     ValidationMessage,
     ValidationReport,
@@ -47,6 +50,8 @@ from quino.domain.types import (
     SensorType,
     SketchConstraintType,
     SketchEntityType,
+    SpringEndpointKind,
+    SpringType,
 )
 from quino.serialization.json_io import JsonMapper
 from quino.services.expressions import ExpressionService
@@ -55,6 +60,7 @@ from quino.services.units import UnitService
 from quino.services.validation import ValidationService
 from quino.services.sketch_solver import SketchSolveResult, SketchSolver
 from quino.simulation.runner import SimulationRunner
+from quino.simulation.sensor_expressions import sensor_expression_variables
 from quino.solver_adapters.exudyn_adapter import ExudynAdapter
 
 
@@ -165,6 +171,8 @@ class ApplicationService:
             visible=True,
             style=Style(color="#9aa0a6", line_width=1.0, marker_size=4.0),
         )
+        origin_id = self.create_sketch_point("0 mm", "0 mm", name="O")
+        self.create_sketch_constraint("fix", [origin_id])
         return project.sketch.id
 
     def delete_sketch(self) -> None:
@@ -534,6 +542,8 @@ class ApplicationService:
         self._validate_sketch_constraint_name(constraint.name)
         self._snapshot()
         sketch.constraints[constraint.id] = constraint
+        if constraint_enum is SketchConstraintType.TANGENT:
+            self._create_tangent_helper_geometry(constraint, sketch, project)
         locked_refs = (
             set()
             if constraint_enum is SketchConstraintType.COINCIDENT and normalized_entity_refs
@@ -763,6 +773,57 @@ class ApplicationService:
 
     def create_bar(self, name: str, start: MarkerInput, end: MarkerInput) -> str:
         return self.create_body(name=name, markers=[start, end], body_type=BodyType.BAR.value)
+
+    def create_punctual_mass(self, name: str, x: str, y: str) -> str:
+        return self.create_body(name=name, markers=[MarkerInput(x, y, "P")], body_type=BodyType.POINT_MASS.value)
+
+    def get_marker_deletion_consequence(self, marker_id: str) -> str:
+        """Returns 'to_bar', 'to_point_mass', or 'normal' for deleting a structural marker."""
+        try:
+            body = self._find_body_by_marker(marker_id)
+        except ValueError:
+            return "normal"
+        marker = next((m for m in body.markers if m.id == marker_id), None)
+        if marker is None or marker.type is not MarkerType.STRUCTURAL:
+            return "normal"
+        remaining = len(body.structural_markers()) - 1
+        if remaining == 1:
+            return "to_point_mass"
+        if remaining == 2:
+            return "to_bar"
+        return "normal"
+
+    def delete_structural_marker_convert_to_bar(self, marker_id: str) -> None:
+        """Remove one structural marker from a 3-marker body and convert the result to a Bar."""
+        project = self._require_project()
+        body = self._find_body_by_marker(marker_id)
+        if len(body.structural_markers()) != 3:
+            raise ValueError("delete_structural_marker_convert_to_bar requires exactly 3 structural markers")
+        self._snapshot()
+        removed_joint_ids = {
+            joint.id
+            for joint in project.model.joints
+            if joint.endpoint_a.marker_id == marker_id or joint.endpoint_b.marker_id == marker_id
+        }
+        body.markers = [m for m in body.markers if m.id != marker_id]
+        body.edge_order = [mid for mid in body.edge_order if mid != marker_id]
+        project.model.joints = [
+            j for j in project.model.joints
+            if j.endpoint_a.marker_id != marker_id and j.endpoint_b.marker_id != marker_id
+        ]
+        project.model.drivers = [
+            d for d in project.model.drivers if d.target_joint_id not in removed_joint_ids
+        ]
+        project.model.sensors = [
+            s for s in project.model.sensors if marker_id not in s.marker_ids
+        ]
+        project.model.loads = [
+            load for load in project.model.loads if load.target_marker_id != marker_id
+        ]
+        body.type = BodyType.BAR
+        body.closed_shape = False
+        body.com_marker().metadata.values["position_percent"] = 50.0
+        self._set_bar_com_from_percent(body, 50.0)
 
     def add_marker_to_body(self, body_id: str, marker: MarkerInput) -> str:
         body = self._find_body(body_id)
@@ -1096,6 +1157,9 @@ class ApplicationService:
         if isinstance(entity, Joint) and property_path in {"friction_coulomb", "friction_viscous", "friction_pin_radius"}:
             self._update_joint_friction_property(entity, property_path, value)
             return
+        if isinstance(entity, Spring) and property_path in {"stiffness", "damping", "rest_value", "law"}:
+            self.update_spring_property(entity.id, property_path, value)
+            return
         if isinstance(entity, Marker) and property_path in {"x", "y"}:
             if value.kind != "expression" or not isinstance(value.value, str):
                 raise ValueError("Marker coordinates require an expression value")
@@ -1168,11 +1232,24 @@ class ApplicationService:
         self._snapshot()
         self._assign_scalar_property(entity, property_path, scalar)
 
-    def toggle_gravity(self, enabled: bool) -> None:
+    def add_gravity(self) -> None:
+        project = self._require_project()
+        if project.model.gravity is not None:
+            return
         self._snapshot()
-        self._require_project().model.gravity.enabled = enabled
+        project.model.gravity = GravityLoad()
+
+    def delete_gravity(self) -> None:
+        project = self._require_project()
+        if project.model.gravity is None:
+            return
+        self._snapshot()
+        project.model.gravity = None
 
     def delete_entity(self, entity_id: str) -> None:
+        if entity_id == "__gravity__":
+            self.delete_gravity()
+            return
         project = self._require_project()
         if project.sketch is not None and entity_id in project.sketch.entities:
             self.delete_sketch_entity(entity_id)
@@ -1557,6 +1634,7 @@ class ApplicationService:
             project.model.drivers,
             project.model.loads,
             project.model.sensors,
+            project.model.springs,
             project.parameters,
         ):
             for entity in collection:
@@ -1568,7 +1646,10 @@ class ApplicationService:
 
     def _find_entity(self, entity_id: str) -> object:
         if entity_id == "__gravity__":
-            return self._require_project().model.gravity
+            gravity = self._require_project().model.gravity
+            if gravity is None:
+                raise ValueError("No gravity in this project")
+            return gravity
         if self._entity_index is None:
             self._entity_index = self._build_entity_index()
         entity = self._entity_index.get(entity_id)
@@ -1639,7 +1720,12 @@ class ApplicationService:
         if current is not None and isinstance(current, ScalarProperty):
             unit = current.unit
         scalar = ScalarProperty(expression=expression, unit=unit, expected_dimension=dimension_map[property_path])
-        variables = {"t": self.unit_service.quantity(0.0, "s")} if property_path == "law" else None
+        if property_path == "law":
+            variables = {"t": self.unit_service.quantity(0.0, "s")}
+        elif property_path in {"fx", "fy"}:
+            variables = self._load_expression_variables(self._require_project(), time_value=0.0)
+        else:
+            variables = None
         self.expression_service.evaluate_property(scalar, self._require_project().parameters, variables=variables)
         return scalar
 
@@ -1654,6 +1740,8 @@ class ApplicationService:
 
     def _update_gravity_property(self, path: str, value: PropertyValueInput) -> None:
         gravity = self._require_project().model.gravity
+        if gravity is None:
+            raise ValueError("No gravity in this project")
         if path not in {"magnitude", "direction_x", "direction_y"}:
             raise ValueError(f"Unknown gravity property: {path}")
         if value.kind != "expression":
@@ -1692,10 +1780,15 @@ class ApplicationService:
             raise ValueError("This joint topology does not support friction")
         if value.kind != "expression" or not isinstance(value.value, str):
             raise ValueError(f"{path} requires a numeric value")
-        try:
-            numeric = float(value.value.strip().replace(",", "."))
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"{path} must be a number") from exc
+        if path == "friction_pin_radius":
+            scalar = self._scalar(value.value, "mm", Dimension.LENGTH)
+            result = self.expression_service.evaluate_property(scalar, self._require_project().parameters)
+            numeric = result.value
+        else:
+            try:
+                numeric = float(value.value.strip().replace(",", "."))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{path} must be a number") from exc
         self._snapshot()
         joint.metadata.values[path] = numeric
 
@@ -1712,9 +1805,12 @@ class ApplicationService:
             raise ValueError(f"Style field '{field}' requires a numeric expression")
         if expected_type is float:
             try:
-                float(value.value)
+                float_value = float(value.value)
             except Exception:
                 raise ValueError(f"Style field '{field}' requires a numeric value")
+            self._snapshot()
+            setattr(entity.style, field, float_value)
+            return
         self._snapshot()
         setattr(entity.style, field, value.value)
 
@@ -1868,6 +1964,22 @@ class ApplicationService:
             if not isinstance(entity, (SketchLineSegment, SketchInfiniteLine, SketchCircle, SketchArc)):
                 raise ValueError("Coincident point-entity constraint requires a line, circle, or arc entity reference")
             return
+        if constraint_type is SketchConstraintType.TANGENT:
+            entity_refs = entity_references or []
+            if len(references) == 2 and len(entity_refs) == 1:
+                entity = self._find_sketch_entity(entity_refs[0])
+                if not isinstance(entity, (SketchCircle, SketchArc)):
+                    raise ValueError("Tangent constraint requires a circle or arc entity reference")
+                return
+            if len(references) == 0 and len(entity_refs) == 2:
+                first = self._find_sketch_entity(entity_refs[0])
+                second = self._find_sketch_entity(entity_refs[1])
+                if not isinstance(first, (SketchCircle, SketchArc)) or not isinstance(second, (SketchCircle, SketchArc)):
+                    raise ValueError("Curve-curve tangent requires two circle or arc entity references")
+                if entity_refs[0] == entity_refs[1]:
+                    raise ValueError("Tangent constraint requires two distinct curve entities")
+                return
+            raise ValueError("Tangent constraint requires either 1 line + 1 circle/arc or 2 circles/arcs")
         spec = CONSTRAINT_SPECS.get(constraint_type)
         expected_pts = spec.points if spec is not None else 2
         if len(references) != expected_pts:
@@ -1894,6 +2006,78 @@ class ApplicationService:
                     raise ValueError("On-circle constraint requires a circle or arc entity reference")
                 if constraint_type is SketchConstraintType.TANGENT and not isinstance(entity, (SketchCircle, SketchArc)):
                     raise ValueError("Tangent constraint requires a circle or arc entity reference")
+
+    def _create_tangent_helper_geometry(self, constraint: SketchConstraint, sketch: Sketch, project: Project) -> None:
+        if len(constraint.references) != 2 or len(constraint.entity_references) != 1:
+            return
+        line_entity = self._find_line_entity_by_points(constraint.references, sketch)
+        if line_entity is None:
+            return
+        curve_entity = self._find_sketch_entity(constraint.entity_references[0])
+        if not isinstance(curve_entity, (SketchCircle, SketchArc)):
+            return
+        center = self._find_sketch_point(curve_entity.center_point_id)
+        line_a = self._find_sketch_point(constraint.references[0])
+        line_b = self._find_sketch_point(constraint.references[1])
+        cx = self._evaluate_sketch_expression(center.x, project.parameters)
+        cy = self._evaluate_sketch_expression(center.y, project.parameters)
+        ax = self._evaluate_sketch_expression(line_a.x, project.parameters)
+        ay = self._evaluate_sketch_expression(line_a.y, project.parameters)
+        bx = self._evaluate_sketch_expression(line_b.x, project.parameters)
+        by = self._evaluate_sketch_expression(line_b.y, project.parameters)
+        dx = bx - ax
+        dy = by - ay
+        denom = dx * dx + dy * dy
+        if denom <= 1e-12:
+            tx, ty = cx, cy
+        else:
+            t = ((cx - ax) * dx + (cy - ay) * dy) / denom
+            tx = ax + t * dx
+            ty = ay + t * dy
+        helper = SketchPoint(
+            id=self.id_service.new("skpt"),
+            name=self._next_sketch_name("TangentPoint"),
+            type=SketchEntityType.POINT,
+            x=Expression(self._mm_expression(tx)),
+            y=Expression(self._mm_expression(ty)),
+            visible=True,
+            construction=True,
+        )
+        sketch.entities[helper.id] = helper
+        line_constraint = SketchConstraint(
+            id=self.id_service.new("skcon"),
+            name=self._next_sketch_constraint_name("Coincident"),
+            type=SketchConstraintType.COINCIDENT,
+            references=[helper.id],
+            entity_references=[line_entity.id],
+        )
+        sketch.constraints[line_constraint.id] = line_constraint
+        curve_constraint = SketchConstraint(
+            id=self.id_service.new("skcon"),
+            name=self._next_sketch_constraint_name("Coincident"),
+            type=SketchConstraintType.COINCIDENT,
+            references=[helper.id],
+            entity_references=[curve_entity.id],
+        )
+        sketch.constraints[curve_constraint.id] = curve_constraint
+
+    def _find_line_entity_by_points(
+        self,
+        point_ids: list[str],
+        sketch: Sketch,
+    ) -> SketchLineSegment | SketchInfiniteLine | None:
+        target = tuple(point_ids[:2])
+        reversed_target = (target[1], target[0])
+        for entity in sketch.entities.values():
+            if isinstance(entity, SketchLineSegment):
+                refs = (entity.start_point_id, entity.end_point_id)
+            elif isinstance(entity, SketchInfiniteLine):
+                refs = (entity.point_a_id, entity.point_b_id)
+            else:
+                continue
+            if refs == target or refs == reversed_target:
+                return entity
+        return None
 
     def _current_sketch_angle_expression(
         self, vertex_id: str, arm1_id: str, arm2_id: str
@@ -3078,6 +3262,22 @@ class ApplicationService:
         )
         return self.unit_service.convert(quantity, unit)
 
+    def _load_expression_variables(
+        self,
+        project: Project,
+        *,
+        time_value: float = 0.0,
+    ) -> dict[str, object]:
+        assembled = self.simulation_runner.adapter.assembler.assemble(project)
+        frame: dict[str, float] = {}
+        for body_id, body in assembled.bodies.items():
+            frame[f"{body_id}.x"] = body.origin_x
+            frame[f"{body_id}.y"] = body.origin_y
+            frame[f"{body_id}.angle"] = body.angle
+        variables = {"t": self.unit_service.quantity(time_value, "s")}
+        variables.update(sensor_expression_variables(project, assembled, frame, self.unit_service))
+        return variables
+
     def _driven_marker_position(self, body, ground_marker, driven_marker, driver_angle: float) -> tuple[float, float]:
         absolute_angle = body.angle + driver_angle
         cos_a = math.cos(absolute_angle)
@@ -3130,6 +3330,23 @@ class ApplicationService:
                         driver.id,
                     )
                 )
+        for load in project.model.loads:
+            for component_name, component in (("Fx", load.fx), ("Fy", load.fy)):
+                try:
+                    self.expression_service.evaluate_property(
+                        component,
+                        project.parameters,
+                        variables=self._load_expression_variables(project, time_value=0.0),
+                    )
+                except Exception as exc:
+                    report.messages.append(
+                        ValidationMessage(
+                            "warning",
+                            "load_evaluation",
+                            f"Load {load.name} {component_name}: {exc}",
+                            load.id,
+                        )
+                    )
         if project.sketch is not None:
             for entity in project.sketch.entities.values():
                 if isinstance(entity, SketchPoint):
@@ -3231,8 +3448,9 @@ class ApplicationService:
         load_id = self.id_service.new("load")
         fx = ScalarProperty(expression=fx_expression, unit="N", expected_dimension=Dimension.FORCE)
         fy = ScalarProperty(expression=fy_expression, unit="N", expected_dimension=Dimension.FORCE)
-        self.expression_service.evaluate_property(fx, self.project.parameters)
-        self.expression_service.evaluate_property(fy, self.project.parameters)
+        variables = self._load_expression_variables(self.project, time_value=0.0)
+        self.expression_service.evaluate_property(fx, self.project.parameters, variables=variables)
+        self.expression_service.evaluate_property(fy, self.project.parameters, variables=variables)
         load = Load(
             id=load_id,
             name=name,
@@ -3266,5 +3484,112 @@ class ApplicationService:
         if load is None:
             raise ValueError(f"Load {load_id} not found")
         scalar = self._build_validated_scalar_property(load, property_path, expression)
+        self.expression_service.evaluate_property(
+            scalar,
+            self.project.parameters,
+            variables=self._load_expression_variables(self.project, time_value=0.0),
+        )
         self._snapshot()
         self._assign_scalar_property(load, property_path, scalar)
+
+    # ------------------------------------------------------------------ springs
+
+    def create_spring(
+        self,
+        name: str,
+        spring_type: str,
+        endpoint_a: SpringEndpoint,
+        endpoint_b: SpringEndpoint,
+    ) -> str:
+        project = self._require_project()
+        spring_id = self.id_service.new("spring")
+        is_rotational = spring_type in ("rotational_spring", "rotational_actuator")
+        rest_value = ScalarProperty(
+            expression="0 deg" if is_rotational else "0 mm",
+            unit="deg" if is_rotational else "mm",
+            expected_dimension=Dimension.ANGLE if is_rotational else Dimension.LENGTH,
+        )
+        law = None
+        if spring_type in ("linear_actuator", "rotational_actuator"):
+            law = ScalarProperty(
+                expression="0 N*mm" if is_rotational else "0 N",
+                unit="N*mm" if is_rotational else "N",
+                expected_dimension=Dimension.TORQUE if is_rotational else Dimension.FORCE,
+            )
+        spring = Spring(
+            id=spring_id,
+            name=name,
+            spring_type=SpringType(spring_type),
+            endpoint_a=endpoint_a,
+            endpoint_b=endpoint_b,
+            rest_value=rest_value,
+            law=law,
+            metadata=Metadata({"stiffness": 0.0, "damping": 0.0}),
+        )
+        self._snapshot()
+        project.model.springs.append(spring)
+        return spring_id
+
+    def delete_spring(self, spring_id: str) -> None:
+        project = self._require_project()
+        self._snapshot()
+        project.model.springs = [sp for sp in project.model.springs if sp.id != spring_id]
+
+    def rename_spring(self, spring_id: str, name: str) -> None:
+        spring = self._require_spring(spring_id)
+        self._snapshot()
+        spring.name = name
+
+    def get_spring(self, spring_id: str) -> Spring:
+        return self._require_spring(spring_id)
+
+    def spring_stiffness(self, spring: Spring) -> float:
+        try:
+            return float(spring.metadata.values.get("stiffness", 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def spring_damping(self, spring: Spring) -> float:
+        try:
+            return float(spring.metadata.values.get("damping", 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def update_spring_property(self, spring_id: str, property_path: str, value: "PropertyValueInput") -> None:
+        spring = self._require_spring(spring_id)
+        project = self._require_project()
+        if value.kind != "expression" or not isinstance(value.value, str):
+            raise ValueError(f"{property_path} requires an expression value")
+        if property_path in ("stiffness", "damping"):
+            try:
+                numeric = float(value.value.strip().replace(",", "."))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{property_path} must be a plain number") from exc
+            self._snapshot()
+            spring.metadata.values[property_path] = numeric
+            return
+        if property_path == "rest_value":
+            is_rotational = spring.spring_type in (SpringType.ROTATIONAL_SPRING, SpringType.ROTATIONAL_ACTUATOR)
+            scalar = self._scalar(value.value, "deg" if is_rotational else "mm", Dimension.ANGLE if is_rotational else Dimension.LENGTH)
+            self.expression_service.evaluate_property(scalar, project.parameters)
+            self._snapshot()
+            spring.rest_value = scalar
+            return
+        if property_path == "law":
+            is_rotational = spring.spring_type in (SpringType.ROTATIONAL_ACTUATOR,)
+            scalar = self._scalar(value.value, "N*mm" if is_rotational else "N", Dimension.TORQUE if is_rotational else Dimension.FORCE)
+            self.expression_service.evaluate_property(
+                scalar, project.parameters,
+                variables={"t": self.expression_service.unit_service.quantity(0.0, "s")},
+            )
+            self._snapshot()
+            spring.law = scalar
+            return
+        raise ValueError(f"Unknown spring property: {property_path}")
+
+    def _require_spring(self, spring_id: str) -> Spring:
+        project = self._require_project()
+        spring = next((sp for sp in project.model.springs if sp.id == spring_id), None)
+        if spring is None:
+            raise ValueError(f"Spring {spring_id} not found")
+        return spring

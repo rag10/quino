@@ -146,10 +146,19 @@ class SketchSolver:
     ) -> float:
         refs = [pid for pid in constraint.references if pid in positions]
         t = constraint.type
-        if t is SketchConstraintType.FIX or not refs:
+        if t is SketchConstraintType.FIX:
+            return 0.0
+        if not refs and not (
+            t is SketchConstraintType.TANGENT and len(constraint.entity_references) == 2
+        ):
             return 0.0
         # Special forms using one point + one entity ref bypass the fixed point-count spec.
         if t in {SketchConstraintType.DISTANCE, SketchConstraintType.RADIUS, SketchConstraintType.COINCIDENT} and len(constraint.entity_references) == 1:
+            handler = self._handlers.get(t)
+            if handler is None:
+                return float("inf")
+            return handler(project, sketch, constraint, refs, positions, locked_axes, tolerance)
+        if t is SketchConstraintType.TANGENT:
             handler = self._handlers.get(t)
             if handler is None:
                 return float("inf")
@@ -244,6 +253,16 @@ class SketchSolver:
         if not constraint.entity_references or constraint.value is None:
             return 0.0
         sign = self.expression_service.evaluate_property(constraint.value, project.parameters).value
+        if len(constraint.entity_references) == 2 and not refs:
+            return self._apply_curve_tangent(
+                project,
+                constraint.entity_references,
+                sign,
+                sketch,
+                positions,
+                locked_axes,
+                tolerance,
+            )
         return self._apply_tangent(
             project,
             refs,
@@ -742,7 +761,7 @@ class SketchSolver:
         positions: dict[str, tuple[float, float]],
         locked_axes: dict[str, list[bool]],
         tolerance: float,
-    ) -> float:
+        ) -> float:
         """refs = [line_p1, line_p2]. entity_refs = [circle_entity_id].
         sign=+1 → exterior tangency (center on positive side of line),
         sign=-1 → interior."""
@@ -785,6 +804,34 @@ class SketchSolver:
             positions[refs[0]] = (p1x + shift * nx, p1y + shift * ny)
             positions[refs[1]] = (p2x + shift * nx, p2y + shift * ny)
         return abs(error)
+
+    def _apply_curve_tangent(
+        self,
+        project: Project,
+        entity_refs: list[str],
+        sign: float,
+        sketch: Sketch,
+        positions: dict[str, tuple[float, float]],
+        locked_axes: dict[str, list[bool]],
+        tolerance: float,
+    ) -> float:
+        first = sketch.entities.get(entity_refs[0])
+        second = sketch.entities.get(entity_refs[1])
+        if not isinstance(first, (SketchCircle, SketchArc)) or not isinstance(second, (SketchCircle, SketchArc)):
+            return 0.0
+        radius_first = self._entity_radius(first, project, positions)
+        radius_second = self._entity_radius(second, project, positions)
+        if radius_first is None or radius_second is None:
+            return 0.0
+        target = radius_first + radius_second if sign >= 0 else abs(radius_first - radius_second)
+        return self._apply_distance(
+            first.center_point_id,
+            second.center_point_id,
+            target,
+            positions,
+            locked_axes,
+            tolerance,
+        )
 
     def _entity_radius(
         self,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from PySide6 import QtCore, QtTest, QtWidgets
+from PySide6 import QtCore, QtGui, QtTest, QtWidgets
 
 from quino.application.service import ApplicationService
 from quino.domain.inputs import MarkerInput, PropertyValueInput, SliderInput
@@ -30,7 +30,7 @@ def test_main_window_loads_examples_and_runs_validation() -> None:
 
     assert window.app_service.project is not None
     assert window.app_service.project.name == "Four Bar"
-    assert window.tree.topLevelItemCount() == 7
+    assert window.tree.topLevelItemCount() == 8
     assert "Bodies: 3" in window.canvas_summary.toPlainText()
     assert window.canvas is not None
     assert not window.canvas.grab().isNull()
@@ -904,6 +904,67 @@ def test_canvas_can_create_rectangle_and_keep_line_polyline_active() -> None:
     QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=window.canvas.screen_position_for_world(160.0, 0.0))
     qt_app.processEvents()
     assert window.canvas.mode() == "create_sketch_line_segment"
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_arc_tool_uses_center_start_end_mode() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    window.action_sketch_arc_tool.trigger()
+    qt_app.processEvents()
+
+    assert window.canvas.mode() == "create_sketch_arc_center"
+    assert "Click center, start, end" in window.statusBar().currentMessage()
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_concentric_tool_accepts_arc_and_circle() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    center_circle = window.app_service.create_sketch_point("0 mm", "0 mm", "O1")
+    circle_id = window.app_service.create_sketch_circle(center_circle, "10 mm", "C1")
+    arc_id = window.app_service.create_sketch_arc_by_center(10.0, 0.0, 20.0, 0.0, 10.0, 10.0, "A1")
+    window.refresh_all()
+
+    window.action_sketch_concentric_tool.trigger()
+    window.canvas.inject_entity_selection(circle_id)
+    window.canvas.inject_entity_selection(arc_id)
+    qt_app.processEvents()
+
+    assert any(
+        constraint.type.value == "coincident" and len(constraint.references) == 2
+        for constraint in window.app_service.project.sketch.constraints.values()
+    )
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_solve_button_runs_sketch_solver() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    p1 = window.app_service.create_sketch_point("0 mm", "0 mm", "A")
+    p2 = window.app_service.create_sketch_point("40 mm", "15 mm", "B")
+    window.app_service.create_sketch_constraint("horizontal", [p1, p2], name="H1")
+    window.refresh_all()
+
+    window.action_solve_sketch.trigger()
+    qt_app.processEvents()
+
+    assert "Sketch solved" in window.messages.toPlainText()
 
     window.close()
     qt_app.processEvents()

@@ -36,6 +36,7 @@ class Dimension(StrEnum):
     MASS = "mass"
     INERTIA = "inertia"
     FORCE = "force"
+    TORQUE = "torque"
     TIME = "time"
     UNITLESS = "unitless"
 
@@ -80,6 +81,18 @@ class SketchConstraintType(StrEnum):
     SYMMETRIC = "symmetric"
     ON_CIRCLE = "on_circle"
     TANGENT = "tangent"
+
+
+class SpringType(StrEnum):
+    LINEAR_SPRING = "linear_spring"
+    ROTATIONAL_SPRING = "rotational_spring"
+    LINEAR_ACTUATOR = "linear_actuator"
+    ROTATIONAL_ACTUATOR = "rotational_actuator"
+
+
+class SpringEndpointKind(StrEnum):
+    MARKER = "marker"
+    GROUND = "ground"
 
 
 class SketchState(StrEnum):

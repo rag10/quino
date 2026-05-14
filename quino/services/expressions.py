@@ -136,6 +136,12 @@ class ExpressionService:
                 raise ValueError(f"Unsupported function: {node.func.id}")
             args = [self._eval_node(arg, env, parameter_map, seen, variables) for arg in node.args]
             return func(*args)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            key = f"{node.value.id}.{node.attr}"
+            value = env.get(key)
+            if isinstance(value, Quantity):
+                return value
+            raise ValueError(f"Unknown sensor channel: {key}")
         raise ValueError("Unsupported expression")
 
     def _sin(self, value: Quantity) -> Quantity:

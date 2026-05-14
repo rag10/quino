@@ -6,7 +6,7 @@ from typing import Any
 from quino.domain.model import Project
 from quino.domain.types import Dimension, JointEndpointKind, JointType
 from quino.services.expressions import ExpressionService
-from quino.simulation.assembler import AssembledBody, AssembledLoad, AssembledMechanism, AssembledSlider
+from quino.simulation.assembler import AssembledBody, AssembledLoad, AssembledMechanism, AssembledSlider, AssembledSpring
 
 
 def _body_com_global(body: AssembledBody) -> tuple[float, float]:
@@ -148,7 +148,7 @@ def _generate_bodies(project: Project, assembled: AssembledMechanism) -> list[st
             f"physicsCenterOfMass=[0.0, 0.0], "
             f"visualization=item_interface.VObjectRigidBody2D(graphicsData=graphics_{b})))"
         )
-        if body.mass > 0 and assembled.gravity.enabled:
+        if body.mass > 0 and assembled.gravity is not None:
             g = assembled.gravity
             lines.append(
                 f"gm_{b} = mbs.AddMarker(item_interface.MarkerBodyMass("
@@ -300,8 +300,9 @@ def _joint_friction_lines(assembled: AssembledMechanism, joint) -> list[str]:
         # Physics-based: F = μ × |F_normal| × sign(v) + c × v
         lines.append(f"def _joint_friction_{sj}(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):")
         lines.append("    try:")
-        lines.append(f"        forces = mbs.GetObjectOutput(pjoint_{sj}, exudyn.OutputVariableType.Lagrange)")
-        lines.append("        N = abs(float(forces[0]))")
+        lines.append(f"        forces = mbs.GetObjectOutput(pjoint_{sj}, exudyn.OutputVariableType.Force)")
+        lines.append("        raw = forces[0] if hasattr(forces, '__len__') else forces")
+        lines.append("        N = abs(float(raw))")
         lines.append("    except Exception:")
         lines.append("        N = 0.0")
         lines.append("    sign = 1.0 if velocity > 1e-12 else -1.0 if velocity < -1e-12 else 0.0")
@@ -333,7 +334,7 @@ def _joint_friction_lines(assembled: AssembledMechanism, joint) -> list[str]:
             r_m = pin_radius_mm * 1e-3
             lines.append(f"def _joint_friction_{sj}(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):")
             lines.append("    try:")
-            lines.append(f"        forces = mbs.GetObjectOutput(pjoint_{sj}, exudyn.OutputVariableType.Lagrange)")
+            lines.append(f"        forces = mbs.GetObjectOutput(pjoint_{sj}, exudyn.OutputVariableType.Force)")
             lines.append("        N = math.sqrt(float(forces[0])**2 + float(forces[1])**2)")
             lines.append("    except Exception:")
             lines.append("        N = 0.0")
@@ -533,6 +534,75 @@ def _generate_loads(assembled: AssembledMechanism) -> list[str]:
     return lines
 
 
+def _generate_springs(assembled: AssembledMechanism) -> list[str]:
+    if not assembled.springs:
+        return []
+    lines: list[str] = ["# --- Springs / Actuators ---", ""]
+    for s in assembled.springs:
+        sv = _safe_var(s.spring_id)
+        is_rotational = s.spring_type in ("rotational_spring", "rotational_actuator")
+        is_actuator = s.spring_type in ("linear_actuator", "rotational_actuator")
+
+        def _ep_marker(ep, suffix: str) -> str:
+            if ep.kind == "ground":
+                return (
+                    f"mbs.AddMarker(item_interface.MarkerBodyPosition("
+                    f"bodyNumber=ground_object, localPosition=[{ep.anchor_x * 1e-3}, {ep.anchor_y * 1e-3}, 0.0]))"
+                )
+            b = _safe_var(ep.body_id)
+            return (
+                f"mbs.AddMarker(item_interface.MarkerBodyPosition("
+                f"bodyNumber=body_{b}, localPosition=[{ep.anchor_x * 1e-3}, {ep.anchor_y * 1e-3}, 0.0]))"
+            )
+
+        def _ep_angle(ep, suffix: str) -> str:
+            if ep.kind == "ground":
+                gn = f"gn_spring_{sv}_{suffix}"
+                lines.append(f"{gn} = mbs.AddNode(item_interface.NodePointGround(referenceCoordinates=[0.0, 0.0, 0.0]))")
+                return f"mbs.AddMarker(item_interface.MarkerNodeCoordinate(nodeNumber={gn}, coordinate=0))"
+            b = _safe_var(ep.body_id)
+            return f"mbs.AddMarker(item_interface.MarkerNodeCoordinate(nodeNumber=node_{b}, coordinate=2))"
+
+        if not is_rotational:
+            lines.append(f"spm_a_{sv} = {_ep_marker(s.endpoint_a, 'a')}")
+            lines.append(f"spm_b_{sv} = {_ep_marker(s.endpoint_b, 'b')}")
+            if is_actuator:
+                law_expr = s.law_expression or "0"
+                lines.append(f"def _spring_law_{sv}(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):")
+                lines.append(f"    # law: {law_expr}  (in N)")
+                lines.append(f"    return 0.0  # TODO: evaluate {_py_repr(law_expr)} at t")
+                lines.append(f"mbs.AddObject(item_interface.ObjectConnectorSpringDamper("
+                             f"name={_py_repr(s.name)}, markerNumbers=[spm_a_{sv}, spm_b_{sv}], "
+                             f"stiffness=0.0, damping=0.0, referenceLength=0.0, springForceUserFunction=_spring_law_{sv}))")
+            else:
+                k = s.stiffness * 1e3
+                c = s.damping * 1e3
+                L0 = s.rest_value * 1e-3
+                lines.append(f"mbs.AddObject(item_interface.ObjectConnectorSpringDamper("
+                             f"name={_py_repr(s.name)}, markerNumbers=[spm_a_{sv}, spm_b_{sv}], "
+                             f"stiffness={k}, damping={c}, referenceLength={L0}))")
+        else:
+            lines.append(f"spm_a_{sv} = {_ep_angle(s.endpoint_a, 'a')}")
+            lines.append(f"spm_b_{sv} = {_ep_angle(s.endpoint_b, 'b')}")
+            if is_actuator:
+                law_expr = s.law_expression or "0"
+                lines.append(f"def _spring_law_{sv}(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):")
+                lines.append(f"    # law: {law_expr}  (in N*mm)")
+                lines.append(f"    return 0.0  # TODO: evaluate {_py_repr(law_expr)} at t")
+                lines.append(f"mbs.AddObject(item_interface.ObjectConnectorCoordinateSpringDamper("
+                             f"name={_py_repr(s.name)}, markerNumbers=[spm_a_{sv}, spm_b_{sv}], "
+                             f"stiffness=0.0, damping=0.0, offset=0.0, springForceUserFunction=_spring_law_{sv}))")
+            else:
+                k = s.stiffness * 1e-3
+                c = s.damping * 1e-3
+                theta0 = s.rest_value
+                lines.append(f"mbs.AddObject(item_interface.ObjectConnectorCoordinateSpringDamper("
+                             f"name={_py_repr(s.name)}, markerNumbers=[spm_a_{sv}, spm_b_{sv}], "
+                             f"stiffness={k}, damping={c}, offset={theta0}))")
+        lines.append("")
+    return lines
+
+
 def generate_exudyn_script(
     project: Project,
     assembled: AssembledMechanism,
@@ -561,7 +631,8 @@ def generate_exudyn_script(
     lines.extend(_generate_joints(assembled))
     lines.extend(_generate_drivers(assembled))
     lines.extend(_generate_loads(assembled))
-    if assembled.gravity.enabled:
+    lines.extend(_generate_springs(assembled))
+    if assembled.gravity is not None:
         g = assembled.gravity
         lines.append(f"mbs.SetGravity([{g.magnitude * g.direction_x}, {g.magnitude * g.direction_y}, 0])")
     else:

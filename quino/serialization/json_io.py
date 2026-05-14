@@ -28,6 +28,8 @@ from quino.domain.model import (
     SketchPoint,
     SketchSpline,
     Slider,
+    Spring,
+    SpringEndpoint,
     Style,
     Variable,
     ViewState,
@@ -42,6 +44,8 @@ from quino.domain.types import (
     SensorType,
     SketchEntityType,
     SketchConstraintType,
+    SpringEndpointKind,
+    SpringType,
 )
 
 
@@ -63,12 +67,12 @@ class JsonMapper:
                 "drivers": [self._driver_to_dict(driver) for driver in project.model.drivers],
                 "loads": [self._load_to_dict(load) for load in project.model.loads],
                 "sensors": [self._sensor_to_dict(sensor) for sensor in project.model.sensors],
+                "springs": [self._spring_to_dict(spring) for spring in project.model.springs],
                 "gravity": {
-                    "enabled": project.model.gravity.enabled,
                     "magnitude": project.model.gravity.magnitude,
                     "direction_x": project.model.gravity.direction_x,
                     "direction_y": project.model.gravity.direction_y,
-                },
+                } if project.model.gravity is not None else None,
             },
             "view_state": {
                 "zoom": project.view_state.zoom,
@@ -97,7 +101,8 @@ class JsonMapper:
                 drivers=[self._driver_from_dict(item) for item in model_block.get("drivers", [])],
                 loads=[self._load_from_dict(item) for item in model_block.get("loads", [])],
                 sensors=[self._sensor_from_dict(item) for item in model_block.get("sensors", [])],
-                gravity=GravityLoad(**model_block.get("gravity", {})),
+                springs=[self._spring_from_dict(item) for item in model_block.get("springs", [])],
+                gravity=self._gravity_from_dict(model_block.get("gravity")),
             ),
             view_state=ViewState(**data.get("view_state", {})),
             metadata=Metadata(project_block.get("metadata", {})),
@@ -346,6 +351,65 @@ class JsonMapper:
             name=data["name"],
             type=SensorType(data["type"]),
             marker_ids=data.get("marker_ids", []),
+            metadata=Metadata(data.get("metadata", {})),
+        )
+
+    def _gravity_from_dict(self, data: dict | None) -> GravityLoad | None:
+        if data is None:
+            return None
+        # backward compat: old format had an 'enabled' boolean field
+        if not data.get("enabled", True):
+            return None
+        return GravityLoad(
+            magnitude=data.get("magnitude", 9.81),
+            direction_x=data.get("direction_x", 0.0),
+            direction_y=data.get("direction_y", -1.0),
+        )
+
+    def _spring_endpoint_to_dict(self, ep: SpringEndpoint) -> dict:
+        result: dict = {"kind": ep.kind.value}
+        if ep.body_id is not None:
+            result["body_id"] = ep.body_id
+        if ep.marker_id is not None:
+            result["marker_id"] = ep.marker_id
+        if ep.ground_x is not None:
+            result["ground_x"] = self._scalar_to_dict(ep.ground_x)
+        if ep.ground_y is not None:
+            result["ground_y"] = self._scalar_to_dict(ep.ground_y)
+        return result
+
+    def _spring_endpoint_from_dict(self, data: dict) -> SpringEndpoint:
+        return SpringEndpoint(
+            kind=SpringEndpointKind(data["kind"]),
+            body_id=data.get("body_id"),
+            marker_id=data.get("marker_id"),
+            ground_x=self._scalar_from_dict(data.get("ground_x")),
+            ground_y=self._scalar_from_dict(data.get("ground_y")),
+        )
+
+    def _spring_to_dict(self, spring: Spring) -> dict:
+        return {
+            "id": spring.id,
+            "name": spring.name,
+            "spring_type": spring.spring_type.value,
+            "endpoint_a": self._spring_endpoint_to_dict(spring.endpoint_a),
+            "endpoint_b": self._spring_endpoint_to_dict(spring.endpoint_b),
+            "rest_value": self._scalar_to_dict(spring.rest_value),
+            "law": self._scalar_to_dict(spring.law),
+            "style": self._style_to_dict(spring.style),
+            "metadata": spring.metadata.values,
+        }
+
+    def _spring_from_dict(self, data: dict) -> Spring:
+        return Spring(
+            id=data["id"],
+            name=data["name"],
+            spring_type=SpringType(data["spring_type"]),
+            endpoint_a=self._spring_endpoint_from_dict(data["endpoint_a"]),
+            endpoint_b=self._spring_endpoint_from_dict(data["endpoint_b"]),
+            rest_value=self._scalar_from_dict(data.get("rest_value")),
+            law=self._scalar_from_dict(data.get("law")),
+            style=self._style_from_dict(data.get("style")),
             metadata=Metadata(data.get("metadata", {})),
         )
 

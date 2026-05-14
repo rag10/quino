@@ -19,9 +19,11 @@ from quino.domain.model import (
     SketchLineSegment,
     SketchPoint,
     Slider,
+    Spring,
+    SpringEndpoint,
 )
 from quino.domain.sketch_constraints import CONSTRAINT_SPECS, ConstraintSpec
-from quino.domain.types import DriverType, JointEndpointKind, JointType, MarkerType, SketchConstraintType, SketchEntityType
+from quino.domain.types import BodyType, DriverType, JointEndpointKind, JointType, MarkerType, SketchConstraintType, SketchEntityType, SpringEndpointKind
 from quino.services.sketch_dof import SketchDofAnalyzer
 from quino.simulation.assembler import AssembledMechanism
 
@@ -83,6 +85,7 @@ class SnapCandidate:
 class CanvasMode:
     SELECT = "select"
     CREATE_BAR = "create_bar"
+    CREATE_POINT_MASS = "create_point_mass"
     CREATE_BODY = "create_body"
     ADD_MARKER = "add_marker"
     CREATE_REVOLUTE = "create_revolute"
@@ -98,11 +101,14 @@ class CanvasMode:
     CREATE_ANGLE_VERTICAL_SENSOR = "create_angle_vertical_sensor"
     CREATE_ANGLE_VECTOR_SENSOR = "create_angle_vector_sensor"
     CREATE_LOAD = "create_load"
+    CREATE_LINEAR_SPRING = "create_linear_spring"
+    CREATE_ROTATIONAL_SPRING = "create_rotational_spring"
+    CREATE_LINEAR_ACTUATOR = "create_linear_actuator"
+    CREATE_ROTATIONAL_ACTUATOR = "create_rotational_actuator"
     CREATE_SKETCH_POINT = "create_sketch_point"
     CREATE_SKETCH_LINE_SEGMENT = "create_sketch_line_segment"
     CREATE_SKETCH_RECTANGLE = "create_sketch_rectangle"
     CREATE_SKETCH_CIRCLE = "create_sketch_circle"
-    CREATE_SKETCH_ARC = "create_sketch_arc"
     CREATE_SKETCH_INFINITE_LINE = "create_sketch_infinite_line"
     CREATE_SKETCH_FIX = "create_sketch_fix"
     CREATE_SKETCH_HORIZONTAL = "create_sketch_horizontal"
@@ -209,6 +215,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._selected_entity_id: str | None = None
         self._selected_entity_ids: set[str] = set()
         self._state_overlay: dict[str, float] | None = None
+        self._simulation_time: float = 0.0
         self._screen_markers: list[tuple[CanvasMarker, QtCore.QPointF]] = []
         self._screen_bodies: list[tuple[str, str, object]] = []
         self._screen_sliders: list[tuple[CanvasSlider, QtCore.QLineF, QtCore.QPointF]] = []
@@ -219,11 +226,14 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._screen_joints: list[tuple[str, QtCore.QPointF]] = []
         self._screen_drivers: list[tuple[str, QtCore.QPointF]] = []
         self._screen_loads: list[tuple[str, QtCore.QPointF]] = []
+        self._screen_springs: list[tuple[str, QtCore.QPointF]] = []
         self._mode = CanvasMode.SELECT
         self._interaction_mode = "all"
         self._editing_enabled = True
         self._creation_points: list[tuple[float, float]] = []
         self._joint_start_marker: CanvasMarker | None = None
+        self._spring_start: CanvasMarker | None = None  # first endpoint for spring/actuator creation
+        self._spring_start_world: tuple[float, float] | None = None  # world coords of first click
         self._slider_joint_start: CanvasMarker | CanvasSlider | None = None
         self._driver_start_joint_id: str | None = None
         self._sensor_marker_ids: list[str] = []
@@ -237,6 +247,8 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._dragging_sketch_point: CanvasSketchPoint | None = None
         self._dragging_sketch_point_preview: tuple[str, float, float] | None = None
         self._dragging_sketch_solution_preview: dict[str, tuple[float, float]] = {}
+        self._dragging_sketch_circle_id: str | None = None
+        self._dragging_sketch_circle_preview_radius: float | None = None
         self._dragging_slider: tuple[str, str] | None = None
         self._dragging_slider_preview: dict[str, float] | None = None
         self._box_selection_start: QtCore.QPointF | None = None
@@ -324,6 +336,8 @@ class MechanismCanvas(QtWidgets.QWidget):
                     self.selectionCleared.emit()
             self._dragging_sketch_point = None
             self._dragging_sketch_point_preview = None
+            self._dragging_sketch_circle_id = None
+            self._dragging_sketch_circle_preview_radius = None
         self._hovered_sketch_point_id = None
         self._hovered_sketch_entity_id = None
         self.update()
@@ -352,6 +366,8 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _reset_tool_state(self) -> None:
         self._creation_points.clear()
         self._joint_start_marker = None
+        self._spring_start = None
+        self._spring_start_world = None
         self._slider_joint_start = None
         self._driver_start_joint_id = None
         self._sensor_marker_ids = []
@@ -365,6 +381,8 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._dragging_sketch_point = None
         self._dragging_sketch_point_preview = None
         self._dragging_sketch_solution_preview = {}
+        self._dragging_sketch_circle_id = None
+        self._dragging_sketch_circle_preview_radius = None
         self._dragging_slider = None
         self._dragging_slider_preview = None
         self._box_selection_start = None
@@ -420,7 +438,6 @@ class MechanismCanvas(QtWidgets.QWidget):
             CanvasMode.CREATE_SKETCH_LINE_SEGMENT: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_SKETCH_RECTANGLE: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_SKETCH_CIRCLE: QtCore.Qt.CursorShape.CrossCursor,
-            CanvasMode.CREATE_SKETCH_ARC: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_SKETCH_ARC_CENTER: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_SKETCH_INFINITE_LINE: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_SKETCH_FIX: QtCore.Qt.CursorShape.CrossCursor,
@@ -441,6 +458,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             CanvasMode.CREATE_SKETCH_TANGENT: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_SKETCH_CONCENTRIC: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_BAR: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_POINT_MASS: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_BODY: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.ADD_MARKER: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_REVOLUTE: QtCore.Qt.CursorShape.CrossCursor,
@@ -456,6 +474,10 @@ class MechanismCanvas(QtWidgets.QWidget):
             CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_ANGLE_VECTOR_SENSOR: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_LOAD: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_LINEAR_SPRING: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_ROTATIONAL_SPRING: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_LINEAR_ACTUATOR: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.CREATE_ROTATIONAL_ACTUATOR: QtCore.Qt.CursorShape.CrossCursor,
         }
         self.setCursor(QtGui.QCursor(cursor_map.get(mode, QtCore.Qt.CursorShape.ArrowCursor)))
 
@@ -542,6 +564,10 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def set_state_overlay(self, state: dict[str, float] | None) -> None:
         self._state_overlay = state
+        self.update()
+
+    def set_simulation_time(self, time: float) -> None:
+        self._simulation_time = time
         self.update()
 
     def set_trajectories(self, trajectories: list[list[tuple[float, float]]]) -> None:
@@ -670,6 +696,17 @@ class MechanismCanvas(QtWidgets.QWidget):
             return
 
         if self._mode in {
+            CanvasMode.CREATE_LINEAR_SPRING,
+            CanvasMode.CREATE_ROTATIONAL_SPRING,
+            CanvasMode.CREATE_LINEAR_ACTUATOR,
+            CanvasMode.CREATE_ROTATIONAL_ACTUATOR,
+        }:
+            marker = marker_map.get(entity_id)
+            if marker is not None:
+                self._handle_spring_click(marker, (marker.x, marker.y))
+            return
+
+        if self._mode in {
             CanvasMode.CREATE_DISTANCE_SENSOR,
             CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR,
             CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR,
@@ -684,7 +721,6 @@ class MechanismCanvas(QtWidgets.QWidget):
         _sketch_entity_modes = {
             CanvasMode.CREATE_SKETCH_LINE_SEGMENT: 2,
             CanvasMode.CREATE_SKETCH_CIRCLE: 2,
-            CanvasMode.CREATE_SKETCH_ARC: 3,
             CanvasMode.CREATE_SKETCH_ARC_CENTER: 3,
             CanvasMode.CREATE_SKETCH_INFINITE_LINE: 2,
         }
@@ -707,12 +743,36 @@ class MechanismCanvas(QtWidgets.QWidget):
         if self._mode in _CONSTRAINT_SPEC:
             # In inject_entity_selection, entity_id is always a sketch point or entity
             sketch_point = self.app_service.get_sketch_point(entity_id)
+            sketch_entity = self.app_service.get_entity(entity_id)
             n_pts, n_ent = _CONSTRAINT_SPEC[self._mode]
             if sketch_point is not None:
                 x = self.app_service._evaluate_sketch_expression(sketch_point.x, project.parameters)
                 y = self.app_service._evaluate_sketch_expression(sketch_point.y, project.parameters)
                 fake_pt = type("_Pt", (), {"entity_id": sketch_point.id, "x": x, "y": y})()
                 self._handle_constraint_input_click(fake_pt, None, n_pts, n_ent)
+            elif isinstance(sketch_entity, (SketchLineSegment, SketchInfiniteLine, SketchCircle, SketchArc)):
+                if isinstance(sketch_entity, SketchLineSegment):
+                    point_ids = [sketch_entity.start_point_id, sketch_entity.end_point_id]
+                elif isinstance(sketch_entity, SketchInfiniteLine):
+                    point_ids = [sketch_entity.point_a_id, sketch_entity.point_b_id]
+                elif isinstance(sketch_entity, SketchCircle):
+                    point_ids = [sketch_entity.center_point_id]
+                else:
+                    point_ids = [
+                        sketch_entity.center_point_id,
+                        sketch_entity.start_point_id,
+                        sketch_entity.end_point_id,
+                    ]
+                fake_entity = type(
+                    "_Entity",
+                    (),
+                    {
+                        "entity_id": sketch_entity.id,
+                        "entity_type": sketch_entity.type,
+                        "point_ids": point_ids,
+                    },
+                )()
+                self._handle_constraint_input_click(None, fake_entity, n_pts, n_ent)
             self.update()
             return
 
@@ -822,6 +882,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._draw_markers(painter, markers, transform)
                 self._draw_forces(painter, project, markers, transform)
                 self._draw_loads(painter, project, markers, transform)
+            self._draw_springs(painter, project, assembled, transform)
             painter.restore()
             self._draw_sketch(painter, sketch_points, sketch_entities, transform, invalid=sketch_invalid)
             self._draw_sketch_constraints(painter, project, sketch_points, transform, invalid=sketch_invalid)
@@ -843,10 +904,12 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._draw_loads(painter, project, markers, transform)
             elif not sketch_points and not sketch_entities:
                 self._draw_empty_state(painter)
+            self._draw_springs(painter, project, assembled, transform)
             if self._show_trajectories and self._trajectories:
                 self._draw_trajectories(painter, transform)
 
         self._draw_creation_overlay(painter, transform)
+        self._draw_edge_rulers(painter, transform)
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # pragma: no cover - UI behavior
         super().resizeEvent(event)
@@ -883,6 +946,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         clicked_joint = self._joint_at(clicked)
         clicked_driver = self._driver_at(clicked)
         clicked_load = self._load_at(clicked)
+        clicked_spring = self._spring_at(clicked)
         clicked_constraint = self._sketch_constraint_at(clicked)
         world = self._to_world(clicked, self._current_transform())
         additive_selection = bool(event.modifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier)
@@ -908,6 +972,19 @@ class MechanismCanvas(QtWidgets.QWidget):
                 return
             if clicked_sketch_entity is not None and self._interaction_mode in ("sketch", "all"):
                 self._select_canvas_entity(clicked_sketch_entity.entity_id, additive=additive_selection)
+                if (
+                    self._editing_enabled
+                    and not additive_selection
+                    and clicked_sketch_entity.entity_type is SketchEntityType.CIRCLE
+                ):
+                    circle = self.app_service.get_entity(clicked_sketch_entity.entity_id)
+                    if isinstance(circle, SketchCircle):
+                        center_point = self.app_service.get_sketch_point(circle.center_point_id)
+                        if center_point is not None:
+                            self._dragging_sketch_circle_id = clicked_sketch_entity.entity_id
+                            cx = self.app_service._evaluate_sketch_expression(center_point.x, self.app_service.project.parameters)
+                            cy = self.app_service._evaluate_sketch_expression(center_point.y, self.app_service.project.parameters)
+                            self._dragging_sketch_circle_preview_radius = max(1e-6, math.hypot(world[0] - cx, world[1] - cy))
                 return
             if clicked_marker is not None and self._interaction_mode in ("model", "sim", "all"):
                 self._select_canvas_entity(clicked_marker.entity_id, additive=additive_selection)
@@ -932,6 +1009,9 @@ class MechanismCanvas(QtWidgets.QWidget):
                 return
             if clicked_load is not None and self._interaction_mode in ("model", "sim", "all"):
                 self._select_canvas_entity(clicked_load, additive=additive_selection)
+                return
+            if clicked_spring is not None and self._interaction_mode in ("model", "sim", "all"):
+                self._select_canvas_entity(clicked_spring, additive=additive_selection)
                 return
             if clicked_body is not None and self._interaction_mode in ("model", "sim", "all"):
                 self._select_canvas_entity(clicked_body, additive=additive_selection)
@@ -1000,11 +1080,17 @@ class MechanismCanvas(QtWidgets.QWidget):
         if self._mode in {
             CanvasMode.CREATE_SKETCH_LINE_SEGMENT,
             CanvasMode.CREATE_SKETCH_CIRCLE,
-            CanvasMode.CREATE_SKETCH_ARC,
             CanvasMode.CREATE_SKETCH_ARC_CENTER,
             CanvasMode.CREATE_SKETCH_INFINITE_LINE,
         }:
             snapped = self._snap_world(world, include_model=False)
+            if self._mode == CanvasMode.CREATE_SKETCH_ARC_CENTER and len(self._creation_points) == 2:
+                cx, cy = self._creation_points[0]
+                sx, sy = self._creation_points[1]
+                r = math.hypot(sx - cx, sy - cy)
+                if r > 1e-9:
+                    angle = math.atan2(snapped[1] - cy, snapped[0] - cx)
+                    snapped = (cx + r * math.cos(angle), cy + r * math.sin(angle))
             self._snap_preview_world = snapped
             point_id = self._resolve_or_create_sketch_point(snapped, clicked_sketch_point)
             self._creation_points.append((snapped[0], snapped[1]))
@@ -1012,7 +1098,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             required = {
                 CanvasMode.CREATE_SKETCH_LINE_SEGMENT: 2,
                 CanvasMode.CREATE_SKETCH_CIRCLE: 2,
-                CanvasMode.CREATE_SKETCH_ARC: 3,
+                CanvasMode.CREATE_SKETCH_ARC_CENTER: 3,
                 CanvasMode.CREATE_SKETCH_INFINITE_LINE: 2,
             }[self._mode]
             if len(self._sensor_marker_ids) >= required:
@@ -1038,6 +1124,10 @@ class MechanismCanvas(QtWidgets.QWidget):
                 clicked_sketch_point, clicked_sketch_entity, n_pts, n_ent
             )
             self.update()
+            return
+
+        if self._mode == CanvasMode.CREATE_POINT_MASS:
+            self._create_point_mass_at(world)
             return
 
         if self._mode == CanvasMode.CREATE_BAR:
@@ -1118,6 +1208,12 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._create_sensor_from_markers([clicked_marker.entity_id], "point")
             return
 
+        if self._mode == CanvasMode.CREATE_LOAD:
+            if clicked_marker is None:
+                return
+            self._create_load_from_marker(clicked_marker.entity_id)
+            return
+
         if self._mode == CanvasMode.CREATE_DISTANCE_SENSOR:
             if clicked_marker is None:
                 return
@@ -1140,6 +1236,15 @@ class MechanismCanvas(QtWidgets.QWidget):
             if clicked_marker is None:
                 return
             self._handle_sensor_marker_selection(clicked_marker, 4)
+            return
+
+        if self._mode in {
+            CanvasMode.CREATE_LINEAR_SPRING,
+            CanvasMode.CREATE_ROTATIONAL_SPRING,
+            CanvasMode.CREATE_LINEAR_ACTUATOR,
+            CanvasMode.CREATE_ROTATIONAL_ACTUATOR,
+        }:
+            self._handle_spring_click(clicked_marker, world)
             return
 
         super().mousePressEvent(event)
@@ -1178,6 +1283,14 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._dragging_sketch_point.entity_id,
                 snapped,
             )
+        elif self._editing_enabled and self._mode == CanvasMode.SELECT and self._dragging_sketch_circle_id is not None:
+            circle = self.app_service.get_entity(self._dragging_sketch_circle_id)
+            if isinstance(circle, SketchCircle):
+                center_point = self.app_service.get_sketch_point(circle.center_point_id)
+                if center_point is not None:
+                    cx = self.app_service._evaluate_sketch_expression(center_point.x, self.app_service.project.parameters)
+                    cy = self.app_service._evaluate_sketch_expression(center_point.y, self.app_service.project.parameters)
+                    self._dragging_sketch_circle_preview_radius = max(1e-6, math.hypot(self._hover_world[0] - cx, self._hover_world[1] - cy))
         elif self._editing_enabled and self._mode == CanvasMode.SELECT and self._dragging_slider is not None:
             slider_id, handle_kind = self._dragging_slider
             self._dragging_slider_preview = self._slider_preview_for_handle(slider_id, handle_kind, self._hover_world)
@@ -1186,7 +1299,6 @@ class MechanismCanvas(QtWidgets.QWidget):
             CanvasMode.CREATE_SKETCH_LINE_SEGMENT,
             CanvasMode.CREATE_SKETCH_RECTANGLE,
             CanvasMode.CREATE_SKETCH_CIRCLE,
-            CanvasMode.CREATE_SKETCH_ARC,
             CanvasMode.CREATE_SKETCH_ARC_CENTER,
             CanvasMode.CREATE_SKETCH_INFINITE_LINE,
             CanvasMode.CREATE_SKETCH_FIX,
@@ -1210,6 +1322,13 @@ class MechanismCanvas(QtWidgets.QWidget):
             snapped = self._snap_world(self._hover_world, include_model=False)
             if self._mode in {CanvasMode.CREATE_SKETCH_LINE_SEGMENT, CanvasMode.CREATE_SKETCH_RECTANGLE}:
                 snapped = self._apply_creation_inference(snapped)
+            if self._mode == CanvasMode.CREATE_SKETCH_ARC_CENTER and len(self._creation_points) == 2:
+                cx, cy = self._creation_points[0]
+                sx, sy = self._creation_points[1]
+                r = math.hypot(sx - cx, sy - cy)
+                if r > 1e-9:
+                    angle = math.atan2(snapped[1] - cy, snapped[0] - cx)
+                    snapped = (cx + r * math.cos(angle), cy + r * math.sin(angle))
             self._snap_preview_world = snapped
         else:
             self._snap_preview_world = None
@@ -1273,6 +1392,28 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._dragging_sketch_solution_preview = {}
             self._snap_preview_world = None
             self.modelChanged.emit(f"Moved sketch point {point_name} to ({x:.2f}, {y:.2f}) mm")
+            self.update()
+            return
+        if event.button() == QtCore.Qt.MouseButton.LeftButton and self._dragging_sketch_circle_id is not None:
+            if not self._require_editing():
+                self._dragging_sketch_circle_id = None
+                self._dragging_sketch_circle_preview_radius = None
+                return
+            circle_id = self._dragging_sketch_circle_id
+            radius = self._dragging_sketch_circle_preview_radius
+            self._dragging_sketch_circle_id = None
+            self._dragging_sketch_circle_preview_radius = None
+            if radius is None:
+                return
+            try:
+                self.app_service.update_sketch_entity(
+                    circle_id,
+                    "radius",
+                    PropertyValueInput("expression", self._mm_expression(radius)),
+                )
+                self.modelChanged.emit(f"Updated circle radius to {radius:.2f} mm")
+            except Exception as exc:
+                QtWidgets.QMessageBox.warning(self, "Circle error", str(exc))
             self.update()
             return
         if event.button() == QtCore.Qt.MouseButton.LeftButton and self._dragging_slider is not None:
@@ -1381,6 +1522,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         joint_id = self._joint_at(event.pos())
         driver_id = self._driver_at(event.pos())
         load_id = self._load_at(event.pos())
+        spring_id = self._spring_at(event.pos())
         menu = QtWidgets.QMenu(self)
         delete_action = None
         rename_action = None
@@ -1417,6 +1559,9 @@ class MechanismCanvas(QtWidgets.QWidget):
         elif load_id is not None:
             rename_action = menu.addAction("Rename Load")
             delete_action = menu.addAction("Delete")
+        elif spring_id is not None:
+            rename_action = menu.addAction("Rename Spring")
+            delete_action = menu.addAction("Delete")
         else:
             selected_body = self._selected_body()
             if selected_body is not None:
@@ -1431,7 +1576,8 @@ class MechanismCanvas(QtWidgets.QWidget):
                 slider.entity_id if slider is not None
                 else joint_id if joint_id is not None
                 else driver_id if driver_id is not None
-                else load_id
+                else load_id if load_id is not None
+                else spring_id
             )
             if target_id is not None:
                 self._rename_entity_dialog(target_id)
@@ -1454,6 +1600,8 @@ class MechanismCanvas(QtWidgets.QWidget):
                 if driver_id is not None
                 else load_id
                 if load_id is not None
+                else spring_id
+                if spring_id is not None
                 else self._selected_entity_id
             )
             if target_id:
@@ -1580,6 +1728,12 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _load_at(self, screen_pos: QtCore.QPointF) -> str | None:
         for entity_id, center in reversed(self._screen_loads):
             if QtCore.QLineF(screen_pos, center).length() <= 12.0:
+                return entity_id
+        return None
+
+    def _spring_at(self, screen_pos: QtCore.QPointF) -> str | None:
+        for entity_id, center in reversed(self._screen_springs):
+            if QtCore.QLineF(screen_pos, center).length() <= 14.0:
                 return entity_id
         return None
 
@@ -1745,30 +1899,24 @@ class MechanismCanvas(QtWidgets.QWidget):
         self,
         points: list[tuple[float, float]],
     ) -> tuple[float, float, float, float, float] | None:
+        """Compute arc geometry from (center, start, end) world coordinates.
+
+        Returns (center_x, center_y, radius, start_angle, span_angle) where
+        start_angle is the angle to the start point and span_angle is the
+        shorter arc from start to end (positive = CCW, negative = CW).
+        The end point is projected onto the arc circle so markers 2 and 3
+        always lie exactly on the arc.
+        """
         if len(points) != 3:
             return None
-        (x1, y1), (x2, y2), (x3, y3) = points
-        determinant = 2.0 * (x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2))
-        if abs(determinant) <= 1e-9:
+        (cx, cy), (sx, sy), (ex, ey) = points
+        radius = math.hypot(sx - cx, sy - cy)
+        if radius < 1e-9:
             return None
-        ux = (
-            (x1 * x1 + y1 * y1) * (y2 - y3)
-            + (x2 * x2 + y2 * y2) * (y3 - y1)
-            + (x3 * x3 + y3 * y3) * (y1 - y2)
-        ) / determinant
-        uy = (
-            (x1 * x1 + y1 * y1) * (x3 - x2)
-            + (x2 * x2 + y2 * y2) * (x1 - x3)
-            + (x3 * x3 + y3 * y3) * (x2 - x1)
-        ) / determinant
-        radius = math.hypot(x1 - ux, y1 - uy)
-        a1 = math.atan2(y1 - uy, x1 - ux)
-        a2 = math.atan2(y2 - uy, x2 - ux)
-        a3 = math.atan2(y3 - uy, x3 - ux)
-        span = self._normalize_angle(a3 - a1)
-        if not self._angle_is_between(a2, a1, a1 + span):
-            span = span - 2 * math.pi if span > 0 else span + 2 * math.pi
-        return ux, uy, radius, a1, span
+        start_angle = math.atan2(sy - cy, sx - cx)
+        end_angle = math.atan2(ey - cy, ex - cx)
+        span = self._normalize_angle(end_angle - start_angle)
+        return cx, cy, radius, start_angle, span
 
     def _normalize_angle(self, angle: float) -> float:
         while angle <= -math.pi:
@@ -1825,12 +1973,22 @@ class MechanismCanvas(QtWidgets.QWidget):
         if self._drag_preview is not None:
             preview_map[self._drag_preview[0]] = (self._drag_preview[1], self._drag_preview[2])
         for body in project.model.bodies:
+            structural_has_preview = (
+                body.type is BodyType.BAR
+                and any(sm.id in preview_map for sm in body.structural_markers())
+            )
             for marker in body.markers:
                 x, y = self._marker_world_position(project, body.id, marker.id, assembled)
                 if x is None or y is None:
                     continue
                 if marker.id in preview_map:
                     x, y = preview_map[marker.id]
+                    if marker.type is MarkerType.COM and body.type is BodyType.BAR:
+                        x, y = self._project_point_onto_bar(project, body, x, y, assembled)
+                elif marker.type is MarkerType.COM and structural_has_preview:
+                    cx, cy = self._bar_com_preview(project, body, preview_map, assembled)
+                    if cx is not None:
+                        x, y = cx, cy
                 markers.append(
                     CanvasMarker(
                         entity_id=marker.id,
@@ -1843,6 +2001,50 @@ class MechanismCanvas(QtWidgets.QWidget):
                     )
                 )
         return markers
+
+    def _bar_com_preview(
+        self,
+        project: Project,
+        body: Body,
+        preview_map: dict,
+        assembled: AssembledMechanism | None = None,
+    ) -> tuple[float | None, float | None]:
+        structural = body.structural_markers()
+        if len(structural) < 2:
+            return None, None
+        x1, y1 = self._marker_world_position(project, body.id, structural[0].id, assembled)
+        x2, y2 = self._marker_world_position(project, body.id, structural[1].id, assembled)
+        if x1 is None or x2 is None:
+            return None, None
+        if structural[0].id in preview_map:
+            x1, y1 = preview_map[structural[0].id]
+        if structural[1].id in preview_map:
+            x2, y2 = preview_map[structural[1].id]
+        t = self.app_service._bar_com_percent(body) / 100.0
+        return x1 + t * (x2 - x1), y1 + t * (y2 - y1)
+
+    def _project_point_onto_bar(
+        self,
+        project: Project,
+        body: Body,
+        x: float,
+        y: float,
+        assembled: AssembledMechanism | None = None,
+    ) -> tuple[float, float]:
+        structural = body.structural_markers()
+        if len(structural) < 2:
+            return x, y
+        x1, y1 = self._marker_world_position(project, body.id, structural[0].id, assembled)
+        x2, y2 = self._marker_world_position(project, body.id, structural[1].id, assembled)
+        if x1 is None or x2 is None:
+            return x, y
+        dx, dy = x2 - x1, y2 - y1
+        length_sq = dx * dx + dy * dy
+        if length_sq <= 1e-12:
+            return x1, y1
+        t = ((x - x1) * dx + (y - y1) * dy) / length_sq
+        t = max(0.0, min(1.0, t))
+        return x1 + t * dx, y1 + t * dy
 
     def _collect_sliders(self, project: Project) -> list[CanvasSlider]:
         sliders: list[CanvasSlider] = []
@@ -1939,7 +2141,11 @@ class MechanismCanvas(QtWidgets.QWidget):
                 )
             elif isinstance(entity, SketchCircle):
                 try:
-                    radius = self.app_service._evaluate_sketch_expression(entity.radius, project.parameters)
+                    radius = (
+                        self._dragging_sketch_circle_preview_radius
+                        if entity.id == self._dragging_sketch_circle_id and self._dragging_sketch_circle_preview_radius is not None
+                        else self.app_service._evaluate_sketch_expression(entity.radius, project.parameters)
+                    )
                 except Exception:
                     continue
                 entities.append(
@@ -2068,6 +2274,86 @@ class MechanismCanvas(QtWidgets.QWidget):
             painter.drawLine(QtCore.QPointF(0.0, screen_y), QtCore.QPointF(float(self.width()), screen_y))
             y -= spacing_world
 
+    def _draw_edge_rulers(self, painter: QtGui.QPainter, transform) -> None:
+        scale, center_x, center_y = transform
+        if scale <= 0.0:
+            return
+        gutter_left = 44.0
+        gutter_bottom = 28.0
+        width = float(self.width())
+        height = float(self.height())
+        world_left = center_x - width * 0.5 / scale
+        world_right = center_x + width * 0.5 / scale
+        world_top = center_y + height * 0.5 / scale
+        world_bottom = center_y - height * 0.5 / scale
+        step_world = self._nice_ruler_step(72.0 / scale)
+        if step_world <= 0.0:
+            return
+
+        painter.save()
+        painter.setPen(QtCore.Qt.PenStyle.NoPen)
+        painter.setBrush(QtGui.QColor(248, 245, 238, 228))
+        painter.drawRect(QtCore.QRectF(0.0, 0.0, gutter_left, height - gutter_bottom))
+        painter.drawRect(QtCore.QRectF(gutter_left, height - gutter_bottom, width - gutter_left, gutter_bottom))
+        painter.drawRect(QtCore.QRectF(0.0, height - gutter_bottom, gutter_left, gutter_bottom))
+
+        font = painter.font()
+        font.setPointSizeF(max(7.0, font.pointSizeF() - 1.0 if font.pointSizeF() > 0 else 8.0))
+        painter.setFont(font)
+        label_pen = QtGui.QPen(QtGui.QColor("#5f666d"), 1.0)
+        tick_pen = QtGui.QPen(QtGui.QColor("#8f969d"), 1.0)
+
+        painter.setClipRect(QtCore.QRectF(gutter_left, height - gutter_bottom, width - gutter_left, gutter_bottom))
+        painter.setPen(tick_pen)
+        start_x = math.floor(world_left / step_world) * step_world
+        x = start_x
+        while x <= world_right + 1e-9:
+            screen_x = self._to_screen(x, center_y, transform).x()
+            if gutter_left <= screen_x <= width:
+                painter.drawLine(QtCore.QPointF(screen_x, height - gutter_bottom), QtCore.QPointF(screen_x, height - gutter_bottom + 8.0))
+                painter.setPen(label_pen)
+                painter.drawText(QtCore.QPointF(screen_x + 3.0, height - 8.0), self._format_ruler_value(x))
+                painter.setPen(tick_pen)
+            x += step_world
+
+        painter.setClipRect(QtCore.QRectF(0.0, 0.0, gutter_left, height - gutter_bottom))
+        start_y = math.floor(world_bottom / step_world) * step_world
+        y = start_y
+        while y <= world_top + 1e-9:
+            screen_y = self._to_screen(center_x, y, transform).y()
+            if 0.0 <= screen_y <= height - gutter_bottom:
+                painter.drawLine(QtCore.QPointF(gutter_left - 8.0, screen_y), QtCore.QPointF(gutter_left, screen_y))
+                painter.setPen(label_pen)
+                painter.drawText(QtCore.QRectF(0.0, screen_y - 8.0, gutter_left - 10.0, 16.0), QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter, self._format_ruler_value(y))
+                painter.setPen(tick_pen)
+            y += step_world
+
+        painter.setClipping(False)
+        painter.setPen(QtGui.QPen(QtGui.QColor("#a5acae"), 1.0))
+        painter.drawLine(QtCore.QPointF(gutter_left, 0.0), QtCore.QPointF(gutter_left, height))
+        painter.drawLine(QtCore.QPointF(0.0, height - gutter_bottom), QtCore.QPointF(width, height - gutter_bottom))
+        painter.setPen(label_pen)
+        painter.drawText(QtCore.QRectF(0.0, height - gutter_bottom, gutter_left - 4.0, gutter_bottom), QtCore.Qt.AlignmentFlag.AlignCenter, "mm")
+        painter.restore()
+
+    def _nice_ruler_step(self, minimum_world_step: float) -> float:
+        if minimum_world_step <= 0.0:
+            return 1.0
+        exponent = math.floor(math.log10(minimum_world_step))
+        base = 10.0 ** exponent
+        normalized = minimum_world_step / base
+        if normalized <= 1.0:
+            return 1.0 * base
+        if normalized <= 2.0:
+            return 2.0 * base
+        if normalized <= 5.0:
+            return 5.0 * base
+        return 10.0 * base
+
+    def _format_ruler_value(self, value: float) -> str:
+        rounded = 0.0 if abs(value) < 1e-9 else value
+        return f"{rounded:.6g}"
+
     def _draw_origin_and_axes(self, painter: QtGui.QPainter, transform) -> None:
         origin = self._to_screen(0.0, 0.0, transform)
         w = float(self.width())
@@ -2143,9 +2429,12 @@ class MechanismCanvas(QtWidgets.QWidget):
                     return QtGui.QColor("#ffc107")
             return QtGui.QColor(color_pt_normal)
 
+        hide_construction = self._interaction_mode in ("model", "sim")
         point_map = {point.entity_id: point for point in points}
         for entity in entities:
             if not entity.visible:
+                continue
+            if hide_construction and entity.construction:
                 continue
             pen_color = _entity_color(entity.entity_id, entity.construction)
             if entity.entity_id in self._selected_entity_ids:
@@ -2194,7 +2483,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                     center.x() - radius_px, center.y() - radius_px,
                     2.0 * radius_px, 2.0 * radius_px,
                 )
-                painter.drawArc(rect, int(-math.degrees(start_angle) * 16), int(-math.degrees(span_angle) * 16))
+                painter.drawArc(rect, int(math.degrees(start_angle) * 16), int(math.degrees(span_angle) * 16))
                 geometry = ("arc", rect, start_angle, span_angle)
             elif entity.entity_type is SketchEntityType.INFINITE_LINE:
                 if not all(point_id in point_map for point_id in entity.point_ids):
@@ -2222,6 +2511,8 @@ class MechanismCanvas(QtWidgets.QWidget):
                         self._draw_sketch_label(painter, anchor, entity.name, pen_color)
         for point in points:
             if not point.visible:
+                continue
+            if hide_construction and point.construction:
                 continue
             screen_point = self._to_screen(point.x, point.y, transform)
             self._screen_sketch_points.append((point, screen_point))
@@ -2403,11 +2694,13 @@ class MechanismCanvas(QtWidgets.QWidget):
             if not structural:
                 continue
             selected = self._selected_entity_id == body.id
-            pen = QtGui.QPen(QtGui.QColor("#31556f"), 2.3)
-            fill = QtGui.QColor(178, 201, 218, 85)
+            base_color = QtGui.QColor(body.style.color) if body.style.color else QtGui.QColor("#31556f")
+            base_width = body.style.line_width if body.style.line_width else 2.3
+            pen = QtGui.QPen(base_color, base_width)
+            fill = QtGui.QColor(base_color.red(), base_color.green(), base_color.blue(), 85)
             if selected:
                 pen.setColor(QtGui.QColor("#c75b12"))
-                pen.setWidthF(3.2)
+                pen.setWidthF(base_width + 1.0)
                 fill = QtGui.QColor(230, 173, 112, 80)
             painter.setPen(pen)
             if len(structural) == 1:
@@ -2568,7 +2861,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         transform,
     ) -> None:
         gravity = project.model.gravity
-        if not gravity.enabled:
+        if gravity is None:
             return
         marker_map = {marker.entity_id: marker for marker in markers}
         scale_mm_per_n = 3.0
@@ -2649,13 +2942,24 @@ class MechanismCanvas(QtWidgets.QWidget):
             canvas_marker = marker_map.get(load.target_marker_id)
             if canvas_marker is None:
                 continue
-            fx = self.app_service.expression_service.evaluate_property(load.fx, project.parameters).value
-            fy = self.app_service.expression_service.evaluate_property(load.fy, project.parameters).value
+            try:
+                time_value = self._simulation_time if self._state_overlay is not None else 0.0
+                variables = {"t": self.app_service.unit_service.quantity(time_value, "s")}
+                fx = self.app_service.expression_service.evaluate_property(load.fx, project.parameters, variables=variables).value
+                fy = self.app_service.expression_service.evaluate_property(load.fy, project.parameters, variables=variables).value
+            except Exception:
+                fx, fy = 0.0, 0.0
             force = math.sqrt(fx * fx + fy * fy)
-            if force < 1e-9:
-                continue
             is_selected = self._selected_entity_id == load.id
             marker_screen = self._to_screen(canvas_marker.x, canvas_marker.y, transform)
+            if force < 1e-9:
+                # Draw a small indicator so time-dependent loads are visible even when zero at t=0
+                indicator_color = selected_arrow_color if is_selected else base_arrow_color
+                painter.setPen(QtGui.QPen(indicator_color, 2.0))
+                painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(marker_screen, 4.0, 4.0)
+                self._screen_loads.append((load.id, marker_screen))
+                continue
             dx = fx / force
             dy = fy / force
             arrow_length_mm = force * scale_mm_per_n
@@ -2804,7 +3108,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 CanvasMode.CREATE_SKETCH_LINE_SEGMENT,
                 CanvasMode.CREATE_SKETCH_RECTANGLE,
                 CanvasMode.CREATE_SKETCH_CIRCLE,
-                CanvasMode.CREATE_SKETCH_ARC,
+                CanvasMode.CREATE_SKETCH_ARC_CENTER,
                 CanvasMode.CREATE_SKETCH_INFINITE_LINE,
             }
         )
@@ -3180,24 +3484,29 @@ class MechanismCanvas(QtWidgets.QWidget):
                 point_ids[0], self._mm_expression(radius), edge_point_id=point_ids[1]
             )
             message = "Created sketch circle"
-        elif self._mode == CanvasMode.CREATE_SKETCH_ARC:
-            created_id = self.app_service.create_sketch_arc(point_ids[0], point_ids[1], point_ids[2])
-            message = "Created sketch arc"
         elif self._mode == CanvasMode.CREATE_SKETCH_ARC_CENTER:
             pts = [self.app_service.get_sketch_point(pid) for pid in point_ids[:3]]
             if any(p is None for p in pts):
                 raise ValueError("Sketch point not found for arc creation")
+            params = self.app_service.project.parameters
             coords = [
-                (self.app_service._evaluate_sketch_expression(p.x, self.app_service.project.parameters),
-                 self.app_service._evaluate_sketch_expression(p.y, self.app_service.project.parameters))
+                (self.app_service._evaluate_sketch_expression(p.x, params),
+                 self.app_service._evaluate_sketch_expression(p.y, params))
                 for p in pts
             ]
-            created_id = self.app_service.create_sketch_arc_by_center(
-                coords[0][0], coords[0][1],
-                coords[1][0], coords[1][1],
-                coords[2][0], coords[2][1],
-            )
-            message = "Created sketch arc (center mode)"
+            cx, cy = coords[0]
+            sx, sy = coords[1]
+            ex_raw, ey_raw = coords[2]
+            radius = math.hypot(sx - cx, sy - cy)
+            if radius > 1e-9 and abs(math.hypot(ex_raw - cx, ey_raw - cy) - radius) > 1e-6:
+                angle = math.atan2(ey_raw - cy, ex_raw - cx)
+                self.app_service.move_sketch_point(
+                    point_ids[2],
+                    self._mm_expression(cx + radius * math.cos(angle)),
+                    self._mm_expression(cy + radius * math.sin(angle)),
+                )
+            created_id = self.app_service.create_sketch_arc(point_ids[0], point_ids[1], point_ids[2])
+            message = "Created sketch arc"
         elif self._mode == CanvasMode.CREATE_SKETCH_INFINITE_LINE:
             created_id = self.app_service.create_sketch_infinite_line(point_ids[0], point_ids[1])
             message = "Created sketch infinite line"
@@ -3224,6 +3533,24 @@ class MechanismCanvas(QtWidgets.QWidget):
             if cpt.entity_id == pid:
                 return cpt
         return None
+
+    def _sketch_point_snapshot(self, pid: str) -> CanvasSketchPoint | None:
+        cpt = self._canvas_sketch_point_by_id(pid)
+        if cpt is not None:
+            return cpt
+        if self.app_service.project is None:
+            return None
+        point = self.app_service.get_sketch_point(pid)
+        if point is None:
+            return None
+        return CanvasSketchPoint(
+            entity_id=point.id,
+            name=point.name,
+            x=self.app_service._evaluate_sketch_expression(point.x, self.app_service.project.parameters),
+            y=self.app_service._evaluate_sketch_expression(point.y, self.app_service.project.parameters),
+            construction=point.construction,
+            visible=point.visible,
+        )
 
     def _nearest_endpoint_of_entity(
         self, entity: CanvasSketchEntity, click_screen: QtCore.QPointF
@@ -3260,7 +3587,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                     and clicked_sketch_entity.entity_type in (SketchEntityType.CIRCLE, SketchEntityType.ARC)
                     and pts_left > 0):
                 center_id = clicked_sketch_entity.point_ids[0]
-                cpt = self._canvas_sketch_point_by_id(center_id)
+                cpt = self._sketch_point_snapshot(center_id)
                 if cpt:
                     self._creation_points.append((cpt.x, cpt.y))
                     self._sensor_marker_ids.append(center_id)
@@ -3284,7 +3611,30 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._creation_points.append((clicked_sketch_point.x, clicked_sketch_point.y))
                 self._sensor_marker_ids.append(clicked_sketch_point.entity_id)
 
-        # Constraints expecting entity refs (ON_CIRCLE, TANGENT)
+        # Tangent supports either line+curve or curve+curve.
+        elif self._mode == CanvasMode.CREATE_SKETCH_TANGENT:
+            if (
+                clicked_sketch_entity is not None
+                and clicked_sketch_entity.entity_type in (SketchEntityType.CIRCLE, SketchEntityType.ARC)
+                and ent_left > 0
+                and clicked_sketch_entity.entity_id not in self._creation_entity_ids
+            ):
+                self._creation_entity_ids.append(clicked_sketch_entity.entity_id)
+            elif (
+                clicked_sketch_entity is not None
+                and clicked_sketch_entity.entity_type in (SketchEntityType.LINE_SEGMENT, SketchEntityType.INFINITE_LINE)
+                and pts_left >= 2
+            ):
+                for pid in clicked_sketch_entity.point_ids[:2]:
+                    cpt = self._sketch_point_snapshot(pid)
+                    if cpt:
+                        self._creation_points.append((cpt.x, cpt.y))
+                        self._sensor_marker_ids.append(pid)
+            elif clicked_sketch_point is not None and pts_left > 0:
+                self._creation_points.append((clicked_sketch_point.x, clicked_sketch_point.y))
+                self._sensor_marker_ids.append(clicked_sketch_point.entity_id)
+
+        # Constraints expecting entity refs (ON_CIRCLE)
         elif n_ent > 0:
             if (clicked_sketch_entity is not None
                     and clicked_sketch_entity.entity_type in (SketchEntityType.CIRCLE, SketchEntityType.ARC)
@@ -3294,7 +3644,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                     and clicked_sketch_entity.entity_type in (SketchEntityType.LINE_SEGMENT, SketchEntityType.INFINITE_LINE)
                     and pts_left >= 2):
                 for pid in clicked_sketch_entity.point_ids[:2]:
-                    cpt = self._canvas_sketch_point_by_id(pid)
+                    cpt = self._sketch_point_snapshot(pid)
                     if cpt:
                         self._creation_points.append((cpt.x, cpt.y))
                         self._sensor_marker_ids.append(pid)
@@ -3310,7 +3660,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             and not self._sensor_marker_ids
         ):
             center_id = clicked_sketch_entity.point_ids[0]
-            cpt = self._canvas_sketch_point_by_id(center_id)
+            cpt = self._sketch_point_snapshot(center_id)
             if cpt:
                 self._creation_points.append((cpt.x, cpt.y))
                 self._sensor_marker_ids.append(center_id)
@@ -3320,20 +3670,30 @@ class MechanismCanvas(QtWidgets.QWidget):
 
         # Point-only constraints
         else:
-            if (clicked_sketch_entity is not None
+            if clicked_sketch_point is not None and pts_left > 0:
+                # Point takes priority over line so endpoints can be selected individually
+                self._creation_points.append((clicked_sketch_point.x, clicked_sketch_point.y))
+                self._sensor_marker_ids.append(clicked_sketch_point.entity_id)
+            elif (clicked_sketch_entity is not None
                     and clicked_sketch_entity.entity_type in (SketchEntityType.LINE_SEGMENT, SketchEntityType.INFINITE_LINE)
                     and pts_left > 0):
                 if self._mode in _SEGMENT_PAIR_MODES and pts_left >= 2:
                     # PARALLEL / PERPENDICULAR / EQUAL_LENGTH: one segment click = both endpoints
                     for pid in clicked_sketch_entity.point_ids[:2]:
-                        cpt = self._canvas_sketch_point_by_id(pid)
+                        cpt = self._sketch_point_snapshot(pid)
                         if cpt:
                             self._creation_points.append((cpt.x, cpt.y))
                             self._sensor_marker_ids.append(pid)
                 elif self._mode in _LINE_TWO_POINT_CONSTRAINT_MODES and pts_left >= 2:
                     # Distance-like constraints can be applied directly to a segment/axis.
                     for pid in clicked_sketch_entity.point_ids[:2]:
-                        cpt = self._canvas_sketch_point_by_id(pid)
+                        cpt = self._sketch_point_snapshot(pid)
+                        if cpt:
+                            self._creation_points.append((cpt.x, cpt.y))
+                            self._sensor_marker_ids.append(pid)
+                elif self._mode == CanvasMode.CREATE_SKETCH_SYMMETRIC and pts_left >= 2:
+                    for pid in clicked_sketch_entity.point_ids[:2]:
+                        cpt = self._sketch_point_snapshot(pid)
                         if cpt:
                             self._creation_points.append((cpt.x, cpt.y))
                             self._sensor_marker_ids.append(pid)
@@ -3342,16 +3702,20 @@ class MechanismCanvas(QtWidgets.QWidget):
                         clicked_sketch_entity, self._last_mouse_screen
                     )
                     if nearest_id is not None:
-                        cpt = self._canvas_sketch_point_by_id(nearest_id)
+                        cpt = self._sketch_point_snapshot(nearest_id)
                         if cpt:
                             self._creation_points.append((cpt.x, cpt.y))
                             self._sensor_marker_ids.append(nearest_id)
-            elif clicked_sketch_point is not None and pts_left > 0:
-                self._creation_points.append((clicked_sketch_point.x, clicked_sketch_point.y))
-                self._sensor_marker_ids.append(clicked_sketch_point.entity_id)
 
-        target_pts = 1 if self._mode == CanvasMode.CREATE_SKETCH_COINCIDENT and self._creation_entity_ids else n_pts
-        target_ents = 1 if self._mode == CanvasMode.CREATE_SKETCH_COINCIDENT and self._creation_entity_ids else n_ent
+        if self._mode == CanvasMode.CREATE_SKETCH_COINCIDENT and self._creation_entity_ids:
+            target_pts = 1
+            target_ents = 1
+        elif self._mode == CanvasMode.CREATE_SKETCH_TANGENT and len(self._creation_entity_ids) >= 2:
+            target_pts = 0
+            target_ents = 2
+        else:
+            target_pts = n_pts
+            target_ents = n_ent
         collected_pts = min(len(self._sensor_marker_ids), target_pts)
         collected_ents = min(len(self._creation_entity_ids), target_ents)
         if target_ents > 0:
@@ -3394,6 +3758,10 @@ class MechanismCanvas(QtWidgets.QWidget):
             or (self._mode == CanvasMode.CREATE_SKETCH_COINCIDENT
                 and len(self._creation_entity_ids) == 1
                 and len(self._sensor_marker_ids) == 1)
+            else 0
+            if (self._mode == CanvasMode.CREATE_SKETCH_TANGENT
+                and len(self._creation_entity_ids) == 2
+                and len(self._sensor_marker_ids) == 0)
             else n_pts
         )
         point_ids = list(self._sensor_marker_ids[:actual_n_pts])
@@ -3425,7 +3793,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             if not ok:
                 self.set_mode(CanvasMode.SELECT)
                 return
-            value_str = str(angle_deg)
+            value_str = f"{angle_deg} deg"
         elif self._mode == CanvasMode.CREATE_SKETCH_TANGENT:
             items = ["External (+1)", "Internal (-1)"]
             item, ok = QtWidgets.QInputDialog.getItem(
@@ -3687,6 +4055,194 @@ class MechanismCanvas(QtWidgets.QWidget):
             return ax + t * (bx - ax), ay + t * (by - ay)
         return None
 
+    def _draw_springs(
+        self,
+        painter: QtGui.QPainter,
+        project: Project,
+        assembled: AssembledMechanism | None,
+        transform,
+    ) -> None:
+        self._screen_springs = []
+        if not project.model.springs:
+            return
+        spring_color = QtGui.QColor("#2a9d8f")
+        actuator_color = QtGui.QColor("#8d6cab")
+        selected_color = QtGui.QColor("#c75b12")
+
+        for spring in project.model.springs:
+            is_selected = self._selected_entity_id == spring.id
+            is_actuator = spring.spring_type.value in ("linear_actuator", "rotational_actuator")
+            is_rotational = spring.spring_type.value in ("rotational_spring", "rotational_actuator")
+            base_color = actuator_color if is_actuator else spring_color
+            color = selected_color if is_selected else base_color
+
+            ax, ay = self._spring_endpoint_world(project, spring.endpoint_a, assembled)
+            bx, by = self._spring_endpoint_world(project, spring.endpoint_b, assembled)
+            if ax is None or bx is None:
+                continue
+
+            pt_a = self._to_screen(ax, ay, transform)
+            pt_b = self._to_screen(bx, by, transform)
+            mid = QtCore.QPointF((pt_a.x() + pt_b.x()) * 0.5, (pt_a.y() + pt_b.y()) * 0.5)
+            self._screen_springs.append((spring.id, mid))
+
+            if is_selected:
+                painter.setPen(QtCore.Qt.PenStyle.NoPen)
+                painter.setBrush(QtGui.QBrush(QtGui.QColor(selected_color.red(), selected_color.green(), selected_color.blue(), 40)))
+                painter.drawEllipse(mid, 14.0, 14.0)
+
+            painter.setPen(QtGui.QPen(color, 2.0, QtCore.Qt.PenStyle.SolidLine, QtCore.Qt.PenCapStyle.RoundCap, QtCore.Qt.PenJoinStyle.RoundJoin))
+            painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+
+            if is_rotational:
+                self._draw_rotational_spring_symbol(painter, pt_a, pt_b, color, is_actuator)
+            else:
+                self._draw_linear_spring_symbol(painter, pt_a, pt_b, color, is_actuator)
+
+            painter.setPen(QtGui.QPen(color.darker(130)))
+            painter.drawText(mid + QtCore.QPointF(6.0, -6.0), spring.name)
+
+    def _spring_endpoint_world(
+        self,
+        project: Project,
+        ep,
+        assembled: AssembledMechanism | None,
+    ) -> tuple[float | None, float | None]:
+        if ep.kind is SpringEndpointKind.GROUND:
+            if ep.ground_x is not None:
+                x = self.app_service.expression_service.evaluate_property(ep.ground_x, project.parameters).value
+                y = self.app_service.expression_service.evaluate_property(ep.ground_y, project.parameters).value
+                return x, y
+            return 0.0, 0.0
+        if ep.body_id is None or ep.marker_id is None:
+            return None, None
+        return self._marker_world_position(project, ep.body_id, ep.marker_id, assembled)
+
+    def _draw_linear_spring_symbol(
+        self,
+        painter: QtGui.QPainter,
+        pt_a: QtCore.QPointF,
+        pt_b: QtCore.QPointF,
+        color: QtGui.QColor,
+        is_actuator: bool,
+    ) -> None:
+        dx = pt_b.x() - pt_a.x()
+        dy = pt_b.y() - pt_a.y()
+        length = math.hypot(dx, dy)
+        if length < 1e-3:
+            return
+        ux, uy = dx / length, dy / length
+        nx, ny = -uy, ux  # normal
+
+        if is_actuator:
+            # Cylinder body with double-headed arrow
+            shaft = length * 0.5
+            cyl_w = 8.0
+            half = shaft * 0.5
+            cx = (pt_a.x() + pt_b.x()) * 0.5
+            cy = (pt_a.y() + pt_b.y()) * 0.5
+            c1 = QtCore.QPointF(cx - ux * half, cy - uy * half)
+            c2 = QtCore.QPointF(cx + ux * half, cy + uy * half)
+            rect_pts = QtGui.QPolygonF([
+                c1 + QtCore.QPointF(nx * cyl_w, ny * cyl_w),
+                c2 + QtCore.QPointF(nx * cyl_w, ny * cyl_w),
+                c2 - QtCore.QPointF(nx * cyl_w, ny * cyl_w),
+                c1 - QtCore.QPointF(nx * cyl_w, ny * cyl_w),
+            ])
+            painter.drawPolygon(rect_pts)
+            painter.drawLine(pt_a, c1)
+            painter.drawLine(c2, pt_b)
+            arrow_size = 8.0
+            wing = 4.0
+            for tip, direction in ((pt_b, 1.0), (pt_a, -1.0)):
+                base = tip - QtCore.QPointF(ux * arrow_size * direction, uy * arrow_size * direction)
+                p1 = base + QtCore.QPointF(nx * wing, ny * wing)
+                p2 = base - QtCore.QPointF(nx * wing, ny * wing)
+                painter.setBrush(QtGui.QBrush(color))
+                painter.setPen(QtCore.Qt.PenStyle.NoPen)
+                painter.drawPolygon(QtGui.QPolygonF([tip, p1, p2]))
+                painter.setPen(QtGui.QPen(color, 2.0))
+                painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        else:
+            # Zigzag spring symbol
+            n_coils = 6
+            coil_w = 6.0
+            lead = min(length * 0.15, 10.0)
+            zigzag_len = length - 2.0 * lead
+            if zigzag_len < 4.0:
+                painter.drawLine(pt_a, pt_b)
+                return
+            pts = [pt_a]
+            pts.append(pt_a + QtCore.QPointF(ux * lead, uy * lead))
+            seg_len = zigzag_len / (n_coils * 2)
+            for i in range(n_coils * 2):
+                t = lead + (i + 1) * seg_len
+                side = coil_w if i % 2 == 0 else -coil_w
+                pts.append(QtCore.QPointF(
+                    pt_a.x() + ux * t + nx * side,
+                    pt_a.y() + uy * t + ny * side,
+                ))
+            pts.append(pt_b - QtCore.QPointF(ux * lead, uy * lead))
+            pts.append(pt_b)
+            painter.drawPolyline(QtGui.QPolygonF(pts))
+
+    def _draw_rotational_spring_symbol(
+        self,
+        painter: QtGui.QPainter,
+        pt_a: QtCore.QPointF,
+        pt_b: QtCore.QPointF,
+        color: QtGui.QColor,
+        is_actuator: bool,
+    ) -> None:
+        # Draw at the midpoint between the two endpoints
+        cx = (pt_a.x() + pt_b.x()) * 0.5
+        cy = (pt_a.y() + pt_b.y()) * 0.5
+        center = QtCore.QPointF(cx, cy)
+        radius = 14.0
+        rect = QtCore.QRectF(cx - radius, cy - radius, radius * 2.0, radius * 2.0)
+
+        # Dashed line between endpoints
+        painter.setPen(QtGui.QPen(color, 1.2, QtCore.Qt.PenStyle.DashLine))
+        painter.drawLine(pt_a, pt_b)
+
+        painter.setPen(QtGui.QPen(color, 2.0))
+        if is_actuator:
+            painter.drawArc(rect, 30 * 16, 300 * 16)
+            # Arrow at start of arc
+            angle_rad = math.radians(30.0 + 300.0)
+            tip = center + QtCore.QPointF(radius * math.cos(math.radians(30.0 + 300.0)), -radius * math.sin(math.radians(30.0 + 300.0)))
+            tang = QtCore.QPointF(-math.sin(angle_rad), -math.cos(angle_rad))
+            p1 = tip + tang * 5.0 + QtCore.QPointF(-tang.y(), tang.x()) * 3.0
+            p2 = tip + tang * 5.0 - QtCore.QPointF(-tang.y(), tang.x()) * 3.0
+            painter.setBrush(QtGui.QBrush(color))
+            painter.setPen(QtCore.Qt.PenStyle.NoPen)
+            painter.drawPolygon(QtGui.QPolygonF([tip, p1, p2]))
+            painter.setPen(QtGui.QPen(color, 2.0))
+            painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+            # Second arrow at end
+            tip2 = center + QtCore.QPointF(radius * math.cos(math.radians(30.0)), -radius * math.sin(math.radians(30.0)))
+            tang2 = QtCore.QPointF(math.sin(math.radians(30.0)), math.cos(math.radians(30.0)))
+            p3 = tip2 + tang2 * 5.0 + QtCore.QPointF(-tang2.y(), tang2.x()) * 3.0
+            p4 = tip2 + tang2 * 5.0 - QtCore.QPointF(-tang2.y(), tang2.x()) * 3.0
+            painter.setBrush(QtGui.QBrush(color))
+            painter.setPen(QtCore.Qt.PenStyle.NoPen)
+            painter.drawPolygon(QtGui.QPolygonF([tip2, p3, p4]))
+            painter.setPen(QtGui.QPen(color, 2.0))
+            painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        else:
+            painter.drawArc(rect, 40 * 16, 280 * 16)
+            # Arrow at end of arc
+            end_angle = math.radians(40.0 + 280.0)
+            tip = center + QtCore.QPointF(radius * math.cos(end_angle), -radius * math.sin(end_angle))
+            tang = QtCore.QPointF(math.sin(end_angle), math.cos(end_angle))
+            p1 = tip + tang * 6.0 + QtCore.QPointF(-tang.y(), tang.x()) * 3.5
+            p2 = tip + tang * 6.0 - QtCore.QPointF(-tang.y(), tang.x()) * 3.5
+            painter.setBrush(QtGui.QBrush(color))
+            painter.setPen(QtCore.Qt.PenStyle.NoPen)
+            painter.drawPolygon(QtGui.QPolygonF([tip, p1, p2]))
+            painter.setPen(QtGui.QPen(color, 2.0))
+            painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+
     def _draw_sliders(self, painter: QtGui.QPainter, sliders: list[CanvasSlider], transform) -> None:
         self._screen_sliders = []
         self._screen_slider_handles = []
@@ -3768,6 +4324,34 @@ class MechanismCanvas(QtWidgets.QWidget):
                 )
             end = self._to_screen(self._hover_world[0], self._hover_world[1], transform)
             painter.drawLine(start, end)
+        is_spring_mode = self._mode in {
+            CanvasMode.CREATE_LINEAR_SPRING,
+            CanvasMode.CREATE_ROTATIONAL_SPRING,
+            CanvasMode.CREATE_LINEAR_ACTUATOR,
+            CanvasMode.CREATE_ROTATIONAL_ACTUATOR,
+        }
+        if is_spring_mode and self._hover_world is not None:
+            is_actuator_mode = self._mode in {CanvasMode.CREATE_LINEAR_ACTUATOR, CanvasMode.CREATE_ROTATIONAL_ACTUATOR}
+            preview_color = QtGui.QColor("#8d6cab") if is_actuator_mode else QtGui.QColor("#2a9d8f")
+            hover_screen = self._to_screen(self._hover_world[0], self._hover_world[1], transform)
+            if self._spring_start is not None:
+                start_screen = self._to_screen(self._spring_start.x, self._spring_start.y, transform)
+                painter.setPen(QtGui.QPen(preview_color, 2.0, QtCore.Qt.PenStyle.DashLine))
+                painter.drawLine(start_screen, hover_screen)
+                painter.setPen(QtCore.Qt.PenStyle.NoPen)
+                painter.setBrush(QtGui.QBrush(preview_color))
+                painter.drawEllipse(start_screen, 4.5, 4.5)
+            elif self._spring_start_world is not None:
+                ground_screen = self._to_screen(self._spring_start_world[0], self._spring_start_world[1], transform)
+                painter.setPen(QtGui.QPen(preview_color, 2.0, QtCore.Qt.PenStyle.DashLine))
+                painter.drawLine(ground_screen, hover_screen)
+                painter.setPen(QtCore.Qt.PenStyle.NoPen)
+                painter.setBrush(QtGui.QBrush(preview_color))
+                painter.drawEllipse(ground_screen, 4.5, 4.5)
+                self._draw_ground_symbol(painter, ground_screen)
+            painter.setPen(QtCore.Qt.PenStyle.NoPen)
+            painter.setBrush(QtGui.QBrush(preview_color))
+            painter.drawEllipse(hover_screen, 4.5, 4.5)
         if self._pending_distance_constraint_refs and self._hover_world is not None and self.app_service.project is not None:
             point_map = {point.entity_id: point for point in self._collect_sketch_points(self.app_service.project)}
             if all(point_id in point_map for point_id in self._pending_distance_constraint_refs[:2]):
@@ -3790,7 +4374,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             CanvasMode.CREATE_SKETCH_LINE_SEGMENT,
             CanvasMode.CREATE_SKETCH_RECTANGLE,
             CanvasMode.CREATE_SKETCH_CIRCLE,
-            CanvasMode.CREATE_SKETCH_ARC,
+            CanvasMode.CREATE_SKETCH_ARC_CENTER,
             CanvasMode.CREATE_SKETCH_INFINITE_LINE,
         } and self._hover_world is not None:
             preview = self._snap_preview_world or self._hover_world
@@ -3878,30 +4462,6 @@ class MechanismCanvas(QtWidgets.QWidget):
             painter.drawEllipse(rect)
             painter.drawLine(center_screen, preview_point)
             return
-        if self._mode == CanvasMode.CREATE_SKETCH_ARC:
-            if len(self._creation_points) < 2:
-                preview_points.append(preview_point)
-                if len(preview_points) >= 2:
-                    painter.drawPolyline(QtGui.QPolygonF(preview_points))
-                return
-            arc = self._arc_geometry_from_tuples(
-                [self._creation_points[0], self._creation_points[1], preview_world]
-            )
-            if arc is None:
-                preview_points.append(preview_point)
-                painter.drawPolyline(QtGui.QPolygonF(preview_points))
-                return
-            center_x, center_y, radius, start_angle, span_angle = arc
-            center = self._to_screen(center_x, center_y, transform)
-            radius_px = abs(radius * transform[0])
-            rect = QtCore.QRectF(
-                center.x() - radius_px,
-                center.y() - radius_px,
-                2.0 * radius_px,
-                2.0 * radius_px,
-            )
-            painter.drawArc(rect, int(-math.degrees(start_angle) * 16), int(-math.degrees(span_angle) * 16))
-            return
         if self._mode == CanvasMode.CREATE_SKETCH_ARC_CENTER:
             n = len(self._creation_points)
             if n == 0:
@@ -3929,8 +4489,8 @@ class MechanismCanvas(QtWidgets.QWidget):
                     center_screen.x() - radius_px, center_screen.y() - radius_px,
                     2.0 * radius_px, 2.0 * radius_px,
                 )
-                start_deg = math.degrees(math.atan2(-(sy - cy), sx - cx))
-                end_deg = math.degrees(math.atan2(-(preview_world[1] - cy), preview_world[0] - cx))
+                start_deg = math.degrees(math.atan2(sy - cy, sx - cx))
+                end_deg = math.degrees(math.atan2(preview_world[1] - cy, preview_world[0] - cx))
                 span = (end_deg - start_deg + 180.0) % 360.0 - 180.0
                 painter.drawArc(rect, int(start_deg * 16), int(span * 16))
             return
@@ -4018,6 +4578,16 @@ class MechanismCanvas(QtWidgets.QWidget):
         self.entitySelected.emit(body_id)
         if self._pending_joint_creation:
             self._create_pending_joint(body_id)
+        self.modelChanged.emit(f"Created {name}")
+        self.set_mode(CanvasMode.SELECT)
+
+    def _create_point_mass_at(self, world: tuple[float, float]) -> None:
+        if not self._require_editing():
+            return
+        name = self._next_name("Mass", [body.name for body in self.app_service.project.model.bodies])
+        x, y = world
+        body_id = self.app_service.create_punctual_mass(name, self._mm_expression(x), self._mm_expression(y))
+        self.entitySelected.emit(body_id)
         self.modelChanged.emit(f"Created {name}")
         self.set_mode(CanvasMode.SELECT)
 
@@ -4138,6 +4708,73 @@ class MechanismCanvas(QtWidgets.QWidget):
                 JointEndpointInput(JointEndpointKind.MARKER, body_id=marker.body_id, marker_id=marker.entity_id),
             )
         self.entitySelected.emit(joint_id)
+        self.modelChanged.emit(f"Created {name}")
+        self.set_mode(CanvasMode.SELECT)
+
+    _SPRING_TYPE_NAMES = {
+        CanvasMode.CREATE_LINEAR_SPRING: ("linear_spring", "LinearSpring"),
+        CanvasMode.CREATE_ROTATIONAL_SPRING: ("rotational_spring", "RotSpring"),
+        CanvasMode.CREATE_LINEAR_ACTUATOR: ("linear_actuator", "LinActuator"),
+        CanvasMode.CREATE_ROTATIONAL_ACTUATOR: ("rotational_actuator", "RotActuator"),
+    }
+
+    def _handle_spring_click(self, clicked_marker: "CanvasMarker | None", world: tuple[float, float]) -> None:
+        if not self._require_editing():
+            self._spring_start = None
+            self._spring_start_world = None
+            return
+
+        if self._spring_start is None and self._spring_start_world is None:
+            # First click: store start endpoint
+            if clicked_marker is not None:
+                self._spring_start = clicked_marker
+            else:
+                self._spring_start_world = world
+            self.update()
+            return
+
+        # Second click: guard against mode switch between first and second clicks
+        if self._mode not in self._SPRING_TYPE_NAMES:
+            self._spring_start = None
+            self._spring_start_world = None
+            self.update()
+            return
+
+        # Reject same-marker for both endpoints
+        if clicked_marker is not None and self._spring_start is not None:
+            if clicked_marker.entity_id == self._spring_start.entity_id:
+                self._spring_start = None
+                self._spring_start_world = None
+                self.update()
+                return
+
+        spring_type_str, default_prefix = self._SPRING_TYPE_NAMES[self._mode]
+        existing_names = [s.name for s in self.app_service.project.model.springs]
+        name = self._next_name(default_prefix, existing_names)
+
+        def _make_ep(marker: "CanvasMarker | None", world_pos: "tuple[float, float] | None") -> SpringEndpoint:
+            if marker is not None:
+                return SpringEndpoint(kind=SpringEndpointKind.MARKER, body_id=marker.body_id, marker_id=marker.entity_id)
+            from quino.domain.model import ScalarProperty
+            from quino.domain.types import Dimension
+            gx, gy = world_pos
+            return SpringEndpoint(
+                kind=SpringEndpointKind.GROUND,
+                ground_x=ScalarProperty(expression=f"{gx:.6g} mm", unit="mm", expected_dimension=Dimension.LENGTH),
+                ground_y=ScalarProperty(expression=f"{gy:.6g} mm", unit="mm", expected_dimension=Dimension.LENGTH),
+            )
+
+        ep_a = _make_ep(self._spring_start, self._spring_start_world)
+        ep_b = _make_ep(clicked_marker, world)
+        self._spring_start = None
+        self._spring_start_world = None
+        try:
+            spring_id = self.app_service.create_spring(name, spring_type_str, ep_a, ep_b)
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Create Spring Failed", str(exc))
+            self.set_mode(CanvasMode.SELECT)
+            return
+        self.entitySelected.emit(spring_id)
         self.modelChanged.emit(f"Created {name}")
         self.set_mode(CanvasMode.SELECT)
 

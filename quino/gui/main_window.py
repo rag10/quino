@@ -24,15 +24,18 @@ from quino.domain.model import (
     SimulationResult,
     Sketch,
     SketchConstraint,
+    SketchConstraintType,
     SketchArc,
     SketchCircle,
     SketchInfiniteLine,
     SketchLineSegment,
     SketchPoint,
     Slider,
+    Spring,
 )
 from quino.gui.canvas import CanvasMode, MechanismCanvas
 from quino.services.expressions import DimensionMismatchError
+from quino.simulation.sensor_expressions import safe_sensor_var, sensor_channel_keys
 from quino.viewer.plot_window import PlotWindow
 
 
@@ -380,6 +383,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.action_add_load = self._tool_action("Load", CanvasMode.CREATE_LOAD, get_icon("load-gravity", color_dynamic), "Add a point load to a marker (select a marker on canvas)")
 
+        self.action_add_linear_spring = self._tool_action("Spring", CanvasMode.CREATE_LINEAR_SPRING, get_icon("spring", color_dynamic), "Add a linear spring between two markers (click 2 markers or click empty space for ground)")
+        self.action_add_rotational_spring = self._tool_action("RotSpring", CanvasMode.CREATE_ROTATIONAL_SPRING, get_icon("rot-spring", color_dynamic), "Add a rotational spring between two markers")
+        self.action_add_linear_actuator = self._tool_action("Actuator", CanvasMode.CREATE_LINEAR_ACTUATOR, get_icon("actuator", color_dynamic), "Add a linear force actuator between two markers")
+        self.action_add_rotational_actuator = self._tool_action("RotActuator", CanvasMode.CREATE_ROTATIONAL_ACTUATOR, get_icon("rot-actuator", color_dynamic), "Add a rotational torque actuator between two markers")
+
         self.action_new_plot = QtGui.QAction(get_icon("new-graph", color_dynamic), "Plot", self)
         self.action_new_plot.triggered.connect(self.create_plot_window)
         self.action_new_plot.setToolTip("Create a new plot from sensor data")
@@ -411,11 +419,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_toggle_grid.triggered.connect(self._on_toggle_grid)
         self.action_toggle_grid.setToolTip("Show/hide grid")
 
-        self.action_toggle_gravity = QtGui.QAction(get_icon("load-gravity", color_base), "Gravity", self)
-        self.action_toggle_gravity.setCheckable(True)
-        self.action_toggle_gravity.setChecked(False)
-        self.action_toggle_gravity.setToolTip("Enable gravity (LoadMassProportional)")
-        self.action_toggle_gravity.triggered.connect(self._on_toggle_gravity)
+        self.action_add_gravity = QtGui.QAction(get_icon("load-gravity", color_base), "Gravity", self)
+        self.action_add_gravity.setToolTip("Add gravity — or select it if already present")
+        self.action_add_gravity.triggered.connect(self._on_add_gravity)
 
         self.action_preferences = QtGui.QAction(get_icon("preferences", color_base), "Preferences", self)
         self.action_preferences.triggered.connect(self._show_preferences_dialog)
@@ -428,6 +434,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.action_select_tool = self._tool_action("Select", CanvasMode.SELECT, get_icon("select", color_base), "Select entities")
         self.action_bar_tool = self._tool_action("Bar", CanvasMode.CREATE_BAR, get_icon("bar", color_kinematic), "Create a bar (2-marker body)")
+        self.action_point_mass_tool = self._tool_action("Mass", CanvasMode.CREATE_POINT_MASS, get_icon("point-mass", color_kinematic), "Create a punctual mass (1 click)")
         self.action_body_tool = self._tool_action("Body", CanvasMode.CREATE_BODY, get_icon("body", color_kinematic), "Create a body")
         self.action_add_marker_tool = self._tool_action("Marker", CanvasMode.ADD_MARKER, get_icon("marker-plus", color_kinematic), "Add a marker to the selected body")
         self.action_joint_tool = self._tool_action("Revolute", CanvasMode.CREATE_REVOLUTE, get_icon("revolute", color_kinematic), "Create a revolute joint")
@@ -437,9 +444,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_slider_connect_tool = self._tool_action("ToSlide", CanvasMode.CONNECT_SLIDER, get_icon("slider-connect", color_kinematic), "Connect a marker to a slider")
         self.action_sketch_point_tool = self._tool_action("Point", CanvasMode.CREATE_SKETCH_POINT, get_icon("sketch-point", color_sketch), "Create a sketch point")
         self.action_sketch_line_tool = self._tool_action("Line", CanvasMode.CREATE_SKETCH_LINE_SEGMENT, get_icon("sketch-line", color_sketch), "Create a sketch line segment")
-        self.action_sketch_rectangle_tool = self._tool_action("Rect", CanvasMode.CREATE_SKETCH_RECTANGLE, get_icon("sketch-line", color_sketch), "Create a sketch rectangle")
+        self.action_sketch_rectangle_tool = self._tool_action("Rect", CanvasMode.CREATE_SKETCH_RECTANGLE, get_icon("sketch-rectangle", color_sketch), "Create a sketch rectangle")
         self.action_sketch_circle_tool = self._tool_action("Circle", CanvasMode.CREATE_SKETCH_CIRCLE, get_icon("sketch-circle", color_sketch), "Create a sketch circle")
-        self.action_sketch_arc_tool = self._tool_action("Arc", CanvasMode.CREATE_SKETCH_ARC, get_icon("sketch-arc", color_sketch), "Create a sketch arc")
+        self.action_sketch_arc_tool = self._tool_action("Arc", CanvasMode.CREATE_SKETCH_ARC_CENTER, get_icon("sketch-arc", color_sketch), "Create an arc: click center, start, end")
         self.action_sketch_infinite_line_tool = self._tool_action("Axis", CanvasMode.CREATE_SKETCH_INFINITE_LINE, get_icon("sketch-infinite-line", color_sketch), "Create a sketch infinite line")
         self.action_sketch_fix_tool = self._tool_action("Fix", CanvasMode.CREATE_SKETCH_FIX, get_icon("constraint-fix", color_sketch), "Fix a sketch point in place")
         self.action_sketch_horizontal_tool = self._tool_action("Horz", CanvasMode.CREATE_SKETCH_HORIZONTAL, get_icon("constraint-horizontal", color_sketch), "Constrain two sketch points horizontally")
@@ -456,8 +463,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_sketch_collinear_tool = self._tool_action("Colin", CanvasMode.CREATE_SKETCH_COLLINEAR, get_icon("collinear", color_sketch), "Constrain 3 points to be collinear (click 3 points or 1 line + 1 point)")
         self.action_sketch_symmetric_tool = self._tool_action("Sym", CanvasMode.CREATE_SKETCH_SYMMETRIC, get_icon("symmetric", color_sketch), "Constrain 2 points to be symmetric about an axis (2 pts + axis line)")
         self.action_sketch_on_circle_tool = self._tool_action("OnCirc", CanvasMode.CREATE_SKETCH_ON_CIRCLE, get_icon("on-circle", color_sketch), "Constrain a point to lie on a circle (1 point + 1 circle)")
-        self.action_sketch_tangent_tool = self._tool_action("Tangent", CanvasMode.CREATE_SKETCH_TANGENT, get_icon("tangent", color_sketch), "Constrain a line to be tangent to a circle (1 line + 1 circle)")
-        self.action_sketch_concentric_tool = self._tool_action("Conc", CanvasMode.CREATE_SKETCH_CONCENTRIC, get_icon("concentric", color_sketch), "Constrain two circles to be concentric (click 2 circles)")
+        self.action_sketch_tangent_tool = self._tool_action("Tangent", CanvasMode.CREATE_SKETCH_TANGENT, get_icon("tangent", color_sketch), "Constrain tangency between a line and a circle/arc, or between two circles/arcs")
+        self.action_sketch_concentric_tool = self._tool_action("Conc", CanvasMode.CREATE_SKETCH_CONCENTRIC, get_icon("concentric", color_sketch), "Constrain two circles/arcs to be concentric (click 2 curves)")
         self.action_sketch_arc_center_tool = self._tool_action("CtrArc", CanvasMode.CREATE_SKETCH_ARC_CENTER, get_icon("arc-center", color_sketch), "Create an arc: click center, start, end")
         self.action_solve_sketch = QtGui.QAction(get_icon("sketch-solve", color_sketch), "Solve", self)
         self.action_solve_sketch.triggered.connect(self.solve_sketch)
@@ -472,6 +479,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for action in (
             self.action_select_tool,
             self.action_bar_tool,
+            self.action_point_mass_tool,
             self.action_body_tool,
             self.action_add_marker_tool,
             self.action_joint_tool,
@@ -511,6 +519,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_angle_v_sensor,
             self.action_angle_vector_sensor,
             self.action_add_load,
+            self.action_add_linear_spring,
+            self.action_add_rotational_spring,
+            self.action_add_linear_actuator,
+            self.action_add_rotational_actuator,
         ):
             self.tool_group.addAction(action)
         self.action_select_tool.setChecked(True)
@@ -677,14 +689,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._add_toolbar_block(t, [
             [self.action_sketch_point_tool, self.action_sketch_line_tool, self.action_sketch_rectangle_tool, self.action_sketch_circle_tool, self.action_sketch_arc_tool],
-            [self.action_sketch_infinite_line_tool, self.action_sketch_arc_center_tool, None, None, None],
+            [self.action_sketch_infinite_line_tool, None, None, None, None],
         ], "Draw")
         self._add_toolbar_sep(t)
 
         self._add_toolbar_block(t, [
-            [self.action_sketch_fix_tool, self.action_sketch_horizontal_tool, self.action_sketch_vertical_tool, self.action_sketch_coincident_tool, self.action_sketch_distance_tool],
-            [self.action_sketch_horizontal_distance_tool, self.action_sketch_vertical_distance_tool, self.action_sketch_angle_tool, self.action_sketch_midpoint_tool, self.action_sketch_collinear_tool],
-            [self.action_sketch_symmetric_tool, self.action_sketch_on_circle_tool, None, None, None],
+            [self.action_sketch_fix_tool, self.action_sketch_horizontal_tool, self.action_sketch_vertical_tool, self.action_sketch_coincident_tool, self.action_sketch_distance_tool, self.action_sketch_horizontal_distance_tool],
+            [self.action_sketch_vertical_distance_tool, self.action_sketch_angle_tool, self.action_sketch_midpoint_tool, self.action_sketch_collinear_tool, self.action_sketch_symmetric_tool, self.action_sketch_on_circle_tool],
         ], "Point")
         self._add_toolbar_sep(t)
 
@@ -707,7 +718,7 @@ class MainWindow(QtWidgets.QMainWindow):
         t = self._model_toolbar
 
         self._add_toolbar_block(t, [
-            [self.action_bar_tool, self.action_body_tool, self.action_add_marker_tool, self.action_slider_tool],
+            [self.action_bar_tool, self.action_point_mass_tool, self.action_body_tool, self.action_add_marker_tool, self.action_slider_tool],
         ], "Parts")
         self._add_toolbar_sep(t)
 
@@ -727,8 +738,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._add_toolbar_sep(t)
 
         self._add_toolbar_block(t, [
-            [self.action_add_load, self.action_toggle_gravity],
+            [self.action_add_load, self.action_add_gravity],
         ], "Loads")
+        self._add_toolbar_sep(t)
+
+        self._add_toolbar_block(t, [
+            [self.action_add_linear_spring, self.action_add_rotational_spring,
+             self.action_add_linear_actuator, self.action_add_rotational_actuator],
+        ], "Springs")
 
         self._model_toolbar.setVisible(True)
 
@@ -812,7 +829,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._populate_parameters(project)
         self._populate_inspector()
         self.action_toggle_sketch_visible.setChecked(project.sketch.visible if project.sketch is not None else False)
-        self.action_toggle_gravity.setChecked(project.model.gravity.enabled)
         self.canvas.set_selection(self._selected_entity_id)
         self._update_interaction_state()
         self._update_status_message()
@@ -1005,14 +1021,74 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if not self._prepare_for_model_edit():
             return
+        entity_id = self._selected_entity_id
+        consequence = self.app_service.get_marker_deletion_consequence(entity_id)
+        result = "accept"
+        if consequence == "to_bar":
+            result = self._confirm_marker_deletion_to_bar(entity_id)
+            if result == "cancel":
+                return
+            if result == "delete_body":
+                body = self.app_service.get_body_by_marker(entity_id)
+                entity_id = body.id if body else entity_id
+        elif consequence == "to_point_mass":
+            result = self._confirm_marker_deletion_to_point_mass(entity_id)
+            if result == "cancel":
+                return
+            if result == "delete_body":
+                body = self.app_service.get_body_by_marker(entity_id)
+                entity_id = body.id if body else entity_id
         try:
-            self.app_service.delete_entity(self._selected_entity_id)
+            if consequence == "to_bar" and result == "accept":
+                self.app_service.delete_structural_marker_convert_to_bar(entity_id)
+            else:
+                self.app_service.delete_entity(entity_id)
             self._append_message("Deleted selected entity")
             self._selected_entity_id = None
             self._mark_project_dirty()
         except Exception as exc:  # pragma: no cover - UI feedback
             self._append_message(f"Delete failed: {exc}")
         self.refresh_all()
+
+    def _confirm_marker_deletion_to_bar(self, marker_id: str) -> str:
+        body = self.app_service.get_body_by_marker(marker_id)
+        body_name = body.name if body else "body"
+        msg = QtWidgets.QMessageBox(self)
+        msg.setWindowTitle("Convert to Bar")
+        msg.setText(
+            f'Removing this marker will convert "{body_name}" into a Bar.\n'
+            "The center of mass will be placed at the midpoint of the remaining two markers."
+        )
+        btn_accept = msg.addButton("Convert to Bar", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        msg.addButton("Cancel", QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        btn_delete = msg.addButton("Delete Body", QtWidgets.QMessageBox.ButtonRole.DestructiveRole)
+        msg.exec()
+        clicked = msg.clickedButton()
+        if clicked is btn_accept:
+            return "accept"
+        if clicked is btn_delete:
+            return "delete_body"
+        return "cancel"
+
+    def _confirm_marker_deletion_to_point_mass(self, marker_id: str) -> str:
+        body = self.app_service.get_body_by_marker(marker_id)
+        body_name = body.name if body else "bar"
+        msg = QtWidgets.QMessageBox(self)
+        msg.setWindowTitle("Convert to Punctual Mass")
+        msg.setText(
+            f'Removing this marker will convert "{body_name}" into a Punctual Mass.\n'
+            "The center of mass will be locked to the remaining marker."
+        )
+        btn_accept = msg.addButton("Convert to Punctual Mass", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        msg.addButton("Cancel", QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        btn_delete = msg.addButton("Delete Bar", QtWidgets.QMessageBox.ButtonRole.DestructiveRole)
+        msg.exec()
+        clicked = msg.clickedButton()
+        if clicked is btn_accept:
+            return "accept"
+        if clicked is btn_delete:
+            return "delete_body"
+        return "cancel"
 
     def _advance_playback(self) -> None:
         if self._last_simulation_result is None or not self._last_simulation_result.frames:
@@ -1110,11 +1186,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _apply_current_frame(self) -> None:
         frame = None
+        time_value = 0.0
         if self._last_simulation_result is not None and self._last_simulation_result.frames:
             index = max(0, min(self._current_frame_index, len(self._last_simulation_result.frames) - 1))
             frame = self._last_simulation_result.frames[index]
+            time_value = self._last_simulation_result.time[index] if index < len(self._last_simulation_result.time) else 0.0
         self._last_simulation_state = frame
         self.canvas.set_state_overlay(frame)
+        self.canvas.set_simulation_time(time_value)
         if self.app_service.project is not None:
             self._populate_canvas_summary(self.app_service.project)
         self._update_interaction_state()
@@ -1147,6 +1226,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._last_simulation_state = None
         self._current_frame_index = 0
         self.canvas.set_state_overlay(None)
+        self.canvas.set_simulation_time(0.0)
         self.canvas.set_trajectories([])
         self.action_show_trajectories.setEnabled(False)
         self._update_timeline_controls()
@@ -1163,14 +1243,20 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_toggle_grid(self) -> None:
         self.canvas.set_show_grid(self.action_toggle_grid.isChecked())
 
-    def _on_toggle_gravity(self, checked: bool) -> None:
+    def _on_add_gravity(self) -> None:
+        project = self.app_service.project
+        if project is None:
+            return
+        if project.model.gravity is not None:
+            self._selected_entity_id = "__gravity__"
+            self.refresh_all()
+            return
         if not self._editing_allowed():
-            self.action_toggle_gravity.setChecked(not checked)
             return
         if not self._prepare_for_model_edit():
-            self.action_toggle_gravity.setChecked(not checked)
             return
-        self.app_service.toggle_gravity(checked)
+        self.app_service.add_gravity()
+        self._selected_entity_id = "__gravity__"
         self._mark_project_dirty()
         self.refresh_all()
 
@@ -1406,6 +1492,9 @@ class MainWindow(QtWidgets.QMainWindow):
         "arc": "sketch-arc",
         "infinite_line": "sketch-infinite-line",
         "gravity": "load-gravity",
+        "load": "load-gravity",
+        "linear_spring": "spring", "rotational_spring": "rot-spring",
+        "linear_actuator": "actuator", "rotational_actuator": "rot-actuator",
     }
     _SECTION_ICON: dict[str, str] = {
         "Bodies": "body", "Sliders": "slider", "Joints": "revolute",
@@ -1413,12 +1502,14 @@ class MainWindow(QtWidgets.QMainWindow):
         "Sketch": "sketch-point",
         "Constraints": "constraint-distance",
         "Loads": "load-gravity",
+        "Springs": "spring",
     }
     _SECTION_COLOR: dict[str, str] = {
         "Bodies": "#2f6f9f", "Sliders": "#2f6f9f", "Joints": "#2f6f9f",
         "Drivers": "#c7781d", "Sensors": "#c7781d",
         "Sketch": "#7a7f87",
         "Loads": "#7a5a8f",
+        "Springs": "#2a9d8f",
     }
 
     def _populate_tree(self, project: Project) -> None:
@@ -1445,9 +1536,10 @@ class MainWindow(QtWidgets.QMainWindow):
         drivers_root = _root("Drivers", len(project.model.drivers))
         sensors_root = _root("Sensors", len(project.model.sensors))
         loads_root = _root("Loads", len(project.model.loads) + 1)
+        springs_root = _root("Springs", len(project.model.springs))
         sketch_count = (len(project.sketch.entities) + len(project.sketch.constraints)) if project.sketch is not None else 0
         sketch_root = _root("Sketch", sketch_count)
-        self.tree.addTopLevelItems([sketch_root, bodies_root, sliders_root, joints_root, drivers_root, sensors_root, loads_root])
+        self.tree.addTopLevelItems([sketch_root, bodies_root, sliders_root, joints_root, drivers_root, sensors_root, loads_root, springs_root])
 
         if project.sketch is not None:
             groups = {
@@ -1498,10 +1590,12 @@ class MainWindow(QtWidgets.QMainWindow):
         for load in project.model.loads:
             loads_root.addChild(self._entity_item(load.name, "load", load.id))
 
-        gravity = project.model.gravity
-        gravity_label = "Gravity (ON)" if gravity.enabled else "Gravity (OFF)"
-        gravity_item = self._entity_item(gravity_label, "gravity", "__gravity__")
-        loads_root.addChild(gravity_item)
+        if project.model.gravity is not None:
+            gravity_item = self._entity_item("Gravity", "gravity", "__gravity__")
+            loads_root.addChild(gravity_item)
+
+        for spring in project.model.springs:
+            springs_root.addChild(self._entity_item(spring.name, spring.spring_type.value, spring.id))
 
         self.tree.expandAll()
 
@@ -1577,7 +1671,7 @@ class MainWindow(QtWidgets.QMainWindow):
         CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR, CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR,
         CanvasMode.CREATE_ANGLE_VECTOR_SENSOR, CanvasMode.CREATE_LOAD,
         CanvasMode.CREATE_SKETCH_POINT, CanvasMode.CREATE_SKETCH_LINE_SEGMENT,
-        CanvasMode.CREATE_SKETCH_RECTANGLE, CanvasMode.CREATE_SKETCH_CIRCLE, CanvasMode.CREATE_SKETCH_ARC,
+        CanvasMode.CREATE_SKETCH_RECTANGLE, CanvasMode.CREATE_SKETCH_CIRCLE, CanvasMode.CREATE_SKETCH_ARC_CENTER,
         CanvasMode.CREATE_SKETCH_INFINITE_LINE,
         CanvasMode.CREATE_SKETCH_FIX, CanvasMode.CREATE_SKETCH_HORIZONTAL,
         CanvasMode.CREATE_SKETCH_VERTICAL, CanvasMode.CREATE_SKETCH_DISTANCE,
@@ -1633,6 +1727,7 @@ class MainWindow(QtWidgets.QMainWindow):
         action_for_mode = {
             CanvasMode.SELECT: self.action_select_tool,
             CanvasMode.CREATE_BAR: self.action_bar_tool,
+            CanvasMode.CREATE_POINT_MASS: self.action_point_mass_tool,
             CanvasMode.CREATE_BODY: self.action_body_tool,
             CanvasMode.ADD_MARKER: self.action_add_marker_tool,
             CanvasMode.CREATE_REVOLUTE: self.action_joint_tool,
@@ -1644,7 +1739,7 @@ class MainWindow(QtWidgets.QMainWindow):
             CanvasMode.CREATE_SKETCH_LINE_SEGMENT: self.action_sketch_line_tool,
             CanvasMode.CREATE_SKETCH_RECTANGLE: self.action_sketch_rectangle_tool,
             CanvasMode.CREATE_SKETCH_CIRCLE: self.action_sketch_circle_tool,
-            CanvasMode.CREATE_SKETCH_ARC: self.action_sketch_arc_tool,
+            CanvasMode.CREATE_SKETCH_ARC_CENTER: self.action_sketch_arc_tool,
             CanvasMode.CREATE_SKETCH_INFINITE_LINE: self.action_sketch_infinite_line_tool,
             CanvasMode.CREATE_SKETCH_FIX: self.action_sketch_fix_tool,
             CanvasMode.CREATE_SKETCH_HORIZONTAL: self.action_sketch_horizontal_tool,
@@ -1672,6 +1767,10 @@ class MainWindow(QtWidgets.QMainWindow):
             CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR: self.action_angle_v_sensor,
             CanvasMode.CREATE_ANGLE_VECTOR_SENSOR: self.action_angle_vector_sensor,
             CanvasMode.CREATE_LOAD: self.action_add_load,
+            CanvasMode.CREATE_LINEAR_SPRING: self.action_add_linear_spring,
+            CanvasMode.CREATE_ROTATIONAL_SPRING: self.action_add_rotational_spring,
+            CanvasMode.CREATE_LINEAR_ACTUATOR: self.action_add_linear_actuator,
+            CanvasMode.CREATE_ROTATIONAL_ACTUATOR: self.action_add_rotational_actuator,
         }.get(mode)
         if action_for_mode:
             if action_for_mode in self.tool_group.actions():
@@ -1743,7 +1842,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 if evaluated.startswith("ERROR:"):
                     evaluated_item.setForeground(QtGui.QColor("#c0392b"))
 
-                if kind == "boolean":
+                if kind == "section_header":
+                    header_color = QtGui.QColor("#888888")
+                    for col in range(3):
+                        h_item = QtWidgets.QTableWidgetItem(label if col == 0 else "")
+                        h_item.setFlags(h_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
+                        h_item.setForeground(header_color)
+                        font = h_item.font()
+                        font.setItalic(True)
+                        h_item.setFont(font)
+                        self.inspector.setItem(row_index, col, h_item)
+                elif kind == "boolean":
                     value_item = QtWidgets.QTableWidgetItem(value)
                     value_item.setFlags(value_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
                     value_item.setData(QtCore.Qt.ItemDataRole.UserRole, (path, kind))
@@ -1756,13 +1865,37 @@ class MainWindow(QtWidgets.QMainWindow):
                         lambda text, current_path=path: self._on_inspector_boolean_changed(current_path, text)
                     )
                     self.inspector.setCellWidget(row_index, 1, combo)
+                elif kind == "color":
+                    color_widget = QtWidgets.QWidget(self.inspector)
+                    color_layout = QtWidgets.QHBoxLayout(color_widget)
+                    color_layout.setContentsMargins(2, 2, 2, 2)
+                    color_layout.setSpacing(4)
+                    preview = QtWidgets.QLabel()
+                    preview.setFixedSize(20, 20)
+                    preview.setStyleSheet(f"background-color: {value}; border: 1px solid #888;")
+                    color_layout.addWidget(preview)
+                    pick_btn = QtWidgets.QPushButton("…")
+                    pick_btn.setFixedWidth(24)
+                    pick_btn.setEnabled(self._editing_allowed())
+                    pick_btn.clicked.connect(
+                        lambda _checked=False, current_path=path, current_value=value: self._pick_inspector_color(current_path, current_value)
+                    )
+                    color_layout.addWidget(pick_btn)
+                    color_layout.addStretch()
+                    self.inspector.setItem(row_index, 1, QtWidgets.QTableWidgetItem(value))
+                    self.inspector.setCellWidget(row_index, 1, color_widget)
                 else:
                     value_item = QtWidgets.QTableWidgetItem(value)
                     value_item.setData(QtCore.Qt.ItemDataRole.UserRole, (path, kind))
-                    if not self._editing_allowed() or kind == "readonly":
+                    if not self._editing_allowed() or kind in {"readonly", "key"}:
                         value_item.setFlags(value_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
+                    if kind == "key":
+                        mono_font = QtGui.QFont("Courier New", label_item.font().pointSize())
+                        label_item.setFont(mono_font)
+                        label_item.setToolTip("Use this key in load expressions")
                     self.inspector.setItem(row_index, 1, value_item)
-                self.inspector.setItem(row_index, 2, evaluated_item)
+                if kind != "section_header":
+                    self.inspector.setItem(row_index, 2, evaluated_item)
 
             # --- relations below the table ---
             relations = self._inspector_relations(entity)
@@ -1889,6 +2022,8 @@ class MainWindow(QtWidgets.QMainWindow):
             prop("closed_shape", "closed_shape", str(entity.closed_shape).lower(), "boolean", str(entity.closed_shape).lower())
             prop("mass", "mass", entity.mass.expression if entity.mass else "", "expression_or_null", self._evaluate_scalar(entity.mass))
             prop("inertia", "inertia", entity.inertia.expression if entity.inertia else "", "expression_or_null", self._evaluate_scalar(entity.inertia))
+            prop("color", "style.color", entity.style.color, "color", entity.style.color)
+            prop("line width", "style.line_width", str(entity.style.line_width), "expression", str(entity.style.line_width))
 
         elif isinstance(entity, Marker):
             body = self.app_service.get_body_by_marker(entity.id)
@@ -1896,7 +2031,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 prop("x", "x", entity.x.expression, "readonly", self._evaluate_scalar(entity.x))
                 prop("y", "y", entity.y.expression, "readonly", self._evaluate_scalar(entity.y))
             elif entity.type is MarkerType.COM and body is not None and body.type.value == "bar":
-                percent = float(entity.metadata.values.get("position_percent", 50.0))
+                percent = self.app_service._bar_com_percent(body)
                 length = self.app_service._bar_length(body)
                 distance = length * percent / 100.0
                 prop("position_percent", "position_percent", f"{percent:.6g}", "expression", f"{percent:.6g} %")
@@ -1921,7 +2056,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if friction_mode == "rotation":
                 coulomb, viscous = self.app_service.joint_friction_values(entity)
                 pin_r = self.app_service.joint_friction_pin_radius(entity)
-                prop("friction_pin_radius", "friction_pin_radius", f"{pin_r:.6g}", "expression", f"{pin_r:.6g}")
+                prop("friction_pin_radius", "friction_pin_radius", f"{pin_r:.6g} mm", "expression", f"{pin_r:.6g} mm")
                 prop("friction_coulomb", "friction_coulomb", f"{coulomb:.6g}", "expression", f"{coulomb:.6g}")
                 prop("friction_viscous", "friction_viscous", f"{viscous:.6g}", "expression", f"{viscous:.6g}")
                 if pin_r > 1e-12:
@@ -1940,13 +2075,21 @@ class MainWindow(QtWidgets.QMainWindow):
 
         elif isinstance(entity, Load):
             prop("target_marker_id", "", entity.target_marker_id, "readonly", entity.target_marker_id)
-            prop("fx", "fx", entity.fx.expression, "expression", self._evaluate_scalar(entity.fx))
-            prop("fy", "fy", entity.fy.expression, "expression", self._evaluate_scalar(entity.fy))
+            prop("fx", "fx", entity.fx.expression, "expression", self._evaluate_scalar(entity.fx, with_time=True))
+            prop("fy", "fy", entity.fy.expression, "expression", self._evaluate_scalar(entity.fy, with_time=True))
 
         elif isinstance(entity, Sensor):
             prop("type", "", entity.type.value, "readonly", entity.type.value)
+            safe = safe_sensor_var(entity.name)
+            channels = sensor_channel_keys(entity)
+            if channels:
+                prop("— Expression Keys —", "", "", "section_header", "")
+                for ch_suffix, ch_unit in channels:
+                    key = f"{safe}.{ch_suffix}"
+                    prop(key, "", f"[{ch_unit}]", "key", f"[{ch_unit}]")
             output = self.app_service.project.sensor_outputs.get(entity.id)
             if output and output.columns and output.data:
+                prop("— Current Values —", "", "", "section_header", "")
                 frame = max(0, min(self._current_frame_index, len(output.data) - 1))
                 row_data = output.data[frame]
                 t = output.time[frame] if frame < len(output.time) else 0.0
@@ -2004,6 +2147,30 @@ class MainWindow(QtWidgets.QMainWindow):
                 label_x, label_y = self.app_service._current_sketch_constraint_label_position(entity)
                 prop("label_x", "label_x", f"{label_x:.6g} mm", "expression", f"{label_x:.6g} mm")
                 prop("label_y", "label_y", f"{label_y:.6g} mm", "expression", f"{label_y:.6g} mm")
+
+        elif isinstance(entity, Spring):
+            from quino.domain.types import SpringType
+            prop("type", "", entity.spring_type.value, "readonly", entity.spring_type.value)
+            is_rotational = entity.spring_type in (SpringType.ROTATIONAL_SPRING, SpringType.ROTATIONAL_ACTUATOR)
+            is_actuator = entity.spring_type in (SpringType.LINEAR_ACTUATOR, SpringType.ROTATIONAL_ACTUATOR)
+            stiffness = float(entity.metadata.values.get("stiffness", 0.0))
+            damping = float(entity.metadata.values.get("damping", 0.0))
+            if is_rotational:
+                prop("stiffness", "stiffness", f"{stiffness:.6g}", "float", f"{stiffness:.6g} N·mm/rad")
+                prop("damping", "damping", f"{damping:.6g}", "float", f"{damping:.6g} N·mm·s/rad")
+            else:
+                prop("stiffness", "stiffness", f"{stiffness:.6g}", "float", f"{stiffness:.6g} N/mm")
+                prop("damping", "damping", f"{damping:.6g}", "float", f"{damping:.6g} N·s/mm")
+            if entity.rest_value is not None:
+                prop("rest_value", "rest_value", entity.rest_value.expression, "expression", self._evaluate_scalar(entity.rest_value))
+            else:
+                rest_unit = "rad" if is_rotational else "mm"
+                prop("rest_value", "rest_value", f"0 {rest_unit}", "expression", f"0.0 {rest_unit}")
+            if is_actuator:
+                if entity.law is not None:
+                    prop("law", "law", entity.law.expression, "expression", self._evaluate_scalar(entity.law, with_time=True))
+                else:
+                    prop("law", "law", "0 N" if not is_rotational else "0 N*mm", "expression", "0.0")
 
         elif isinstance(entity, GravityLoad):
             prop("magnitude", "magnitude", str(entity.magnitude), "expression", str(entity.magnitude))
@@ -2066,6 +2233,16 @@ class MainWindow(QtWidgets.QMainWindow):
             if joint is not None:
                 icon_j = self._KIND_ICON.get(joint.type.value, "revolute")
                 rel("Target Joint", icon_j, joint.name, joint.type.value, entity.target_joint_id)
+
+        elif isinstance(entity, Spring):
+            from quino.domain.types import SpringEndpointKind
+            for label, ep in [("A", entity.endpoint_a), ("B", entity.endpoint_b)]:
+                if ep.kind is SpringEndpointKind.GROUND:
+                    rel("Endpoints", "ground", f"Endpoint {label}", "Ground", None)
+                elif ep.body_id is not None and ep.marker_id is not None:
+                    om = self.app_service.get_entity(ep.marker_id)
+                    ob = self.app_service.get_body(ep.body_id)
+                    rel("Endpoints", "marker", f"Endpoint {label}", f"{ob.name}.{om.name}" if om is not None and ob is not None else ep.marker_id, ep.marker_id)
 
         elif isinstance(entity, Sensor):
             for mid in (entity.marker_ids or []):
@@ -2178,6 +2355,18 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as exc:  # pragma: no cover - UI feedback
             self._append_message(f"Property update failed: {exc}")
         self.refresh_all()
+
+    def _pick_inspector_color(self, path: str, current_value: str) -> None:
+        if self._suspend_property_updates or not self._selected_entity_id or not self._editing_allowed():
+            return
+        color = QtWidgets.QColorDialog.getColor(QtGui.QColor(current_value), self, "Select Color")
+        if color.isValid():
+            try:
+                self._apply_property_update(self._selected_entity_id, path, color.name(), "expression")
+                self._mark_project_dirty()
+            except Exception as exc:  # pragma: no cover - UI feedback
+                self._append_message(f"Property update failed: {exc}")
+            self.refresh_all()
 
     def _apply_property_update(self, entity_id: str, path: str, raw_value: str, kind: str) -> None:
         entity = self.app_service.get_entity(entity_id)
@@ -2371,6 +2560,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_undo,
             self.action_redo,
             self.action_bar_tool,
+            self.action_point_mass_tool,
             self.action_body_tool,
             self.action_add_marker_tool,
             self.action_joint_tool,
@@ -2438,6 +2628,7 @@ class MainWindow(QtWidgets.QMainWindow):
         mode_label = {
             "select": "Select",
             "create_bar": "Create Bar",
+            "create_point_mass": "Punctual Mass",
             "create_body": "Create Body",
             "add_marker": "Marker",
             "create_revolute": "Revolute",
@@ -2449,7 +2640,6 @@ class MainWindow(QtWidgets.QMainWindow):
             "create_sketch_line_segment": "Line",
             "create_sketch_rectangle": "Rect",
             "create_sketch_circle": "Circle",
-            "create_sketch_arc": "Arc",
             "create_sketch_infinite_line": "Axis",
             "create_sketch_fix": "Fix",
             "create_sketch_horizontal": "Horz",
@@ -2466,20 +2656,20 @@ class MainWindow(QtWidgets.QMainWindow):
             "create_sketch_on_circle": "OnCirc",
             "create_sketch_tangent": "Tangent",
             "create_sketch_concentric": "Conc",
-            "create_sketch_arc_center": "CtrArc",
+            "create_sketch_arc_center": "Arc",
             "create_rotation_driver": "RotDrv",
             "create_translation_driver": "LinDrv",
             "create_load": "Load",
         }.get(mode, mode)
         mode_hint = {
             "create_bar": "2 clicks",
+            "create_point_mass": "1 click",
             "create_body": "Click to place points, Enter/Esc to finish",
             "create_slider": "2 clicks for axis",
             "create_sketch_point": "1 click",
             "create_sketch_line_segment": "2 clicks or snap to existing points",
             "create_sketch_rectangle": "2 opposite corners",
             "create_sketch_circle": "Center + radius point",
-            "create_sketch_arc": "3 points",
             "create_sketch_infinite_line": "2 points define direction",
             "create_sketch_fix": "Click 1 sketch point",
             "create_sketch_horizontal": "Click 2 sketch points",
@@ -2491,11 +2681,11 @@ class MainWindow(QtWidgets.QMainWindow):
             "create_sketch_equal_length": "Click 4 sketch points (2 per line)",
             "create_sketch_angle": "Click vertex then 2 arm points",
             "create_sketch_midpoint": "Click midpoint then 2 endpoints",
-            "create_sketch_collinear": "Click 3 points (or 1 line + 1 point)",
+            "create_sketch_collinear": "Click 2 segments",
             "create_sketch_symmetric": "Click 2 points then axis line (2 pts)",
             "create_sketch_on_circle": "Click 1 point then 1 circle",
-            "create_sketch_tangent": "Click 1 line then 1 circle",
-            "create_sketch_concentric": "Click 2 circles",
+            "create_sketch_tangent": "Click 1 line + 1 curve, or 2 curves",
+            "create_sketch_concentric": "Click 2 circles/arcs",
             "create_sketch_arc_center": "Click center, start, end",
             "create_load": "Click a marker",
         }.get(mode)

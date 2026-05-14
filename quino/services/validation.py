@@ -11,11 +11,12 @@ from quino.domain.model import (
     SketchInfiniteLine,
     SketchLineSegment,
     SketchPoint,
+    Spring,
     ValidationMessage,
     ValidationReport,
 )
 from quino.domain.sketch_constraints import CONSTRAINT_SPECS
-from quino.domain.types import MarkerType, SketchConstraintType
+from quino.domain.types import MarkerType, SketchConstraintType, SpringEndpointKind, SpringType
 
 
 class ValidationService:
@@ -27,6 +28,7 @@ class ValidationService:
         self._validate_joint_references(project.model, report)
         self._validate_driver_references(project.model, report)
         self._validate_driver_duplicates(project.model, report)
+        self._validate_springs(project.model, report)
         self._validate_sketch(project, report)
         return report
 
@@ -135,6 +137,27 @@ class ValidationService:
         serialized = sorted([serialize(joint.endpoint_a), serialize(joint.endpoint_b)])
         return serialized[0], serialized[1]
 
+    def _validate_springs(self, model: Model, report: ValidationReport) -> None:
+        marker_index: dict[str, str] = {}
+        for body in model.bodies:
+            for marker in body.markers:
+                marker_index[marker.id] = body.id
+        for spring in model.springs:
+            for ep, label in [(spring.endpoint_a, "A"), (spring.endpoint_b, "B")]:
+                if ep.kind is SpringEndpointKind.MARKER:
+                    if ep.body_id is None or ep.marker_id is None:
+                        report.messages.append(ValidationMessage("error", "spring_missing_endpoint", f"Spring '{spring.name}' endpoint {label} is incomplete", spring.id))
+                    elif ep.marker_id not in marker_index:
+                        report.messages.append(ValidationMessage("error", "spring_invalid_marker", f"Spring '{spring.name}' endpoint {label} references unknown marker", spring.id))
+                elif ep.kind is SpringEndpointKind.GROUND:
+                    if ep.ground_x is None or ep.ground_y is None:
+                        report.messages.append(ValidationMessage("error", "spring_missing_ground_pos", f"Spring '{spring.name}' ground endpoint {label} has no position", spring.id))
+            is_actuator = spring.spring_type in (SpringType.LINEAR_ACTUATOR, SpringType.ROTATIONAL_ACTUATOR)
+            if is_actuator and spring.law is None:
+                report.messages.append(ValidationMessage("error", "spring_missing_law", f"Actuator '{spring.name}' has no law expression", spring.id))
+            if not is_actuator and spring.metadata.values.get("stiffness", 0.0) == 0.0 and spring.metadata.values.get("damping", 0.0) == 0.0:
+                report.messages.append(ValidationMessage("warning", "spring_zero_properties", f"Spring '{spring.name}' has zero stiffness and damping", spring.id))
+
     def _validate_sketch(self, project: Project, report: ValidationReport) -> None:
         sketch = project.sketch
         if sketch is None:
@@ -217,9 +240,17 @@ class ValidationService:
                 and len(constraint.references) == 1
                 and len(constraint.entity_references) == 1
             )
+            tangent_curve_curve = (
+                constraint.type is SketchConstraintType.TANGENT
+                and len(constraint.references) == 0
+                and len(constraint.entity_references) == 2
+            )
             if expected_points is not None and not point_entity_coincident and (
-                len(constraint.references) != expected_points
-                or len(set(constraint.references)) != len(constraint.references)
+                not tangent_curve_curve
+                and (
+                    len(constraint.references) != expected_points
+                    or len(set(constraint.references)) != len(constraint.references)
+                )
             ):
                 report.messages.append(
                     ValidationMessage("error", "invalid_sketch_constraint", f"{constraint.name} requires {expected_points} distinct point references", constraint.id)
@@ -239,7 +270,12 @@ class ValidationService:
                 ValidationMessage("error", "invalid_sketch_constraint", f"{constraint.name} requires an angle value", constraint.id)
             )
         expected_entities = spec.entities if spec is not None else 0
-        if not point_entity_coincident and len(constraint.entity_references) != expected_entities:
+        tangent_curve_curve = (
+            constraint.type is SketchConstraintType.TANGENT
+            and len(constraint.references) == 0
+            and len(constraint.entity_references) == 2
+        )
+        if not point_entity_coincident and not tangent_curve_curve and len(constraint.entity_references) != expected_entities:
             report.messages.append(
                 ValidationMessage("error", "invalid_sketch_constraint", f"{constraint.name} requires {expected_entities} entity references", constraint.id)
             )

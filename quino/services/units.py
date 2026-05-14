@@ -35,6 +35,8 @@ class Quantity:
             return not self.dimensions
         if dimension is Dimension.INERTIA:
             return self.dimensions == {Dimension.MASS: 1, Dimension.LENGTH: 2}
+        if dimension is Dimension.TORQUE:
+            return self.dimensions == {Dimension.FORCE: 1, Dimension.LENGTH: 1}
         return self.dimensions == {dimension: 1}
 
 
@@ -50,6 +52,8 @@ class UnitService:
         "unitless": (Dimension.UNITLESS, 1.0),
         "kgmm2": (Dimension.INERTIA, 1e-6),
         "kgm2": (Dimension.INERTIA, 1.0),
+        "N*mm": (Dimension.TORQUE, 1e-3),
+        "N*m": (Dimension.TORQUE, 1.0),
     }
 
     # Maps each Dimension to its SI base-dimension exponents
@@ -60,6 +64,7 @@ class UnitService:
         Dimension.TIME: {Dimension.TIME: 1},
         Dimension.INERTIA: {Dimension.MASS: 1, Dimension.LENGTH: 2},
         Dimension.FORCE: {Dimension.FORCE: 1},
+        Dimension.TORQUE: {Dimension.FORCE: 1, Dimension.LENGTH: 1},
         Dimension.UNITLESS: {},
     }
 

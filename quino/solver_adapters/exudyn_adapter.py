@@ -15,8 +15,10 @@ from quino.simulation.assembler import (
     AssembledLoad,
     AssembledMechanism,
     AssembledSlider,
+    AssembledSpring,
     MechanismAssembler,
 )
+from quino.simulation.sensor_expressions import safe_sensor_var, sensor_channel_keys, sensor_expression_variables
 from quino.solver_adapters.base import SolverAdapter
 from quino.solver_adapters.exudyn_script_generator import generate_exudyn_script
 
@@ -52,7 +54,7 @@ def _make_revolute_physics_friction_fn(joint_obj_num: int, exu, mu: float, r_m: 
     """Physics-based revolute friction: T = μ × ||F_joint|| × r_pin × sign(ω) + c × ω."""
     def fn(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):
         try:
-            forces = mbs.GetObjectOutput(joint_obj_num, exu.OutputVariableType.Lagrange)
+            forces = mbs.GetObjectOutput(joint_obj_num, exu.OutputVariableType.Force)
             N = math.sqrt(float(forces[0]) ** 2 + float(forces[1]) ** 2)
         except Exception:
             N = 0.0
@@ -65,8 +67,9 @@ def _make_slider_physics_friction_fn(joint_obj_num: int, exu, mu: float, viscous
     """Physics-based slider friction: F = μ × |F_normal| × sign(v) + c × v."""
     def fn(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):
         try:
-            forces = mbs.GetObjectOutput(joint_obj_num, exu.OutputVariableType.Lagrange)
-            N = abs(float(forces[0]))
+            forces = mbs.GetObjectOutput(joint_obj_num, exu.OutputVariableType.Force)
+            raw = forces[0] if hasattr(forces, "__len__") else forces
+            N = abs(float(raw))
         except Exception:
             N = 0.0
         sign = 1.0 if velocity > 1e-12 else -1.0 if velocity < -1e-12 else 0.0
@@ -217,7 +220,9 @@ class ExudynAdapter(SolverAdapter):
                 translation_driver_mode=translation_driver_mode,
             )
         for load in assembled.loads:
-            self._create_load(mbs, item_interface, assembled, body_objects, load)
+            self._create_load(mbs, item_interface, project, assembled, body_objects, node_numbers, load, exu)
+        for spring in assembled.springs:
+            self._create_spring(mbs, item_interface, project, body_objects, node_numbers, ground_object, spring, exu)
         mbs.Assemble()
         time: list[float] = []
         frames: list[dict[str, float]] = []
@@ -327,7 +332,7 @@ class ExudynAdapter(SolverAdapter):
                     physicsCenterOfMass=[0.0, 0.0],
                 )
             )
-            if body.mass > 0 and assembled.gravity.enabled:
+            if body.mass > 0 and assembled.gravity is not None:
                 g = assembled.gravity
                 gravity_marker = mbs.AddMarker(
                     item_interface.MarkerBodyMass(
@@ -366,7 +371,7 @@ class ExudynAdapter(SolverAdapter):
                 return body
         raise ValueError(f"Marker {marker_id} not found in any body")
 
-    def _create_load(self, mbs, item_interface, assembled, body_objects, load: AssembledLoad) -> None:
+    def _create_load(self, mbs, item_interface, project, assembled, body_objects, node_numbers, load: AssembledLoad, exu) -> None:
         body = self._find_body_for_marker(assembled, load.target_marker_id)
         marker = body.markers[load.target_marker_id]
         lx, ly = _marker_local_rel_com(body, marker)
@@ -376,12 +381,170 @@ class ExudynAdapter(SolverAdapter):
                 localPosition=[lx * _MM_TO_M, ly * _MM_TO_M, 0.0],
             )
         )
-        mbs.AddLoad(
-            item_interface.LoadForceVector(
-                markerNumber=load_marker,
-                loadVector=[load.fx, load.fy, 0.0],
+        if self._load_is_dynamic(project, load):
+            mbs.AddLoad(
+                item_interface.LoadForceVector(
+                    markerNumber=load_marker,
+                    loadVector=[0.0, 0.0, 0.0],
+                    loadVectorUserFunction=self._make_load_vector_function(
+                        project, assembled, node_numbers, load, exu
+                    ),
+                )
+            )
+            return
+        mbs.AddLoad(item_interface.LoadForceVector(markerNumber=load_marker, loadVector=[load.fx, load.fy, 0.0]))
+
+    def _load_is_dynamic(self, project: Project, load: AssembledLoad) -> bool:
+        tokens = ["t"]
+        for sensor in project.model.sensors:
+            safe = safe_sensor_var(sensor.name)
+            for channel, _ in sensor_channel_keys(sensor):
+                tokens.append(f"{safe}.{channel}")
+        expressions = (load.fx_expression, load.fy_expression)
+        for expression in expressions:
+            for token in tokens:
+                if token and token in expression:
+                    return True
+        return False
+
+    def _make_load_vector_function(self, project: Project, assembled: AssembledMechanism, node_numbers: dict[str, int], load: AssembledLoad, exu):
+        def force_fn(mbs, t, loadVector):
+            frame = self._current_frame(mbs, exu, assembled, node_numbers)
+            variables = {"t": self.expression_service.unit_service.quantity(float(t), "s")}
+            variables.update(
+                sensor_expression_variables(
+                    project,
+                    assembled,
+                    frame,
+                    self.expression_service.unit_service,
+                )
+            )
+            fx_q = self.expression_service.evaluate_expression(load.fx_expression, project.parameters, variables=variables)
+            fy_q = self.expression_service.evaluate_expression(load.fy_expression, project.parameters, variables=variables)
+            return [
+                self.expression_service.unit_service.convert(fx_q, "N"),
+                self.expression_service.unit_service.convert(fy_q, "N"),
+                0.0,
+            ]
+
+        return force_fn
+
+    def _current_frame(self, mbs, exu, assembled: AssembledMechanism, node_numbers: dict[str, int]) -> dict[str, float]:
+        frame: dict[str, float] = {}
+        for body_id, node_number in node_numbers.items():
+            coordinates = mbs.GetNodeOutput(node_number, exu.OutputVariableType.Coordinates)
+            body = assembled.bodies[body_id]
+            com_ref_x, com_ref_y = _body_com_global_mm(body)
+            cur_angle = body.angle + (float(coordinates[2]) if len(coordinates) > 2 else 0.0)
+            cos_a = math.cos(cur_angle)
+            sin_a = math.sin(cur_angle)
+            cur_com_x = com_ref_x + float(coordinates[0]) * _M_TO_MM
+            cur_com_y = com_ref_y + float(coordinates[1]) * _M_TO_MM
+            frame[f"{body_id}.x"] = cur_com_x - cos_a * body.com_local_x + sin_a * body.com_local_y
+            frame[f"{body_id}.y"] = cur_com_y - sin_a * body.com_local_x - cos_a * body.com_local_y
+            frame[f"{body_id}.angle"] = cur_angle
+            try:
+                vel = mbs.GetNodeOutput(node_number, exu.OutputVariableType.Velocity)
+                frame[f"{body_id}.vx"] = float(vel[0]) * _M_TO_MM
+                frame[f"{body_id}.vy"] = float(vel[1]) * _M_TO_MM
+                frame[f"{body_id}.omega"] = float(vel[2]) if len(vel) > 2 else 0.0
+            except Exception:
+                pass
+        return frame
+
+    def _create_spring(
+        self,
+        mbs,
+        item_interface,
+        project: Project,
+        body_objects: dict[str, int],
+        node_numbers: dict[str, int],
+        ground_object: int,
+        spring: AssembledSpring,
+        exu,
+    ) -> None:
+        is_rotational = spring.spring_type in ("rotational_spring", "rotational_actuator")
+        if is_rotational:
+            self._create_rotational_spring(mbs, item_interface, project, node_numbers, ground_object, spring)
+        else:
+            self._create_linear_spring(mbs, item_interface, project, body_objects, ground_object, spring, exu)
+
+    def _linear_spring_marker(self, mbs, item_interface, body_objects: dict[str, int], ground_object: int, ep) -> int:
+        if ep.kind == "ground":
+            return mbs.AddMarker(
+                item_interface.MarkerBodyPosition(
+                    bodyNumber=ground_object,
+                    localPosition=[ep.global_x * _MM_TO_M, ep.global_y * _MM_TO_M, 0.0],
+                )
+            )
+        return mbs.AddMarker(
+            item_interface.MarkerBodyPosition(
+                bodyNumber=body_objects[ep.body_id],
+                localPosition=[ep.global_x * _MM_TO_M, ep.global_y * _MM_TO_M, 0.0],
             )
         )
+
+    def _create_linear_spring(self, mbs, item_interface, project, body_objects, ground_object, spring: AssembledSpring, exu) -> None:
+        m_a = mbs.AddMarker(
+            item_interface.MarkerBodyPosition(
+                bodyNumber=ground_object if spring.endpoint_a.kind == "ground" else body_objects[spring.endpoint_a.body_id],
+                localPosition=[spring.endpoint_a.anchor_x * _MM_TO_M, spring.endpoint_a.anchor_y * _MM_TO_M, 0.0],
+            )
+        )
+        m_b = mbs.AddMarker(
+            item_interface.MarkerBodyPosition(
+                bodyNumber=ground_object if spring.endpoint_b.kind == "ground" else body_objects[spring.endpoint_b.body_id],
+                localPosition=[spring.endpoint_b.anchor_x * _MM_TO_M, spring.endpoint_b.anchor_y * _MM_TO_M, 0.0],
+            )
+        )
+        k = spring.stiffness * 1e3   # N/mm → N/m
+        c = spring.damping * 1e3     # N·s/mm → N·s/m
+        L0 = spring.rest_value * _MM_TO_M  # mm → m
+        if spring.spring_type == "linear_actuator":
+            law_fn = self._make_spring_law_fn(project, spring, "N")  # already SI
+            mbs.AddObject(item_interface.ObjectConnectorSpringDamper(
+                name=spring.name, markerNumbers=[m_a, m_b],
+                stiffness=0.0, damping=0.0, referenceLength=0.0,
+                springForceUserFunction=law_fn,
+            ))
+        else:
+            mbs.AddObject(item_interface.ObjectConnectorSpringDamper(
+                name=spring.name, markerNumbers=[m_a, m_b],
+                stiffness=k, damping=c, referenceLength=L0,
+            ))
+
+    def _create_rotational_spring(self, mbs, item_interface, project, node_numbers: dict[str, int], ground_object: int, spring: AssembledSpring) -> None:
+        def _angle_marker(ep) -> int:
+            if ep.kind == "ground":
+                gn = mbs.AddNode(item_interface.NodePointGround(referenceCoordinates=[0.0, 0.0, 0.0]))
+                return mbs.AddMarker(item_interface.MarkerNodeCoordinate(nodeNumber=gn, coordinate=0))
+            return mbs.AddMarker(item_interface.MarkerNodeCoordinate(nodeNumber=node_numbers[ep.body_id], coordinate=2))
+
+        m_a = _angle_marker(spring.endpoint_a)
+        m_b = _angle_marker(spring.endpoint_b)
+        k = spring.stiffness * 1e-3   # N·mm/rad → N·m/rad
+        c = spring.damping * 1e-3     # N·mm·s/rad → N·m·s/rad
+        theta0 = spring.rest_value    # already in rad
+        if spring.spring_type == "rotational_actuator":
+            law_fn = self._make_spring_law_fn(project, spring, "N*m")
+            mbs.AddObject(item_interface.ObjectConnectorCoordinateSpringDamper(
+                name=spring.name, markerNumbers=[m_a, m_b],
+                stiffness=0.0, damping=0.0, offset=0.0,
+                springForceUserFunction=law_fn,
+            ))
+        else:
+            mbs.AddObject(item_interface.ObjectConnectorCoordinateSpringDamper(
+                name=spring.name, markerNumbers=[m_a, m_b],
+                stiffness=k, damping=c, offset=theta0,
+            ))
+
+    def _make_spring_law_fn(self, project: Project, spring: AssembledSpring, si_unit: str):
+        """Returns a springForceUserFunction. si_unit: 'N' (linear) or 'N*m' (rotational, SI)."""
+        def fn(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):
+            variables = {"t": self.expression_service.unit_service.quantity(float(t), "s")}
+            quantity = self.expression_service.evaluate_expression(spring.law_expression, project.parameters, variables=variables)
+            return self.expression_service.unit_service.convert(quantity, si_unit)
+        return fn
 
     def _create_marker_to_marker_joint(self, mbs, item_interface, assembled, body_objects, node_numbers, endpoint_a, endpoint_b, joint_type) -> int:
         body_a = assembled.bodies[endpoint_a.body_id]

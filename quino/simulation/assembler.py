@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 
-from quino.domain.model import Body, Driver, GravityLoad, Joint, Load, Marker, Project, Slider
-from quino.domain.types import MarkerType
+from quino.domain.model import Body, Driver, GravityLoad, Joint, Load, Marker, Project, Slider, Spring
+from quino.domain.types import Dimension, MarkerType, SpringEndpointKind, SpringType
 from quino.services.expressions import ExpressionService
+from quino.simulation.sensor_expressions import sensor_expression_variables
 
 
 @dataclass(slots=True)
@@ -69,6 +70,36 @@ class AssembledLoad:
     target_marker_id: str
     fx: float
     fy: float
+    fx_expression: str
+    fy_expression: str
+
+
+@dataclass(slots=True)
+class AssembledSpringEndpoint:
+    kind: str
+    body_id: str | None
+    marker_id: str | None
+    # For body: local position of marker relative to CoM (mm, body frame)
+    # For ground: world-space anchor position (mm)
+    anchor_x: float
+    anchor_y: float
+    global_x: float  # reference global position (mm) — for canvas rendering
+    global_y: float
+
+
+@dataclass(slots=True)
+class AssembledSpring:
+    spring_id: str
+    name: str
+    spring_type: str
+    endpoint_a: AssembledSpringEndpoint
+    endpoint_b: AssembledSpringEndpoint
+    stiffness: float  # N/mm (linear) or N·mm/rad (rotational)
+    damping: float    # N·s/mm (linear) or N·mm·s/rad (rotational)
+    rest_value: float  # mm (linear) or rad (rotational)
+    law_expression: str | None  # for actuators
+    law_unit: str | None
+    law_dimension: str | None
 
 
 @dataclass(slots=True)
@@ -78,7 +109,8 @@ class AssembledMechanism:
     joints: list[Joint]
     drivers: list[AssembledDriver]
     loads: list[AssembledLoad]
-    gravity: GravityLoad
+    springs: list[AssembledSpring]
+    gravity: GravityLoad | None
     warnings: list[str] = field(default_factory=list)
 
 
@@ -90,15 +122,55 @@ class MechanismAssembler:
         bodies = {body.id: self._assemble_body(project, body) for body in project.model.bodies}
         sliders = {slider.id: self._assemble_slider(project, slider) for slider in project.model.sliders}
         drivers = [self._assemble_driver(driver) for driver in project.model.drivers]
-        loads = [self._assemble_load(project, load) for load in project.model.loads]
+        loads = [self._assemble_load(project, load, bodies, sliders) for load in project.model.loads]
+        springs = [self._assemble_spring(project, spring, bodies) for spring in project.model.springs]
         return AssembledMechanism(
             bodies=bodies,
             sliders=sliders,
             joints=list(project.model.joints),
             drivers=drivers,
             loads=loads,
+            springs=springs,
             gravity=project.model.gravity,
             warnings=[],
+        )
+
+    def _assemble_spring(self, project: Project, spring: Spring, bodies: dict) -> AssembledSpring:
+        def _ep(ep) -> AssembledSpringEndpoint:
+            if ep.kind is SpringEndpointKind.GROUND:
+                gx = self.expression_service.evaluate_property(ep.ground_x, project.parameters).value if ep.ground_x else 0.0
+                gy = self.expression_service.evaluate_property(ep.ground_y, project.parameters).value if ep.ground_y else 0.0
+                return AssembledSpringEndpoint(kind="ground", body_id=None, marker_id=None, anchor_x=gx, anchor_y=gy, global_x=gx, global_y=gy)
+            body = bodies[ep.body_id]
+            m = body.markers[ep.marker_id]
+            return AssembledSpringEndpoint(kind="marker", body_id=ep.body_id, marker_id=ep.marker_id, anchor_x=m.local_x - body.com_local_x, anchor_y=m.local_y - body.com_local_y, global_x=m.global_x, global_y=m.global_y)
+
+        is_rotational = spring.spring_type in (SpringType.ROTATIONAL_SPRING, SpringType.ROTATIONAL_ACTUATOR)
+        stiffness = float(spring.metadata.values.get("stiffness", 0.0))
+        damping = float(spring.metadata.values.get("damping", 0.0))
+        if spring.rest_value is not None:
+            rest_unit = "rad" if is_rotational else "mm"
+            rest_val = self.expression_service.unit_service.convert(
+                self.expression_service.evaluate_expression(spring.rest_value.expression, project.parameters),
+                rest_unit,
+            )
+        else:
+            rest_val = 0.0
+        law_expression = spring.law.expression if spring.law else None
+        law_unit = spring.law.unit if spring.law else None
+        law_dimension = spring.law.expected_dimension.value if spring.law else None
+        return AssembledSpring(
+            spring_id=spring.id,
+            name=spring.name,
+            spring_type=spring.spring_type.value,
+            endpoint_a=_ep(spring.endpoint_a),
+            endpoint_b=_ep(spring.endpoint_b),
+            stiffness=stiffness,
+            damping=damping,
+            rest_value=rest_val,
+            law_expression=law_expression,
+            law_unit=law_unit,
+            law_dimension=law_dimension,
         )
 
     def _assemble_body(self, project: Project, body: Body) -> AssembledBody:
@@ -218,13 +290,44 @@ class MechanismAssembler:
             expected_dimension=driver.law.expected_dimension.value,
         )
 
-    def _assemble_load(self, project: Project, load: Load) -> AssembledLoad:
-        fx = self.expression_service.evaluate_property(load.fx, project.parameters).value
-        fy = self.expression_service.evaluate_property(load.fy, project.parameters).value
+    def _assemble_load(
+        self,
+        project: Project,
+        load: Load,
+        bodies: dict[str, AssembledBody],
+        sliders: dict[str, AssembledSlider],
+    ) -> AssembledLoad:
+        assembled = AssembledMechanism(
+            bodies=bodies,
+            sliders=sliders,
+            joints=list(project.model.joints),
+            drivers=[],
+            loads=[],
+            springs=[],
+            gravity=project.model.gravity,
+        )
+        frame: dict[str, float] = {}
+        for body_id, body in bodies.items():
+            frame[f"{body_id}.x"] = body.origin_x
+            frame[f"{body_id}.y"] = body.origin_y
+            frame[f"{body_id}.angle"] = body.angle
+        variables = {"t": self.expression_service.unit_service.quantity(0.0, "s")}
+        variables.update(
+            sensor_expression_variables(
+                project,
+                assembled,
+                frame,
+                self.expression_service.unit_service,
+            )
+        )
+        fx = self.expression_service.evaluate_property(load.fx, project.parameters, variables=variables).value
+        fy = self.expression_service.evaluate_property(load.fy, project.parameters, variables=variables).value
         return AssembledLoad(
             load_id=load.id,
             name=load.name,
             target_marker_id=load.target_marker_id,
             fx=fx,
             fy=fy,
+            fx_expression=load.fx.expression,
+            fy_expression=load.fy.expression,
         )
