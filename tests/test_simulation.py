@@ -97,12 +97,17 @@ class _FakeItemInterface:
     def LoadForceVector(**kwargs):
         return {"kind": "LoadForceVector", **kwargs}
 
+    @staticmethod
+    def SensorObject(**kwargs):
+        return {"kind": "SensorObject", **kwargs}
+
 
 class _FakeMbs:
     def __init__(self) -> None:
         self.nodes = []
         self.objects = []
         self.markers = []
+        self.sensors = []
         self.coordinate_constraints = []
         self.assembled = False
 
@@ -117,6 +122,10 @@ class _FakeMbs:
     def AddMarker(self, item):
         self.markers.append(item)
         return len(self.markers) - 1
+
+    def AddSensor(self, item):
+        self.sensors.append(item)
+        return len(self.sensors) - 1
 
     def CreateCoordinateConstraint(self, **kwargs):
         self.coordinate_constraints.append(kwargs)
@@ -138,6 +147,9 @@ class _FakeMbs:
 
     def GetNodeOutput(self, nodeNumber, variableType):
         return [0.0, 0.0, 0.0]
+
+    def GetObjectOutput(self, objectNumber, variableType):
+        return [0.0, 0.0]
 
 
 class _FakeSystemContainer:
