@@ -2089,22 +2089,21 @@ class MainWindow(QtWidgets.QMainWindow):
                 enabled = self._editing_allowed() and kind not in {"readonly", "key", "section_header"}
                 self.inspector.add_property(label, path, value, kind, evaluated, enabled)
 
-            # --- marker reordering for Body/Bar ---
-            if isinstance(entity, Body) and entity.edge_order:
-                structural_markers = [m for m in entity.markers if m.type is MarkerType.STRUCTURAL]
-                if len(structural_markers) >= 2:
-                    # Add marker reordering section
-                    reorder_label = QtWidgets.QLabel("Markers (drag to reorder)")
-                    reorder_font = reorder_label.font()
-                    reorder_font.setPointSize(reorder_font.pointSize() - 1)
-                    reorder_label.setFont(reorder_font)
-                    reorder_label.setStyleSheet("color: #888; margin-top: 6px;")
-                    reorder_label.setContentsMargins(0, 4, 0, 0)
-                    self.relations_vbox.insertWidget(self.relations_vbox.count() - 1, reorder_label)
+            # --- markers section for Body/Bar (consolidated with reordering) ---
+            if isinstance(entity, Body) and entity.markers:
+                markers_label = QtWidgets.QLabel("Markers")
+                markers_font = markers_label.font()
+                markers_font.setPointSize(markers_font.pointSize() - 1)
+                markers_label.setFont(markers_font)
+                markers_label.setStyleSheet("color: #888; margin-top: 6px;")
+                markers_label.setContentsMargins(0, 4, 0, 0)
+                self.relations_vbox.insertWidget(self.relations_vbox.count() - 1, markers_label)
 
+                # Show reorderable markers first (if edge_order exists)
+                if entity.edge_order:
                     for idx, marker_id in enumerate(entity.edge_order):
                         marker = next((m for m in entity.markers if m.id == marker_id), None)
-                        if marker and marker.type is MarkerType.STRUCTURAL:
+                        if marker:
                             row_w = QtWidgets.QWidget()
                             row_h = QtWidgets.QHBoxLayout(row_w)
                             row_h.setContentsMargins(0, 1, 0, 1)
@@ -2114,23 +2113,45 @@ class MainWindow(QtWidgets.QMainWindow):
                             marker_lbl = QtWidgets.QLabel(marker.name)
                             row_h.addWidget(marker_lbl, stretch=1)
 
-                            # Up button
-                            up_btn = QtWidgets.QPushButton("↑")
-                            up_btn.setFixedWidth(28)
-                            up_btn.setFixedHeight(20)
-                            up_btn.setEnabled(self._editing_allowed() and idx > 0)
-                            up_btn.clicked.connect(lambda checked=False, mid=marker_id: self._on_marker_reorder(mid, -1))
-                            row_h.addWidget(up_btn)
+                            # Up/Down buttons only for structural markers
+                            if marker.type is MarkerType.STRUCTURAL:
+                                up_btn = QtWidgets.QPushButton("↑")
+                                up_btn.setFixedWidth(28)
+                                up_btn.setFixedHeight(20)
+                                up_btn.setEnabled(self._editing_allowed() and idx > 0)
+                                up_btn.clicked.connect(lambda checked=False, mid=marker_id: self._on_marker_reorder(mid, -1))
+                                row_h.addWidget(up_btn)
 
-                            # Down button
-                            down_btn = QtWidgets.QPushButton("↓")
-                            down_btn.setFixedWidth(28)
-                            down_btn.setFixedHeight(20)
-                            down_btn.setEnabled(self._editing_allowed() and idx < len(entity.edge_order) - 1)
-                            down_btn.clicked.connect(lambda checked=False, mid=marker_id: self._on_marker_reorder(mid, 1))
-                            row_h.addWidget(down_btn)
+                                down_btn = QtWidgets.QPushButton("↓")
+                                down_btn.setFixedWidth(28)
+                                down_btn.setFixedHeight(20)
+                                down_btn.setEnabled(self._editing_allowed() and idx < len(entity.edge_order) - 1)
+                                down_btn.clicked.connect(lambda checked=False, mid=marker_id: self._on_marker_reorder(mid, 1))
+                                row_h.addWidget(down_btn)
 
                             self.relations_vbox.insertWidget(self.relations_vbox.count() - 1, row_w)
+
+                # Show non-reorderable markers (those not in edge_order)
+                if entity.edge_order:
+                    reorderable_ids = set(entity.edge_order)
+                else:
+                    reorderable_ids = set()
+
+                for marker in entity.markers:
+                    if marker.id not in reorderable_ids:
+                        # Skip COM markers that are not visible
+                        if not marker.visible and marker.type.value == "com":
+                            continue
+                        row_w = QtWidgets.QWidget()
+                        row_h = QtWidgets.QHBoxLayout(row_w)
+                        row_h.setContentsMargins(0, 1, 0, 1)
+                        row_h.setSpacing(5)
+
+                        coords = self._evaluate_scalar(marker.x) + " / " + self._evaluate_scalar(marker.y)
+                        marker_lbl = QtWidgets.QLabel(f"{marker.name}  <span style='color:#999'>{coords}</span>")
+                        marker_lbl.setTextFormat(QtCore.Qt.TextFormat.RichText)
+                        row_h.addWidget(marker_lbl, stretch=1)
+                        self.relations_vbox.insertWidget(self.relations_vbox.count() - 1, row_w)
 
             # --- relations below the table ---
             relations = self._inspector_relations(entity)
@@ -2480,11 +2501,13 @@ class MainWindow(QtWidgets.QMainWindow):
             rels.append((group, icon, display, detail, entity_id))
 
         if isinstance(entity, Body):
-            for m in entity.markers:
-                if not m.visible and m.type.value == "com":
-                    continue
-                coords = self._evaluate_scalar(m.x) + " / " + self._evaluate_scalar(m.y)
-                rel("Markers", "marker", m.name, coords, m.id)
+            # Only show markers in relations if not already shown in reorderable section
+            if not entity.edge_order:
+                for m in entity.markers:
+                    if not m.visible and m.type.value == "com":
+                        continue
+                    coords = self._evaluate_scalar(m.x) + " / " + self._evaluate_scalar(m.y)
+                    rel("Markers", "marker", m.name, coords, m.id)
 
         elif isinstance(entity, Marker):
             body = self.app_service.get_body_by_marker(entity.id)
