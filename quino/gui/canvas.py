@@ -725,15 +725,16 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._create_load_from_marker(entity_id)
             return
 
-        if self._mode in {
-            CanvasMode.CREATE_LINEAR_SPRING,
-            CanvasMode.CREATE_ROTATIONAL_SPRING,
-            CanvasMode.CREATE_LINEAR_ACTUATOR,
-            CanvasMode.CREATE_ROTATIONAL_ACTUATOR,
-        }:
+        if self._mode in {CanvasMode.CREATE_LINEAR_SPRING, CanvasMode.CREATE_LINEAR_ACTUATOR}:
             marker = marker_map.get(entity_id)
             if marker is not None:
                 self._handle_spring_click(marker, (marker.x, marker.y))
+            return
+
+        if self._mode in {CanvasMode.CREATE_ROTATIONAL_SPRING, CanvasMode.CREATE_ROTATIONAL_ACTUATOR}:
+            joint_ids = {j.id for j in project.model.joints}
+            if entity_id in joint_ids:
+                self._handle_rotational_spring_click(entity_id)
             return
 
         if self._mode in {
@@ -1276,13 +1277,15 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._handle_sensor_marker_selection(clicked_marker, 4)
             return
 
-        if self._mode in {
-            CanvasMode.CREATE_LINEAR_SPRING,
-            CanvasMode.CREATE_ROTATIONAL_SPRING,
-            CanvasMode.CREATE_LINEAR_ACTUATOR,
-            CanvasMode.CREATE_ROTATIONAL_ACTUATOR,
-        }:
-            self._handle_spring_click(clicked_marker, world)
+        if self._mode in {CanvasMode.CREATE_LINEAR_SPRING, CanvasMode.CREATE_LINEAR_ACTUATOR}:
+            effective_marker = clicked_marker
+            if effective_marker is None and clicked_body is not None:
+                effective_marker = self._nearest_marker_on_body(clicked_body, clicked)
+            self._handle_spring_click(effective_marker, world)
+            return
+
+        if self._mode in {CanvasMode.CREATE_ROTATIONAL_SPRING, CanvasMode.CREATE_ROTATIONAL_ACTUATOR}:
+            self._handle_rotational_spring_click(clicked_joint)
             return
 
         super().mousePressEvent(event)
@@ -1781,6 +1784,18 @@ class MechanismCanvas(QtWidgets.QWidget):
             if QtCore.QLineF(screen_pos, center).length() <= 14.0:
                 return entity_id
         return None
+
+    def _nearest_marker_on_body(self, body_id: str, screen_pos: QtCore.QPointF) -> "CanvasMarker | None":
+        candidates = [
+            (QtCore.QLineF(screen_pos, pos).length(), marker)
+            for marker, pos in self._screen_markers
+            if marker.body_id == body_id and marker.visible
+        ]
+        if not candidates:
+            return None
+        structural = [(d, m) for d, m in candidates if m.marker_type is not MarkerType.COM]
+        pool = structural if structural else candidates
+        return min(pool, key=lambda x: x[0])[1]
 
     def _sketch_constraint_at(self, screen_pos: QtCore.QPointF) -> str | None:
         for constraint_id, center in reversed(self._screen_sketch_constraints):
@@ -3110,49 +3125,83 @@ class MechanismCanvas(QtWidgets.QWidget):
         for rxn in project.reaction_outputs.values():
             if not rxn.data or not rxn.positions or not rxn.time:
                 continue
-            # Find nearest frame by time
             t = self._simulation_time
             frame_idx = min(range(len(rxn.time)), key=lambda i: abs(rxn.time[i] - t))
             frame_idx = max(0, min(frame_idx, len(rxn.data) - 1, len(rxn.positions) - 1))
             row = rxn.data[frame_idx]
             fx = row[0] if len(row) > 0 else 0.0
             fy = row[1] if len(row) > 1 else 0.0
+            mz = row[3] if len(row) > 3 else 0.0
             force = math.sqrt(fx * fx + fy * fy)
-            if force < 1e-9:
-                continue
             origin_x, origin_y = rxn.positions[frame_idx]
-            dx = fx / force
-            dy = fy / force
-            arrow_length_mm = force * scale_mm_per_n
-            end_x = origin_x + dx * arrow_length_mm
-            end_y = origin_y + dy * arrow_length_mm
             origin_screen = self._to_screen(origin_x, origin_y, transform)
-            end_screen = self._to_screen(end_x, end_y, transform)
-            painter.save()
-            painter.setOpacity(0.75)
-            pen = QtGui.QPen(arrow_color, 3.0, QtCore.Qt.PenStyle.SolidLine, QtCore.Qt.PenCapStyle.RoundCap)
-            painter.setPen(pen)
-            painter.drawLine(origin_screen, end_screen)
-            screen_dx = end_screen.x() - origin_screen.x()
-            screen_dy = end_screen.y() - origin_screen.y()
-            screen_len = math.sqrt(screen_dx * screen_dx + screen_dy * screen_dy)
-            if screen_len > 1e-6:
-                ux = screen_dx / screen_len
-                uy = screen_dy / screen_len
-                arrow_size = 12.0
-                wing = 6.0
-                bx = end_screen.x() - ux * arrow_size
-                by = end_screen.y() - uy * arrow_size
-                wx = -uy * wing
-                wy = ux * wing
-                p1 = QtCore.QPointF(bx + wx, by + wy)
-                p2 = QtCore.QPointF(bx - wx, by - wy)
+
+            # Force arrow
+            if force >= 1e-9:
+                dx = fx / force
+                dy = fy / force
+                arrow_length_mm = force * scale_mm_per_n
+                end_x = origin_x + dx * arrow_length_mm
+                end_y = origin_y + dy * arrow_length_mm
+                end_screen = self._to_screen(end_x, end_y, transform)
+                painter.save()
+                painter.setOpacity(0.75)
+                pen = QtGui.QPen(arrow_color, 3.0, QtCore.Qt.PenStyle.SolidLine, QtCore.Qt.PenCapStyle.RoundCap)
+                painter.setPen(pen)
+                painter.drawLine(origin_screen, end_screen)
+                screen_dx = end_screen.x() - origin_screen.x()
+                screen_dy = end_screen.y() - origin_screen.y()
+                screen_len = math.sqrt(screen_dx * screen_dx + screen_dy * screen_dy)
+                if screen_len > 1e-6:
+                    ux = screen_dx / screen_len
+                    uy = screen_dy / screen_len
+                    arrow_size = 12.0
+                    wing = 6.0
+                    bx = end_screen.x() - ux * arrow_size
+                    by = end_screen.y() - uy * arrow_size
+                    wx = -uy * wing
+                    wy = ux * wing
+                    p1 = QtCore.QPointF(bx + wx, by + wy)
+                    p2 = QtCore.QPointF(bx - wx, by - wy)
+                    painter.setBrush(QtGui.QBrush(arrow_color))
+                    painter.setPen(QtCore.Qt.PenStyle.NoPen)
+                    painter.drawPolygon(QtGui.QPolygonF([end_screen, p1, p2]))
+                painter.restore()
+                painter.setPen(QtGui.QPen(text_color))
+                painter.drawText(end_screen + QtCore.QPointF(8.0, -8.0), f"{force:.2f} N")
+
+            # Moment arc
+            if abs(mz) >= 1e-9:
+                arc_radius = 30.0  # screen pixels
+                start_deg = 45.0
+                span_deg = 270.0 if mz > 0 else -270.0
+                end_deg = start_deg + span_deg
+                end_rad = math.radians(end_deg)
+                arc_rect = QtCore.QRectF(
+                    origin_screen.x() - arc_radius, origin_screen.y() - arc_radius,
+                    2.0 * arc_radius, 2.0 * arc_radius,
+                )
+                painter.save()
+                painter.setOpacity(0.75)
+                pen = QtGui.QPen(arrow_color, 3.0, QtCore.Qt.PenStyle.SolidLine, QtCore.Qt.PenCapStyle.RoundCap)
+                painter.setPen(pen)
+                painter.drawArc(arc_rect, int(start_deg * 16), int(span_deg * 16))
+                tip = origin_screen + QtCore.QPointF(arc_radius * math.cos(end_rad), -arc_radius * math.sin(end_rad))
+                if mz > 0:
+                    tang = QtCore.QPointF(math.sin(end_rad), math.cos(end_rad))
+                else:
+                    tang = QtCore.QPointF(-math.sin(end_rad), -math.cos(end_rad))
+                arrow_size = 10.0
+                wing = 5.0
+                perp = QtCore.QPointF(-tang.y(), tang.x())
+                p1 = tip - tang * arrow_size + perp * wing
+                p2 = tip - tang * arrow_size - perp * wing
                 painter.setBrush(QtGui.QBrush(arrow_color))
                 painter.setPen(QtCore.Qt.PenStyle.NoPen)
-                painter.drawPolygon(QtGui.QPolygonF([end_screen, p1, p2]))
-            painter.restore()
-            painter.setPen(QtGui.QPen(text_color))
-            painter.drawText(end_screen + QtCore.QPointF(8.0, -8.0), f"{force:.2f} N")
+                painter.drawPolygon(QtGui.QPolygonF([tip, p1, p2]))
+                painter.restore()
+                painter.setPen(QtGui.QPen(text_color))
+                painter.drawText(tip + QtCore.QPointF(8.0, -8.0), f"{mz:.3f} Nm")
 
     def _body_at(self, point: QtCore.QPointF) -> str | None:
         project = self.app_service.project
@@ -4481,9 +4530,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             painter.drawLine(start, end)
         is_spring_mode = self._mode in {
             CanvasMode.CREATE_LINEAR_SPRING,
-            CanvasMode.CREATE_ROTATIONAL_SPRING,
             CanvasMode.CREATE_LINEAR_ACTUATOR,
-            CanvasMode.CREATE_ROTATIONAL_ACTUATOR,
         }
         if is_spring_mode and self._hover_world is not None:
             is_actuator_mode = self._mode in {CanvasMode.CREATE_LINEAR_ACTUATOR, CanvasMode.CREATE_ROTATIONAL_ACTUATOR}
@@ -4496,14 +4543,6 @@ class MechanismCanvas(QtWidgets.QWidget):
                 painter.setPen(QtCore.Qt.PenStyle.NoPen)
                 painter.setBrush(QtGui.QBrush(preview_color))
                 painter.drawEllipse(start_screen, 4.5, 4.5)
-            elif self._spring_start_world is not None:
-                ground_screen = self._to_screen(self._spring_start_world[0], self._spring_start_world[1], transform)
-                painter.setPen(QtGui.QPen(preview_color, 2.0, QtCore.Qt.PenStyle.DashLine))
-                painter.drawLine(ground_screen, hover_screen)
-                painter.setPen(QtCore.Qt.PenStyle.NoPen)
-                painter.setBrush(QtGui.QBrush(preview_color))
-                painter.drawEllipse(ground_screen, 4.5, 4.5)
-                self._draw_ground_symbol(painter, ground_screen)
             painter.setPen(QtCore.Qt.PenStyle.NoPen)
             painter.setBrush(QtGui.QBrush(preview_color))
             painter.drawEllipse(hover_screen, 4.5, 4.5)
@@ -4880,12 +4919,10 @@ class MechanismCanvas(QtWidgets.QWidget):
             return
 
         if self._spring_start is None and self._spring_start_world is None:
-            # First click: store start endpoint
+            # First click must be on a body marker — ignore empty-canvas clicks
             if clicked_marker is not None:
                 self._spring_start = clicked_marker
-            else:
-                self._spring_start_world = world
-            self.update()
+                self.update()
             return
 
         # Second click: guard against mode switch between first and second clicks
@@ -4907,9 +4944,14 @@ class MechanismCanvas(QtWidgets.QWidget):
         existing_names = [s.name for s in self.app_service.project.model.springs]
         name = self._next_name(default_prefix, existing_names)
 
-        def _make_ep(marker: "CanvasMarker | None", world_pos: "tuple[float, float] | None") -> SpringEndpoint:
+        def _make_ep(marker: "CanvasMarker | None", world_pos: "tuple[float, float]") -> SpringEndpoint:
             if marker is not None:
                 return SpringEndpoint(kind=SpringEndpointKind.MARKER, body_id=marker.body_id, marker_id=marker.entity_id)
+            # No marker clicked — create an editable ground anchor body at that position
+            anchor_ep = self._create_ground_anchor(world_pos)
+            if anchor_ep is not None:
+                return anchor_ep
+            # Fallback (should not happen): raw ground coordinate
             from quino.domain.model import ScalarProperty
             from quino.domain.types import Dimension
             gx, gy = world_pos
@@ -4919,10 +4961,78 @@ class MechanismCanvas(QtWidgets.QWidget):
                 ground_y=ScalarProperty(expression=f"{gy:.6g} mm", unit="mm", expected_dimension=Dimension.LENGTH),
             )
 
-        ep_a = _make_ep(self._spring_start, self._spring_start_world)
+        ep_a = _make_ep(self._spring_start, self._spring_start_world or (0.0, 0.0))
         ep_b = _make_ep(clicked_marker, world)
         self._spring_start = None
         self._spring_start_world = None
+        try:
+            spring_id = self.app_service.create_spring(name, spring_type_str, ep_a, ep_b)
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Create Spring Failed", str(exc))
+            self.set_mode(CanvasMode.SELECT)
+            return
+        self.entitySelected.emit(spring_id)
+        self.modelChanged.emit(f"Created {name}")
+        self.set_mode(CanvasMode.SELECT)
+
+    def _create_ground_anchor(self, world_pos: tuple[float, float]) -> "SpringEndpoint | None":
+        """Create a PointMass body + rigid ground joint at world_pos; return a MARKER SpringEndpoint for it."""
+        project = self.app_service.project
+        if project is None:
+            return None
+        existing_body_names = [b.name for b in project.model.bodies]
+        anchor_name = self._next_name("Anchor", existing_body_names)
+        gx, gy = world_pos
+        x_expr = self._mm_expression(gx)
+        y_expr = self._mm_expression(gy)
+        try:
+            body_id, marker_id = self.app_service.create_ground_anchor(anchor_name, x_expr, y_expr)
+        except Exception:
+            return None
+        return SpringEndpoint(kind=SpringEndpointKind.MARKER, body_id=body_id, marker_id=marker_id)
+
+    def _handle_rotational_spring_click(self, joint_id: str | None) -> None:
+        if not self._require_editing():
+            return
+        if joint_id is None:
+            return
+        project = self.app_service.project
+        if project is None:
+            return
+        joint = next((j for j in project.model.joints if j.id == joint_id), None)
+        if joint is None:
+            return
+
+        assembled = self._assembled_mechanism(project)
+        markers = self._collect_markers(project, assembled)
+        marker_map = {cm.entity_id: cm for cm in markers}
+
+        def _joint_ep_to_spring_ep(ep, other_ep) -> SpringEndpoint:
+            from quino.domain.model import ScalarProperty
+            from quino.domain.types import Dimension
+            if ep.kind is JointEndpointKind.MARKER:
+                return SpringEndpoint(
+                    kind=SpringEndpointKind.MARKER,
+                    body_id=ep.body_id,
+                    marker_id=ep.marker_id,
+                )
+            pos_x, pos_y = 0.0, 0.0
+            if other_ep.kind is JointEndpointKind.MARKER and other_ep.marker_id in marker_map:
+                cm = marker_map[other_ep.marker_id]
+                pos_x, pos_y = cm.x, cm.y
+            return SpringEndpoint(
+                kind=SpringEndpointKind.GROUND,
+                ground_x=ScalarProperty(expression=f"{pos_x:.6g} mm", unit="mm", expected_dimension=Dimension.LENGTH),
+                ground_y=ScalarProperty(expression=f"{pos_y:.6g} mm", unit="mm", expected_dimension=Dimension.LENGTH),
+            )
+
+        ep_a = _joint_ep_to_spring_ep(joint.endpoint_a, joint.endpoint_b)
+        ep_b = _joint_ep_to_spring_ep(joint.endpoint_b, joint.endpoint_a)
+
+        spring_type_str, default_prefix = self._SPRING_TYPE_NAMES[self._mode]
+        existing_names = [s.name for s in project.model.springs]
+        name = self._next_name(default_prefix, existing_names)
+
         try:
             spring_id = self.app_service.create_spring(name, spring_type_str, ep_a, ep_b)
         except Exception as exc:

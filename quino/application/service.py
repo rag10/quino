@@ -776,6 +776,20 @@ class ApplicationService:
     def create_punctual_mass(self, name: str, x: str, y: str) -> str:
         return self.create_body(name=name, markers=[MarkerInput(x, y, "P")], body_type=BodyType.POINT_MASS.value)
 
+    def create_ground_anchor(self, name: str, x: str, y: str) -> tuple[str, str]:
+        """Create a PointMass body + rigid ground joint as one undo step.
+
+        Returns (body_id, structural_marker_id).
+        """
+        project = self._require_project()
+        self.validation_service.ensure_unique_name(project.model.bodies, name)
+        with self._operation():
+            body_id = self.create_body(name=name, markers=[MarkerInput(x, y, "P")], body_type=BodyType.POINT_MASS.value)
+            body = next(b for b in project.model.bodies if b.id == body_id)
+            structural = next(m for m in body.markers if m.type is MarkerType.STRUCTURAL)
+            self.connect_marker_to_ground(structural.id, joint_type="rigid", name=f"Ground_{name}")
+        return body_id, structural.id
+
     def get_marker_deletion_consequence(self, marker_id: str) -> str:
         """Returns 'to_bar', 'to_point_mass', or 'normal' for deleting a structural marker."""
         try:

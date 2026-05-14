@@ -386,10 +386,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.action_add_load = self._tool_action("Load", CanvasMode.CREATE_LOAD, get_icon("load-gravity", color_dynamic), "Add a point load to a marker (select a marker on canvas)")
 
-        self.action_add_linear_spring = self._tool_action("Spring", CanvasMode.CREATE_LINEAR_SPRING, get_icon("spring", color_dynamic), "Add a linear spring between two markers (click 2 markers or click empty space for ground)")
-        self.action_add_rotational_spring = self._tool_action("RotSpring", CanvasMode.CREATE_ROTATIONAL_SPRING, get_icon("rot-spring", color_dynamic), "Add a rotational spring between two markers")
-        self.action_add_linear_actuator = self._tool_action("Actuator", CanvasMode.CREATE_LINEAR_ACTUATOR, get_icon("actuator", color_dynamic), "Add a linear force actuator between two markers")
-        self.action_add_rotational_actuator = self._tool_action("RotActuator", CanvasMode.CREATE_ROTATIONAL_ACTUATOR, get_icon("rot-actuator", color_dynamic), "Add a rotational torque actuator between two markers")
+        self.action_add_linear_spring = self._tool_action("Spring", CanvasMode.CREATE_LINEAR_SPRING, get_icon("spring", color_dynamic), "Add a linear spring between two markers (click 2 markers; second click on empty canvas attaches to ground)")
+        self.action_add_rotational_spring = self._tool_action("RotSpring", CanvasMode.CREATE_ROTATIONAL_SPRING, get_icon("rot-spring", color_dynamic), "Add a rotational spring at a revolute joint (click the joint)")
+        self.action_add_linear_actuator = self._tool_action("Actuator", CanvasMode.CREATE_LINEAR_ACTUATOR, get_icon("actuator", color_dynamic), "Add a linear force actuator between two markers (click 2 markers; second click on empty canvas attaches to ground)")
+        self.action_add_rotational_actuator = self._tool_action("RotActuator", CanvasMode.CREATE_ROTATIONAL_ACTUATOR, get_icon("rot-actuator", color_dynamic), "Add a rotational torque actuator at a revolute joint (click the joint)")
 
         self.action_new_plot = QtGui.QAction(get_icon("new-graph", color_dynamic), "Plot", self)
         self.action_new_plot.triggered.connect(self.create_plot_window)
