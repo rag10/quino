@@ -1029,3 +1029,32 @@ def test_gravity_direction_normalization() -> None:
     # magnitude * direction_y = 10 * 0.8 = 8.0
     assert "mbs.SetGravity([6" in script or "6.0" in script
     assert "8" in script or "8.0" in script
+
+
+# ---------------------------------------------------------------------------
+# Reaction force tests
+# ---------------------------------------------------------------------------
+
+def test_reaction_output_dataclass_fields() -> None:
+    from quino.domain.model import ReactionOutput
+    r = ReactionOutput(
+        joint_id="j1",
+        joint_name="Ground_A",
+        endpoint_type="ground",
+        time=[0.0, 0.1],
+        columns=["Fx [N]", "Fy [N]", "F [N]"],
+        data=[[1.0, 2.0, 2.236], [3.0, 4.0, 5.0]],
+        positions=[(10.0, 20.0), (10.1, 20.1)],
+    )
+    assert r.joint_id == "j1"
+    assert r.columns == ["Fx [N]", "Fy [N]", "F [N]"]
+    assert len(r.data) == 2
+    assert len(r.positions) == 2
+
+
+def test_project_has_reaction_outputs_field() -> None:
+    app = ApplicationService()
+    app.new_project("Test")
+    assert hasattr(app.project, "reaction_outputs")
+    assert isinstance(app.project.reaction_outputs, dict)
+    assert len(app.project.reaction_outputs) == 0

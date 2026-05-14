@@ -194,6 +194,17 @@ class SensorOutput:
 
 
 @dataclass(slots=True)
+class ReactionOutput:
+    joint_id: str
+    joint_name: str
+    endpoint_type: str                    # "ground" | "slider"
+    time: list[float] = field(default_factory=list)
+    columns: list[str] = field(default_factory=list)
+    data: list[list[float]] = field(default_factory=list)
+    positions: list[tuple[float, float]] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class SketchPoint:
     id: str
     name: str
@@ -356,6 +367,7 @@ class Project:
     view_state: ViewState = field(default_factory=ViewState)
     metadata: Metadata = field(default_factory=Metadata)
     sensor_outputs: dict[str, SensorOutput] = field(default_factory=dict)
+    reaction_outputs: dict[str, ReactionOutput] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
