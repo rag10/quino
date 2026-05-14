@@ -20,6 +20,7 @@ from quino.domain.model import (
     Marker,
     Parameter,
     Project,
+    ReactionOutput,
     Sensor,
     SimulationResult,
     Sketch,
@@ -1476,6 +1477,7 @@ class MainWindow(QtWidgets.QMainWindow):
     # --- icon name per entity kind ---
     _KIND_ICON: dict[str, str] = {
         "bar": "bar", "body": "body",
+        "reaction": "sensor-point",
         "structural": "marker", "com": "marker",
         "slider": "slider",
         "revolute": "revolute", "rigid": "rigid",
@@ -1502,6 +1504,7 @@ class MainWindow(QtWidgets.QMainWindow):
     _SECTION_ICON: dict[str, str] = {
         "Bodies": "body", "Sliders": "slider", "Joints": "revolute",
         "Drivers": "rotate-driver", "Sensors": "sensor-point",
+        "Reactions": "sensor-point",
         "Sketch": "sketch-point",
         "Constraints": "constraint-distance",
         "Loads": "load-gravity",
@@ -1510,6 +1513,7 @@ class MainWindow(QtWidgets.QMainWindow):
     _SECTION_COLOR: dict[str, str] = {
         "Bodies": "#2f6f9f", "Sliders": "#2f6f9f", "Joints": "#2f6f9f",
         "Drivers": "#c7781d", "Sensors": "#c7781d",
+        "Reactions": "#c7781d",
         "Sketch": "#7a7f87",
         "Loads": "#7a5a8f",
         "Springs": "#2a9d8f",
@@ -1599,6 +1603,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
         for spring in project.model.springs:
             springs_root.addChild(self._entity_item(spring.name, spring.spring_type.value, spring.id))
+
+        if project.reaction_outputs:
+            reactions_root = _root("Reactions", len(project.reaction_outputs))
+            self.tree.addTopLevelItem(reactions_root)
+            for rxn in project.reaction_outputs.values():
+                reactions_root.addChild(
+                    self._entity_item(rxn.joint_name, "reaction", f"__reaction__{rxn.joint_id}")
+                )
 
         self.tree.expandAll()
 
@@ -1970,6 +1982,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return "point"
         if isinstance(entity, GravityLoad):
             return "gravity"
+        if isinstance(entity, ReactionOutput):
+            return "reaction"
         return ""
 
     def _entity_default_icon(self, entity: object) -> str:
@@ -1997,6 +2011,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return "sketch-arc"
         if isinstance(entity, SketchInfiniteLine):
             return "sketch-infinite-line"
+        if isinstance(entity, ReactionOutput):
+            return "sensor-point"
         if isinstance(entity, SketchConstraint):
             return {
                 "fix": "constraint-fix",
@@ -2183,6 +2199,20 @@ class MainWindow(QtWidgets.QMainWindow):
             prop("magnitude", "magnitude", str(entity.magnitude), "expression", str(entity.magnitude))
             prop("direction_x", "direction_x", str(entity.direction_x), "expression", str(entity.direction_x))
             prop("direction_y", "direction_y", str(entity.direction_y), "expression", str(entity.direction_y))
+
+        elif isinstance(entity, ReactionOutput):
+            prop("joint", "", entity.joint_name, "readonly", entity.joint_name)
+            prop("type", "", entity.endpoint_type, "readonly", entity.endpoint_type)
+            if entity.time and entity.data:
+                prop("— Current Values —", "", "", "section_header", "")
+                frame = max(0, min(self._current_frame_index, len(entity.data) - 1))
+                row_data = entity.data[frame]
+                t = entity.time[frame] if frame < len(entity.time) else 0.0
+                prop("t", "", f"{t:.4g} s", "readonly", f"{t:.4g} s")
+                for col_idx, col_name in enumerate(entity.columns):
+                    if col_idx < len(row_data):
+                        val = row_data[col_idx]
+                        prop(col_name, "", f"{val:.6g}", "readonly", f"{val:.6g}")
 
         return rows
 
