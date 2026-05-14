@@ -30,7 +30,6 @@ class AssembledBody:
     origin_y: float
     angle: float
     mass: float
-    inertia: float
     com_local_x: float
     com_local_y: float
     markers: dict[str, AssembledMarker] = field(default_factory=dict)
@@ -205,25 +204,9 @@ class MechanismAssembler:
         mass = self._eval_optional(project, body.mass, default=0.0)
         if mass is None:
             mass = 0.0
-        if mass == 0.0:
-            inertia_default = 0.0
-        elif len(structural_global) >= 2:
-            dx = structural_global[1].global_x - structural_global[0].global_x
-            dy = structural_global[1].global_y - structural_global[0].global_y
-            L_sq_mm2 = dx * dx + dy * dy
-            inertia_default = max(mass * L_sq_mm2 / 12.0, 1e-6)
-        else:
-            inertia_default = max(mass * 1.0, 1e-6)
-        inertia = self._eval_optional(project, body.inertia, default=inertia_default)
-        if inertia is None:
-            inertia = inertia_default
         warnings: list[str] = []
         if body.mass is None:
             warnings.append(f"Body {body.name}: undefined mass, defaulting to 0.0 kg (massless / kinematic) for Exudyn assembly")
-        if body.inertia is None:
-            warnings.append(
-                f"Body {body.name}: undefined inertia, defaulting to {inertia:.6g} for Exudyn assembly"
-            )
         return AssembledBody(
             body_id=body.id,
             name=body.name,
@@ -232,7 +215,6 @@ class MechanismAssembler:
             origin_y=origin_y,
             angle=angle,
             mass=mass,
-            inertia=inertia,
             com_local_x=com_marker.local_x,
             com_local_y=com_marker.local_y,
             markers=transformed_markers,

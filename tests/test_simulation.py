@@ -105,6 +105,22 @@ class _FakeItemInterface:
     def SensorUserFunction(**kwargs):
         return {"kind": "SensorUserFunction", **kwargs}
 
+    @staticmethod
+    def NodePoint2D(**kwargs):
+        return {"kind": "NodePoint2D", **kwargs}
+
+    @staticmethod
+    def ObjectMassPoint2D(**kwargs):
+        return {"kind": "ObjectMassPoint2D", **kwargs}
+
+    @staticmethod
+    def MarkerNodePosition(**kwargs):
+        return {"kind": "MarkerNodePosition", **kwargs}
+
+    @staticmethod
+    def Force(**kwargs):
+        return {"kind": "Force", **kwargs}
+
 
 class _FakeMbs:
     def __init__(self) -> None:
@@ -819,7 +835,7 @@ def test_application_service_export_exudyn_script_raises_for_non_exudyn() -> Non
         app.export_exudyn_script()
 
 
-def test_assembler_defaults_mass_and_inertia_to_zero() -> None:
+def test_assembler_defaults_mass_to_zero() -> None:
     app = ApplicationService()
     app.new_project("Massless")
     body_id = app.create_bar("Link", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
@@ -828,21 +844,6 @@ def test_assembler_defaults_mass_and_inertia_to_zero() -> None:
     assembled = app.simulation_runner.adapter.assembler.assemble(app.project)
     body = assembled.bodies[body_id]
     assert body.mass == pytest.approx(0.0)
-    assert body.inertia == pytest.approx(0.0)
-
-
-def test_assembler_inertia_defaults_to_mass_based_when_mass_is_set() -> None:
-    app = ApplicationService()
-    app.new_project("InertiaDefault")
-    body_id = app.create_bar("Link", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
-    app.update_property(body_id, "mass", PropertyValueInput("expression", "2 kg"))
-    app.connect_marker_to_ground(next(m.id for m in app._find_body(body_id).markers if m.name == "A"))
-
-    assembled = app.simulation_runner.adapter.assembler.assemble(app.project)
-    body = assembled.bodies[body_id]
-    assert body.mass == pytest.approx(2.0)
-    # Length = 100 mm; inertia default = m * L² / 12 (kgmm²)
-    assert body.inertia == pytest.approx(2.0 * 100.0**2 / 12.0)
 
 
 def test_dynamic_simulation_runs_without_drivers_when_bodies_have_mass(monkeypatch) -> None:

@@ -764,7 +764,6 @@ class ApplicationService:
             edge_order=[marker.id for marker in structural_markers],
             closed_shape=actual_type is not BodyType.BAR,
             mass=None,
-            inertia=None,
             style=Style(),
         )
         body.markers.append(self._make_com_marker(body))
@@ -1206,7 +1205,7 @@ class ApplicationService:
             self._snapshot()
             setattr(entity, property_path, value.value)
             return
-        if property_path in {"mass", "inertia", "travel_min", "travel_max"} and value.kind == "null":
+        if property_path in {"mass", "travel_min", "travel_max"} and value.kind == "null":
             self._snapshot()
             setattr(entity, property_path, None)
             return
@@ -1720,7 +1719,6 @@ class ApplicationService:
             "travel_max": Dimension.LENGTH,
             "angle": Dimension.ANGLE,
             "mass": Dimension.MASS,
-            "inertia": Dimension.INERTIA,
             "fx": Dimension.FORCE,
             "fy": Dimension.FORCE,
             "law": getattr(entity, "law", None).expected_dimension if isinstance(entity, Driver) else None,
@@ -1729,8 +1727,6 @@ class ApplicationService:
             raise ValueError(f"Unsupported property path: {property_path}")
         current = getattr(entity, property_path, None)
         unit = "deg" if property_path == "angle" else "kg" if property_path == "mass" else "N" if property_path in ("fx", "fy") else "mm"
-        if property_path == "inertia":
-            unit = "kgmm2"
         if current is not None and isinstance(current, ScalarProperty):
             unit = current.unit
         scalar = ScalarProperty(expression=expression, unit=unit, expected_dimension=dimension_map[property_path])

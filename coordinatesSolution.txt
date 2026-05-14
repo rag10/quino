@@ -1,22 +1,22 @@
 #Exudyn implicit second order time integration solver solution file
-#simulation started=2026-05-14,14:46:48
+#simulation started=2026-05-14,16:37:42
 #columns contain: time, ODE2 displacements, ODE2 velocities, ODE2 accelerations, AE coordinates
-#number of system coordinates [nODE2, nODE1, nAlgebraic, nData] = [3,0,2,0]
-#number of written coordinates [nODE2, nVel2, nAcc2, nODE1, nVel1, nAlgebraic, nData] = [3,3,3,0,0,2,0]
-#total columns exported  (excl. time) = 11
-#number of time steps (planned) = 10
+#number of system coordinates [nODE2, nODE1, nAlgebraic, nData] = [5,0,4,0]
+#number of written coordinates [nODE2, nVel2, nAcc2, nODE1, nVel1, nAlgebraic, nData] = [5,5,5,0,0,4,0]
+#total columns exported  (excl. time) = 19
+#number of time steps (planned) = 100
 #Exudyn version = 1.10.0; Python3.11.11; Windows AVX2 FLOAT64
 #
-0,0,0,0,0,0,0,0,0,0,0,0
-0.01,0,0,0,0,0,0,0,0,0,0,-9.81
-0.02,0,0,0,0,0,0,0,0,0,0,-9.81
-0.03,0,0,0,0,0,0,0,0,0,0,-9.81
-0.04,0,0,0,0,0,0,0,0,0,0,-9.81
-0.05,0,0,0,0,0,0,0,0,0,0,-9.81
-0.06,0,0,0,0,0,0,0,0,0,0,-9.81
-0.07,0,0,0,0,0,0,0,0,0,0,-9.81
-0.08,0,0,0,0,0,0,0,0,0,0,-9.81
-0.09,0,0,0,0,0,0,0,0,0,0,-9.81
-0.1,0,0,0,0,0,0,0,0,0,0,-9.81
-#simulation finished=2026-05-14,14:46:48
-#Solver Info: cpuTime=0.0002181,stepReductionFailed(or step failed)=0,discontinuousIterationSuccessful=1,newtonSolutionDiverged=0,massMatrixNotInvertible=0,total time steps=10,total Newton iterations=10,total Newton jacobians=10
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+0.01,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-9.81,0,-9.81
+0.02,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-9.81,0,-9.81
+0.03,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-9.81,0,-9.81
+0.04,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-9.81,0,-9.81
+0.05,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-9.81,0,-9.81
+0.06,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-9.81,0,-9.81
+0.07,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-9.81,0,-9.81
+0.08,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-9.81,0,-9.81
+0.09,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-9.81,0,-9.81
+0.1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-9.81,0,-9.81
+#simulation finished=2026-05-14,16:37:42
+#Solver Info: cpuTime=0.0006137,stepReductionFailed(or step failed)=0,discontinuousIterationSuccessful=1,newtonSolutionDiverged=0,massMatrixNotInvertible=0,total time steps=100,total Newton iterations=100,total Newton jacobians=100

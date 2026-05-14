@@ -50,7 +50,7 @@ _PROPERTY_DIMENSION_HINTS: dict[str, str] = {
     "travel_max": "length (e.g. 50 mm)",
     "angle": "angle (e.g. 90 deg)",
     "mass": "mass (e.g. 1.5 kg)",
-    "inertia": "inertia (e.g. 250 kgmm2)",
+
     "radius": "length (e.g. 25 mm)",
     "value": "see constraint type",
     "law": "angle or length (e.g. 90 deg * t / 1 s)",
@@ -2075,7 +2075,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if isinstance(entity, Body):
             prop("closed_shape", "closed_shape", str(entity.closed_shape).lower(), "boolean", str(entity.closed_shape).lower())
             prop("mass", "mass", entity.mass.expression if entity.mass else "", "expression_or_null", self._evaluate_scalar(entity.mass))
-            prop("inertia", "inertia", entity.inertia.expression if entity.inertia else "", "expression_or_null", self._evaluate_scalar(entity.inertia))
             prop("color", "style.color", entity.style.color, "color", entity.style.color)
             prop("line width", "style.line_width", str(entity.style.line_width), "expression", str(entity.style.line_width))
 

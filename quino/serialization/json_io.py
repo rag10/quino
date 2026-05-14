@@ -211,7 +211,6 @@ class JsonMapper:
             "edge_order": body.edge_order,
             "closed_shape": body.closed_shape,
             "mass": self._scalar_to_dict(body.mass),
-            "inertia": self._scalar_to_dict(body.inertia),
             "style": self._style_to_dict(body.style),
             "metadata": body.metadata.values,
         }
@@ -225,7 +224,6 @@ class JsonMapper:
             edge_order=data.get("edge_order", []),
             closed_shape=data.get("closed_shape", True),
             mass=self._scalar_from_dict(data.get("mass")),
-            inertia=self._scalar_from_dict(data.get("inertia")),
             style=self._style_from_dict(data.get("style")),
             metadata=Metadata(data.get("metadata", {})),
         )

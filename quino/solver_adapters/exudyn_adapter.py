@@ -364,16 +364,14 @@ class ExudynAdapter(SolverAdapter):
                 item_interface.ObjectRigidBody2D(
                     nodeNumber=node,
                     physicsMass=body.mass,
-                    physicsInertia=body.inertia * _KGMM2_TO_KGM2,
+                    physicsInertia=0.0,
                     physicsCenterOfMass=[0.0, 0.0],
                 )
             )
             if body.mass > 0 and assembled.gravity is not None:
                 g = assembled.gravity
                 gravity_marker = mbs.AddMarker(
-                    item_interface.MarkerBodyMass(
-                        bodyNumber=body_object,
-                    )
+                    item_interface.MarkerBodyMass(bodyNumber=body_object)
                 )
                 mbs.AddLoad(
                     item_interface.LoadMassProportional(

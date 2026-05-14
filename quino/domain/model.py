@@ -88,7 +88,6 @@ class Body:
     edge_order: list[str]
     closed_shape: bool
     mass: ScalarProperty | None = None
-    inertia: ScalarProperty | None = None
     style: Style = field(default_factory=Style)
     metadata: Metadata = field(default_factory=Metadata)
 
