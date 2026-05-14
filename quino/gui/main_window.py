@@ -1231,6 +1231,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_show_trajectories.setEnabled(False)
         self._update_timeline_controls()
         self._update_interaction_state()
+        if self.app_service.project is not None:
+            self.app_service.project.reaction_outputs.clear()
+            self.app_service.project.sensor_outputs.clear()
         if message:
             self._append_message(message)
 

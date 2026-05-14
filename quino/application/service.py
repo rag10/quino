@@ -1387,6 +1387,7 @@ class ApplicationService:
                 "Preflight detected unreachable kinematics; attempting solver for partial trajectory"
             )
         project.sensor_outputs.clear()
+        project.reaction_outputs.clear()
         result = self.simulation_runner.run(project, duration=duration, steps=steps)
         result.warnings = [*validation_messages, *result.warnings]
         result.messages = [*validation_messages, *result.messages]
@@ -1672,6 +1673,10 @@ class ApplicationService:
         if entity_id == "__gravity__":
             project = self.project
             return project.model.gravity if project else None
+        if entity_id.startswith("__reaction__"):
+            joint_id = entity_id[len("__reaction__"):]
+            project = self.project
+            return project.reaction_outputs.get(joint_id) if project else None
         try:
             return self._find_entity(entity_id)
         except ValueError:

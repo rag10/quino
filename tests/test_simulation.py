@@ -1058,3 +1058,29 @@ def test_project_has_reaction_outputs_field() -> None:
     assert hasattr(app.project, "reaction_outputs")
     assert isinstance(app.project.reaction_outputs, dict)
     assert len(app.project.reaction_outputs) == 0
+
+
+def test_get_entity_returns_reaction_output_for_reaction_prefix() -> None:
+    from quino.domain.model import ReactionOutput
+    app = ApplicationService()
+    app.new_project("Test")
+    rxn = ReactionOutput(
+        joint_id="j1", joint_name="Ground_A", endpoint_type="ground",
+        time=[0.0], columns=["Fx [N]", "Fy [N]", "F [N]"],
+        data=[[1.0, 2.0, 2.236]], positions=[(10.0, 20.0)],
+    )
+    app.project.reaction_outputs["j1"] = rxn
+    result = app.get_entity("__reaction__j1")
+    assert result is rxn
+    assert app.get_entity("__reaction__nonexistent") is None
+
+
+def test_run_simulation_clears_reaction_outputs() -> None:
+    from quino.domain.model import ReactionOutput
+    app = ApplicationService()
+    app.new_project("Test")
+    app.project.reaction_outputs["j1"] = ReactionOutput(
+        joint_id="j1", joint_name="Ground_A", endpoint_type="ground",
+    )
+    app.run_kinematic_simulation()
+    assert len(app.project.reaction_outputs) == 0
