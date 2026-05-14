@@ -12,5 +12,5 @@ class SolverAdapter(ABC):
         return True
 
     @abstractmethod
-    def run(self, project: Project, duration: float = 1.0, steps: int = 100) -> SimulationResult:
+    def run(self, project: Project, duration: float = 1.0, steps: int = 100, cancel_event=None, log_path=None) -> SimulationResult:
         raise NotImplementedError

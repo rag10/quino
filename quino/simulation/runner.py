@@ -18,5 +18,12 @@ class SimulationRunner:
         availability = "available" if self.backend_available() else "unavailable"
         return f"{self.backend_name()} ({availability})"
 
-    def run(self, project: Project, duration: float = 1.0, steps: int = 100) -> SimulationResult:
-        return self.adapter.run(project, duration=duration, steps=steps)
+    def run(self, project: Project, duration: float = 1.0, steps: int = 100, cancel_event=None, log_path=None) -> SimulationResult:
+        import inspect
+        sig = inspect.signature(self.adapter.run)
+        kwargs = {"duration": duration, "steps": steps}
+        if "cancel_event" in sig.parameters:
+            kwargs["cancel_event"] = cancel_event
+        if "log_path" in sig.parameters:
+            kwargs["log_path"] = log_path
+        return self.adapter.run(project, **kwargs)

@@ -1386,7 +1386,13 @@ class ApplicationService:
             raise RuntimeError("Export is only supported for the Exudyn backend")
         return self.simulation_runner.adapter.export_script(project, duration=duration, steps=steps)
 
-    def run_kinematic_simulation(self, duration: float = 1.0, steps: int = 100) -> SimulationResult:
+    def run_kinematic_simulation(
+        self,
+        duration: float = 1.0,
+        steps: int = 100,
+        cancel_event=None,
+        log_path=None,
+    ) -> SimulationResult:
         project = self._require_project()
         report = self.validate_model(duration=duration, steps=steps)
         validation_messages = [message.message for message in report.messages]
@@ -1401,7 +1407,10 @@ class ApplicationService:
             )
         project.sensor_outputs.clear()
         project.reaction_outputs.clear()
-        result = self.simulation_runner.run(project, duration=duration, steps=steps)
+        result = self.simulation_runner.run(
+            project, duration=duration, steps=steps,
+            cancel_event=cancel_event, log_path=log_path,
+        )
         result.warnings = [*validation_messages, *result.warnings]
         result.messages = [*validation_messages, *result.messages]
         return result

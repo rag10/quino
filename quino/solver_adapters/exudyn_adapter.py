@@ -4,6 +4,7 @@ import importlib
 import math
 from pathlib import Path
 import tempfile
+import threading
 import traceback
 
 from quino.domain.model import Project, ReactionOutput, SensorOutput, SimulationResult
@@ -94,7 +95,14 @@ class ExudynAdapter(SolverAdapter):
         assembled = self.assembler.assemble(project)
         return generate_exudyn_script(project, assembled, duration, steps, self.expression_service)
 
-    def run(self, project: Project, duration: float = 1.0, steps: int = 100) -> SimulationResult:
+    def run(
+        self,
+        project: Project,
+        duration: float = 1.0,
+        steps: int = 100,
+        cancel_event: threading.Event | None = None,
+        log_path: Path | None = None,
+    ) -> SimulationResult:
         try:
             assembled = self.assembler.assemble(project)
         except Exception as exc:
@@ -118,7 +126,11 @@ class ExudynAdapter(SolverAdapter):
             )
         try:
             exu = importlib.import_module("exudyn")
-            return self._run_with_exudyn(project, assembled, exu, solve_mode="dynamic", duration=duration, steps=steps)
+            return self._run_with_exudyn(
+                project, assembled, exu,
+                solve_mode="dynamic", duration=duration, steps=steps,
+                cancel_event=cancel_event, log_path=log_path,
+            )
         except Exception as exc:  # pragma: no cover - depends on external package/runtime
             dynamic_error = exc
             dynamic_traceback = self._format_exception(exc)
@@ -126,13 +138,10 @@ class ExudynAdapter(SolverAdapter):
                 try:
                     exu = importlib.import_module("exudyn")
                     fallback = self._run_with_exudyn(
-                        project,
-                        assembled,
-                        exu,
-                        solve_mode="dynamic",
-                        duration=duration,
-                        steps=steps,
+                        project, assembled, exu,
+                        solve_mode="dynamic", duration=duration, steps=steps,
                         translation_driver_mode="servo",
+                        cancel_event=cancel_event, log_path=log_path,
                     )
                     fallback.warnings.append(
                         f"Translation driver constraint fallback used: {dynamic_error}"
@@ -153,12 +162,9 @@ class ExudynAdapter(SolverAdapter):
                 try:
                     exu = importlib.import_module("exudyn")
                     fallback = self._run_with_exudyn(
-                        project,
-                        assembled,
-                        exu,
-                        solve_mode="static",
-                        duration=duration,
-                        steps=steps,
+                        project, assembled, exu,
+                        solve_mode="static", duration=duration, steps=steps,
+                        cancel_event=cancel_event, log_path=log_path,
                     )
                     fallback.warnings.append(f"Dynamic solve fallback used: {exc}")
                     fallback.messages.append("Static fallback used after dynamic solve failure")
@@ -199,6 +205,8 @@ class ExudynAdapter(SolverAdapter):
         duration: float,
         steps: int,
         translation_driver_mode: str = "constraint",
+        cancel_event: threading.Event | None = None,
+        log_path: Path | None = None,
     ) -> SimulationResult:
         item_interface = importlib.import_module("exudyn.itemInterface")
         sc = exu.SystemContainer()
@@ -259,6 +267,16 @@ class ExudynAdapter(SolverAdapter):
                         sensorNumbers=[],
                         sensorUserFunction=sensor_fn,
                     ))
+                # Cancel sensor: raises KeyboardInterrupt when cancel_event is set
+                if cancel_event is not None:
+                    def _cancel_sensor_fn(mbs_ref, t):
+                        if cancel_event.is_set():
+                            raise KeyboardInterrupt("Simulation cancelled by user")
+                        return 0.0
+                    mbs.AddSensor(item_interface.SensorUserFunction(
+                        sensorNumbers=[],
+                        sensorUserFunction=_cancel_sensor_fn,
+                    ))
                 mbs.Assemble()
                 with tempfile.TemporaryDirectory(prefix="quino_exudyn_") as temp_dir:
                     temp_dir_path = Path(temp_dir)
@@ -269,9 +287,13 @@ class ExudynAdapter(SolverAdapter):
                     simulation_settings.solutionSettings.sensorsWritePeriod = duration / max(steps, 1)
                     if hasattr(simulation_settings.solutionSettings, "binarySolutionFile"):
                         simulation_settings.solutionSettings.binarySolutionFile = False
+                    if log_path is not None:
+                        simulation_settings.solutionSettings.solverInformationFileName = str(log_path)
+                        simulation_settings.timeIntegration.verboseMode = 1
                     try:
                         mbs.SolveDynamic(simulationSettings=simulation_settings)
-                    except Exception as exc:
+                    except (Exception, KeyboardInterrupt) as exc:
+                        cancelled = cancel_event is not None and cancel_event.is_set()
                         time, frames = self._load_solution_frames(
                             exu,
                             mbs,
@@ -282,6 +304,20 @@ class ExudynAdapter(SolverAdapter):
                             allow_final_fallback=False,
                             project=project,
                         )
+                        if cancelled:
+                            if project and frames:
+                                self._record_reaction_data_dynamic(
+                                    project, assembled, time, frames, reaction_info, reaction_logs
+                                )
+                            return SimulationResult(
+                                success=False,
+                                backend=self.name,
+                                messages=messages + ["Simulation cancelled by user"],
+                                warnings=warnings,
+                                time=time,
+                                frames=frames,
+                                error="Simulation cancelled by user",
+                            )
                         if frames:
                             warnings.append(
                                 "Dynamic solve failed; returning partial trajectory up to last converged frame"
@@ -303,6 +339,8 @@ class ExudynAdapter(SolverAdapter):
                                 frames=frames,
                                 error=f"Dynamic solve failed after partial trajectory: {exc}",
                             )
+                        if isinstance(exc, KeyboardInterrupt):
+                            raise
                         raise
                     time, frames = self._load_solution_frames(
                         exu,
