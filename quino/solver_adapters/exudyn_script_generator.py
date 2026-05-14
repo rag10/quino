@@ -144,7 +144,7 @@ def _generate_bodies(project: Project, assembled: AssembledMechanism) -> list[st
         )
         lines.append(
             f"body_{b} = mbs.AddObject(item_interface.ObjectRigidBody2D("
-            f"nodeNumber=node_{b}, physicsMass={body.mass}, physicsInertia={max(body.mass * 1e-12, 1e-18)}, "
+            f"nodeNumber=node_{b}, physicsMass={body.mass}, physicsInertia=1e-10, "
             f"physicsCenterOfMass=[0.0, 0.0], "
             f"visualization=item_interface.VObjectRigidBody2D(graphicsData=graphics_{b})))"
         )

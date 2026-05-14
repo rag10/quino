@@ -50,12 +50,15 @@ def _make_constant_friction_fn(coulomb: float, viscous: float):
     return fn
 
 
-def _make_revolute_physics_friction_fn(joint_obj_num: int, exu, mu: float, r_m: float, viscous: float):
+def _make_revolute_physics_friction_fn(joint_obj_num: int, mu: float, r_m: float, viscous: float):
     """Physics-based revolute friction: T = μ × ||F_joint|| × r_pin × sign(ω) + c × ω."""
     def fn(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):
         try:
-            forces = mbs.GetObjectOutput(joint_obj_num, exu.OutputVariableType.Force)
-            N = math.sqrt(float(forces[0]) ** 2 + float(forces[1]) ** 2)
+            ae = mbs.systemData.GetAECoordinates()
+            ltg = mbs.systemData.GetObjectLTGAE(joint_obj_num)
+            fx = -float(ae[ltg[0]])
+            fy = -float(ae[ltg[1]])
+            N = math.sqrt(fx ** 2 + fy ** 2)
         except Exception:
             N = 0.0
         sign = 1.0 if velocity > 1e-12 else -1.0 if velocity < -1e-12 else 0.0
@@ -364,7 +367,9 @@ class ExudynAdapter(SolverAdapter):
                 item_interface.ObjectRigidBody2D(
                     nodeNumber=node,
                     physicsMass=body.mass,
-                    physicsInertia=0.0,
+                    # Small non-zero inertia required for friction connectors to take effect;
+                    # negligible compared to effective inertia m*L² through joint constraints.
+                    physicsInertia=1e-10,
                     physicsCenterOfMass=[0.0, 0.0],
                 )
             )
@@ -711,7 +716,7 @@ class ExudynAdapter(SolverAdapter):
             except (TypeError, ValueError):
                 pin_radius_mm = 0.0
             if pin_radius_mm > 1e-12:
-                force_fn = _make_revolute_physics_friction_fn(joint_obj_num, exu, coulomb, pin_radius_mm * _MM_TO_M, viscous)
+                force_fn = _make_revolute_physics_friction_fn(joint_obj_num, coulomb, pin_radius_mm * _MM_TO_M, viscous)
             else:
                 force_fn = _make_constant_friction_fn(coulomb, viscous)
         else:
