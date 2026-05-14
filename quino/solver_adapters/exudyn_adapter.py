@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import traceback
 
-from quino.domain.model import Project, SensorOutput, SimulationResult
+from quino.domain.model import Project, ReactionOutput, SensorOutput, SimulationResult
 from quino.domain.types import Dimension, DriverType, JointEndpointKind, JointType
 from quino.services.expressions import ExpressionService
 from quino.simulation.assembler import (
@@ -223,7 +223,7 @@ class ExudynAdapter(SolverAdapter):
             self._create_load(mbs, item_interface, project, assembled, body_objects, node_numbers, load, exu)
         for spring in assembled.springs:
             self._create_spring(mbs, item_interface, project, body_objects, node_numbers, ground_object, spring, exu)
-        mbs.Assemble()
+        reaction_info = self._reaction_joint_info(assembled, joint_objects)
         time: list[float] = []
         frames: list[dict[str, float]] = []
         warnings = list(assembled.warnings)
@@ -238,8 +238,37 @@ class ExudynAdapter(SolverAdapter):
                 simulation_settings = exu.SimulationSettings()
                 simulation_settings.timeIntegration.numberOfSteps = steps
                 simulation_settings.timeIntegration.endTime = duration
+                reaction_logs: dict[str, list[list[float]]] = {}
+                for jid, _jname, etype, _sid, nx, ny in reaction_info:
+                    if jid not in joint_objects:
+                        continue
+                    body_id_r, marker_id_r = self._reaction_joint_marker_ep(assembled, jid)
+                    if body_id_r is None:
+                        continue
+                    body_r = assembled.bodies[body_id_r]
+                    marker_r = body_r.markers[marker_id_r]
+                    lx_r, ly_r = _marker_local_rel_com(body_r, marker_r)
+                    log: list[list[float]] = []
+                    reaction_logs[jid] = log
+                    rxn_marker = mbs.AddMarker(
+                        item_interface.MarkerBodyRigid(
+                            bodyNumber=body_objects[body_id_r],
+                            localPosition=[lx_r * _MM_TO_M, ly_r * _MM_TO_M, 0.0],
+                        )
+                    )
+                    mbs.AddLoad(
+                        item_interface.LoadForceVector(
+                            markerNumber=rxn_marker,
+                            loadVector=[0.0, 0.0, 0.0],
+                            loadVectorUserFunction=self._make_reaction_log_fn(
+                                joint_objects[jid], log, etype, nx, ny, exu
+                            ),
+                        )
+                    )
+                mbs.Assemble()
                 with tempfile.TemporaryDirectory(prefix="quino_exudyn_") as temp_dir:
-                    solution_path = Path(temp_dir) / "solution.txt"
+                    temp_dir_path = Path(temp_dir)
+                    solution_path = temp_dir_path / "solution.txt"
                     simulation_settings.solutionSettings.writeSolutionToFile = True
                     simulation_settings.solutionSettings.coordinatesSolutionFileName = str(solution_path)
                     simulation_settings.solutionSettings.solutionWritePeriod = duration / max(steps, 1)
@@ -266,6 +295,10 @@ class ExudynAdapter(SolverAdapter):
                                 "Exudyn dynamic solve terminated before end; partial frames are available"
                             )
                             messages.append(self._format_exception(exc))
+                            if project:
+                                self._record_reaction_data_dynamic(
+                                    project, assembled, time, frames, reaction_info, reaction_logs
+                                )
                             return SimulationResult(
                                 success=False,
                                 backend=self.name,
@@ -285,8 +318,13 @@ class ExudynAdapter(SolverAdapter):
                         node_numbers,
                         project=project,
                     )
+                    if project:
+                        self._record_reaction_data_dynamic(
+                            project, assembled, time, frames, reaction_info, reaction_logs
+                        )
                 messages.append("Exudyn dynamic solve completed")
             elif solve_mode == "static":
+                mbs.Assemble()
                 simulation_settings = exu.SimulationSettings()
                 simulation_settings.staticSolver.numberOfLoadSteps = 100
                 simulation_settings.solutionSettings.writeSolutionToFile = False
@@ -294,13 +332,22 @@ class ExudynAdapter(SolverAdapter):
                 final_state = self._collect_final_state(mbs, exu, assembled, node_numbers)
                 time = [duration]
                 frames = [final_state]
+                if project:
+                    self._record_reaction_data_static(
+                        project, assembled, mbs, exu, time, frames, reaction_info, joint_objects
+                    )
                 warnings.append("Dynamic solve fallback used; returning a single static frame")
                 messages.append("Exudyn static fallback completed")
             else:
                 raise ValueError(f"Unsupported Exudyn solve mode: {solve_mode}")
         else:
+            mbs.Assemble()
             time = [0.0]
             frames = [self._collect_final_state(mbs, exu, assembled, node_numbers)]
+            if project:
+                self._record_reaction_data_static(
+                    project, assembled, mbs, exu, time, frames, reaction_info, joint_objects
+                )
             messages.append("No drivers defined; returning assembled reference configuration")
         return SimulationResult(
             success=True,
@@ -1262,6 +1309,200 @@ class ExudynAdapter(SolverAdapter):
             if marker_id in body.markers:
                 return body_id
         return None
+
+    # ------------------------------------------------------------------
+    # Reaction force helpers
+    # ------------------------------------------------------------------
+
+    def _reaction_joint_info(
+        self,
+        assembled: AssembledMechanism,
+        joint_objects: dict[str, int],
+    ) -> list[tuple[str, str, str, str | None, float, float]]:
+        """Return metadata for joints whose reactions we should capture.
+
+        Each entry: (joint_id, joint_name, endpoint_type, slider_id_or_None, normal_x, normal_y)
+        """
+        result = []
+        for joint in assembled.joints:
+            ep_a = joint.endpoint_a
+            ep_b = joint.endpoint_b
+            is_ground = ep_a.kind is JointEndpointKind.GROUND or ep_b.kind is JointEndpointKind.GROUND
+            is_slider = ep_a.kind is JointEndpointKind.SLIDER or ep_b.kind is JointEndpointKind.SLIDER
+            if not (is_ground or is_slider):
+                continue
+            if joint.id not in joint_objects:
+                continue
+            if is_slider:
+                slider_ep = ep_a if ep_a.kind is JointEndpointKind.SLIDER else ep_b
+                slider = assembled.sliders.get(slider_ep.slider_id)
+                nx = slider.normal_x if slider else 0.0
+                ny = slider.normal_y if slider else 0.0
+                result.append((joint.id, joint.name, "slider", slider_ep.slider_id, nx, ny))
+            else:
+                result.append((joint.id, joint.name, "ground", None, 0.0, 0.0))
+        return result
+
+    def _reaction_joint_marker_ep(
+        self, assembled: AssembledMechanism, joint_id: str
+    ) -> tuple[str | None, str | None]:
+        """Return (body_id, marker_id) for the MARKER endpoint of a ground/slider joint."""
+        for joint in assembled.joints:
+            if joint.id != joint_id:
+                continue
+            ep_a, ep_b = joint.endpoint_a, joint.endpoint_b
+            if ep_a.kind is JointEndpointKind.MARKER:
+                return ep_a.body_id, ep_a.marker_id
+            if ep_b.kind is JointEndpointKind.MARKER:
+                return ep_b.body_id, ep_b.marker_id
+        return None, None
+
+    def _build_reaction_positions(
+        self,
+        assembled: AssembledMechanism,
+        frames: list[dict[str, float]],
+        body_id: str,
+        marker_id: str,
+    ) -> list[tuple[float, float]]:
+        """Return world-space mm positions of a marker for each simulation frame."""
+        positions = []
+        for frame in frames:
+            x, y = self._marker_global_pos(assembled, body_id, marker_id, frame)
+            positions.append((x, y))
+        return positions
+
+    def _load_sensor_file(self, path) -> list[list[float]]:
+        """Parse an Exudyn sensor output file into a list of numeric rows."""
+        path = Path(path)
+        if not path.exists():
+            return []
+        rows = []
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            try:
+                rows.append([float(v) for v in line.split()])
+            except ValueError:
+                continue
+        return rows
+
+    def _resample_sensor_to_time_axis(
+        self,
+        sensor_rows: list[list[float]],
+        target_times: list[float],
+    ) -> list[list[float]]:
+        """For each target time, find the nearest sensor row and return its value columns."""
+        if not sensor_rows or not target_times:
+            return []
+        result = []
+        for t_target in target_times:
+            best = min(sensor_rows, key=lambda row: abs(row[0] - t_target))
+            result.append(best[1:])
+        return result
+
+    def _make_reaction_log_fn(
+        self,
+        joint_obj_num: int,
+        log: list,
+        endpoint_type: str,
+        nx: float,
+        ny: float,
+        exu,
+    ):
+        """Return a zero-force LoadForceVector user function that logs joint reactions each step."""
+        def fn(mbs, t, loadVector):
+            try:
+                forces = mbs.GetObjectOutput(joint_obj_num, exu.OutputVariableType.Force)
+                if endpoint_type == "ground":
+                    fx = float(forces[0]) if hasattr(forces, "__len__") and len(forces) > 0 else float(forces)
+                    fy = float(forces[1]) if hasattr(forces, "__len__") and len(forces) > 1 else 0.0
+                else:
+                    lam = float(forces[0]) if hasattr(forces, "__len__") and len(forces) > 0 else float(forces)
+                    fx = lam * nx
+                    fy = lam * ny
+            except Exception:
+                fx, fy = 0.0, 0.0
+            log.append([float(t), fx, fy])
+            return [0.0, 0.0, 0.0]
+        return fn
+
+    def _record_reaction_data_dynamic(
+        self,
+        project: Project,
+        assembled: AssembledMechanism,
+        time: list[float],
+        frames: list[dict[str, float]],
+        reaction_info: list[tuple],
+        reaction_logs: dict[str, list[list[float]]],
+    ) -> None:
+        """Populate project.reaction_outputs from logs accumulated during dynamic solve."""
+        for joint_id, joint_name, endpoint_type, _slider_id, _nx, _ny in reaction_info:
+            rows = reaction_logs.get(joint_id, [])
+            values = self._resample_sensor_to_time_axis(rows, time)
+            if not values:
+                continue
+            body_id, marker_id = self._reaction_joint_marker_ep(assembled, joint_id)
+            if body_id is None:
+                continue
+            positions = self._build_reaction_positions(assembled, frames, body_id, marker_id)
+            data: list[list[float]] = []
+            for v in values:
+                fx = v[0] if len(v) > 0 else 0.0
+                fy = v[1] if len(v) > 1 else 0.0
+                f_mag = math.sqrt(fx * fx + fy * fy)
+                data.append([fx, fy, f_mag])
+            project.reaction_outputs[joint_id] = ReactionOutput(
+                joint_id=joint_id,
+                joint_name=joint_name,
+                endpoint_type=endpoint_type,
+                time=list(time),
+                columns=["Fx [N]", "Fy [N]", "F [N]"],
+                data=data,
+                positions=positions,
+            )
+
+    def _record_reaction_data_static(
+        self,
+        project: Project,
+        assembled: AssembledMechanism,
+        mbs,
+        exu,
+        time: list[float],
+        frames: list[dict[str, float]],
+        reaction_info: list[tuple],
+        joint_objects: dict[str, int],
+    ) -> None:
+        """Populate project.reaction_outputs via GetObjectOutput after static/no-driver solve."""
+        for joint_id, joint_name, endpoint_type, slider_id, normal_x, normal_y in reaction_info:
+            joint_obj_num = joint_objects.get(joint_id)
+            if joint_obj_num is None:
+                continue
+            try:
+                raw = mbs.GetObjectOutput(joint_obj_num, exu.OutputVariableType.Force)
+            except Exception:
+                continue
+            if endpoint_type == "ground":
+                fx = float(raw[0]) if hasattr(raw, "__len__") and len(raw) > 0 else float(raw)
+                fy = float(raw[1]) if hasattr(raw, "__len__") and len(raw) > 1 else 0.0
+            else:
+                lam = float(raw[0]) if hasattr(raw, "__len__") and len(raw) > 0 else float(raw)
+                fx = lam * normal_x
+                fy = lam * normal_y
+            f_mag = math.sqrt(fx * fx + fy * fy)
+            body_id, marker_id = self._reaction_joint_marker_ep(assembled, joint_id)
+            if body_id is None:
+                continue
+            positions = self._build_reaction_positions(assembled, frames, body_id, marker_id)
+            project.reaction_outputs[joint_id] = ReactionOutput(
+                joint_id=joint_id,
+                joint_name=joint_name,
+                endpoint_type=endpoint_type,
+                time=list(time),
+                columns=["Fx [N]", "Fy [N]", "F [N]"],
+                data=[[fx, fy, f_mag]] * len(frames),
+                positions=positions,
+            )
 
     def _project_diagnostics(self, project: Project) -> list[str]:
         lines = [
