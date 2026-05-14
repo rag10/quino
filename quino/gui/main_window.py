@@ -2462,11 +2462,11 @@ class MainWindow(QtWidgets.QMainWindow):
             stiffness = float(entity.metadata.values.get("stiffness", 0.0))
             damping = float(entity.metadata.values.get("damping", 0.0))
             if is_rotational:
-                prop("stiffness", "stiffness", f"{stiffness:.6g}", "float", f"{stiffness:.6g} N·mm/rad")
-                prop("damping", "damping", f"{damping:.6g}", "float", f"{damping:.6g} N·mm·s/rad")
+                prop("stiffness", "stiffness", f"{stiffness:.6g}", "expression", f"{stiffness:.6g} N·mm/rad")
+                prop("damping", "damping", f"{damping:.6g}", "expression", f"{damping:.6g} N·mm·s/rad")
             else:
-                prop("stiffness", "stiffness", f"{stiffness:.6g}", "float", f"{stiffness:.6g} N/mm")
-                prop("damping", "damping", f"{damping:.6g}", "float", f"{damping:.6g} N·s/mm")
+                prop("stiffness", "stiffness", f"{stiffness:.6g}", "expression", f"{stiffness:.6g} N/mm")
+                prop("damping", "damping", f"{damping:.6g}", "expression", f"{damping:.6g} N·s/mm")
             if entity.rest_value is not None:
                 prop("rest_value", "rest_value", entity.rest_value.expression, "expression", self._evaluate_scalar(entity.rest_value))
             else:
