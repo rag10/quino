@@ -208,8 +208,11 @@ class ExudynAdapter(SolverAdapter):
         joint_objects: dict[str, int] = {}
         for joint in assembled.joints:
             joint_objects[joint.id] = self._create_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, joint)
+        friction_objects: dict[str, int] = {}
         for joint in assembled.joints:
-            self._add_joint_friction(mbs, item_interface, assembled, node_numbers, body_objects, ground_object, joint, exu, joint_objects)
+            fobj = self._add_joint_friction(mbs, item_interface, assembled, node_numbers, body_objects, ground_object, joint, exu, joint_objects)
+            if fobj is not None:
+                friction_objects[joint.id] = fobj
         for driver in assembled.drivers:
             self._create_driver(
                 mbs,
@@ -251,7 +254,7 @@ class ExudynAdapter(SolverAdapter):
                     if etype == "slider":
                         sensor_fn = self._make_slider_reaction_sensor_fn(joint_obj_num, nx, ny, log, exu)
                     else:
-                        sensor_fn = self._make_ground_reaction_sensor_fn(joint_obj_num, log)
+                        sensor_fn = self._make_ground_reaction_sensor_fn(joint_obj_num, friction_objects.get(jid), log, exu)
                     mbs.AddSensor(item_interface.SensorUserFunction(
                         sensorNumbers=[],
                         sensorUserFunction=sensor_fn,
@@ -693,21 +696,21 @@ class ExudynAdapter(SolverAdapter):
         joint: Joint,
         exu,
         joint_objects: dict[str, int],
-    ) -> None:
+    ) -> int | None:
         mode = None
         if joint.endpoint_a.kind is JointEndpointKind.SLIDER or joint.endpoint_b.kind is JointEndpointKind.SLIDER:
             mode = "translation"
         elif joint.type is JointType.REVOLUTE:
             mode = "rotation"
         if mode is None:
-            return
+            return None
         try:
             coulomb = float(joint.metadata.values.get("friction_coulomb", 0.0))
             viscous = float(joint.metadata.values.get("friction_viscous", 0.0))
         except (TypeError, ValueError):
-            return
+            return None
         if abs(coulomb) <= 1e-12 and abs(viscous) <= 1e-12:
-            return
+            return None
         joint_obj_num = joint_objects.get(joint.id, -1)
         if mode == "rotation":
             marker_numbers = self._rotation_coordinate_markers(mbs, item_interface, node_numbers, ground_object, joint)
@@ -741,7 +744,7 @@ class ExudynAdapter(SolverAdapter):
             )
             marker_numbers = [relative_translation_marker, zero_coordinate_marker]
             force_fn = _make_slider_physics_friction_fn(joint_obj_num, exu, coulomb, viscous)
-        mbs.AddObject(
+        return mbs.AddObject(
             item_interface.ObjectConnectorCoordinateSpringDamper(
                 name=f"{joint.name}_friction",
                 markerNumbers=marker_numbers,
@@ -1403,12 +1406,12 @@ class ExudynAdapter(SolverAdapter):
                 fy = lam * ny
             except Exception:
                 fx, fy = 0.0, 0.0
-            log.append([float(t), fx, fy])
-            return [fx, fy]
+            log.append([float(t), fx, fy, 0.0])
+            return [fx, fy, 0.0]
         return fn
 
-    def _make_ground_reaction_sensor_fn(self, joint_obj_num: int, log: list):
-        """SensorUserFunction that records revolute joint reaction force from AE Lagrange multipliers."""
+    def _make_ground_reaction_sensor_fn(self, joint_obj_num: int, friction_obj_num: int | None, log: list, exu):
+        """SensorUserFunction that records revolute joint reaction force and friction torque."""
         def fn(mbs, t, sensorNumbers, factors, configuration):
             try:
                 ae = mbs.systemData.GetAECoordinates()
@@ -1417,8 +1420,15 @@ class ExudynAdapter(SolverAdapter):
                 fy = -float(ae[ltg[1]])
             except Exception:
                 fx, fy = 0.0, 0.0
-            log.append([float(t), fx, fy])
-            return [fx, fy]
+            mz = 0.0
+            if friction_obj_num is not None:
+                try:
+                    raw = mbs.GetObjectOutput(friction_obj_num, exu.OutputVariableType.Force)
+                    mz = float(raw[0]) if hasattr(raw, "__len__") else float(raw)
+                except Exception:
+                    mz = 0.0
+            log.append([float(t), fx, fy, mz])
+            return [fx, fy, mz]
         return fn
 
 
@@ -1438,27 +1448,24 @@ class ExudynAdapter(SolverAdapter):
             if body_id is None:
                 continue
             positions = self._build_reaction_positions(assembled, frames, body_id, marker_id)
-            if endpoint_type == "ground":
-                rows = reaction_logs.get(joint_id, [])
-                values = self._resample_sensor_to_time_axis(rows, time)
-                force_rows = [[v[0] if len(v) > 0 else 0.0, v[1] if len(v) > 1 else 0.0] for v in values]
-            else:
-                rows = reaction_logs.get(joint_id, [])
-                values = self._resample_sensor_to_time_axis(rows, time)
-                force_rows = [[v[0] if len(v) > 0 else 0.0, v[1] if len(v) > 1 else 0.0] for v in values]
+            rows = reaction_logs.get(joint_id, [])
+            values = self._resample_sensor_to_time_axis(rows, time)
+            force_rows = [
+                [v[0] if len(v) > 0 else 0.0, v[1] if len(v) > 1 else 0.0, v[2] if len(v) > 2 else 0.0]
+                for v in values
+            ]
             if not force_rows:
                 continue
             data: list[list[float]] = []
             for frow in force_rows:
-                fx = frow[0]
-                fy = frow[1]
-                data.append([fx, fy, math.sqrt(fx * fx + fy * fy)])
+                fx, fy, mz = frow[0], frow[1], frow[2]
+                data.append([fx, fy, math.sqrt(fx * fx + fy * fy), mz])
             project.reaction_outputs[joint_id] = ReactionOutput(
                 joint_id=joint_id,
                 joint_name=joint_name,
                 endpoint_type=endpoint_type,
                 time=list(time),
-                columns=["Fx [N]", "Fy [N]", "F [N]"],
+                columns=["Fx [N]", "Fy [N]", "F [N]", "Mz [Nm]"],
                 data=data,
                 positions=positions,
             )
@@ -1508,8 +1515,8 @@ class ExudynAdapter(SolverAdapter):
                 joint_name=joint_name,
                 endpoint_type=endpoint_type,
                 time=list(time),
-                columns=["Fx [N]", "Fy [N]", "F [N]"],
-                data=[[fx, fy, f_mag]] * len(frames),
+                columns=["Fx [N]", "Fy [N]", "F [N]", "Mz [Nm]"],
+                data=[[fx, fy, f_mag, 0.0]] * len(frames),
                 positions=positions,
             )
 
