@@ -913,6 +913,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._draw_markers(painter, markers, transform)
                 self._draw_forces(painter, project, markers, transform)
                 self._draw_loads(painter, project, markers, transform)
+                self._draw_reactions(painter, project, transform)
             self._draw_springs(painter, project, assembled, transform)
             painter.restore()
             self._draw_sketch(painter, sketch_points, sketch_entities, transform, invalid=sketch_invalid)
@@ -934,6 +935,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._draw_markers(painter, markers, transform)
                 self._draw_forces(painter, project, markers, transform)
                 self._draw_loads(painter, project, markers, transform)
+                self._draw_reactions(painter, project, transform)
             elif not sketch_points and not sketch_entities:
                 self._draw_empty_state(painter)
             self._draw_springs(painter, project, assembled, transform)
@@ -3091,6 +3093,64 @@ class MechanismCanvas(QtWidgets.QWidget):
                 painter.drawPolygon(QtGui.QPolygonF([end_screen, p1, p2]))
             painter.restore()
             self._screen_loads.append((load.id, end_screen))
+            painter.setPen(QtGui.QPen(text_color))
+            painter.drawText(end_screen + QtCore.QPointF(8.0, -8.0), f"{force:.2f} N")
+
+    def _draw_reactions(
+        self,
+        painter: QtGui.QPainter,
+        project: Project,
+        transform,
+    ) -> None:
+        if self._state_overlay is None or not project.reaction_outputs:
+            return
+        arrow_color = QtGui.QColor("#f4a261")
+        text_color = QtGui.QColor("#f4a261")
+        scale_mm_per_n = 3.0
+        for rxn in project.reaction_outputs.values():
+            if not rxn.data or not rxn.positions or not rxn.time:
+                continue
+            # Find nearest frame by time
+            t = self._simulation_time
+            frame_idx = min(range(len(rxn.time)), key=lambda i: abs(rxn.time[i] - t))
+            frame_idx = max(0, min(frame_idx, len(rxn.data) - 1, len(rxn.positions) - 1))
+            row = rxn.data[frame_idx]
+            fx = row[0] if len(row) > 0 else 0.0
+            fy = row[1] if len(row) > 1 else 0.0
+            force = math.sqrt(fx * fx + fy * fy)
+            if force < 1e-9:
+                continue
+            origin_x, origin_y = rxn.positions[frame_idx]
+            dx = fx / force
+            dy = fy / force
+            arrow_length_mm = force * scale_mm_per_n
+            end_x = origin_x + dx * arrow_length_mm
+            end_y = origin_y + dy * arrow_length_mm
+            origin_screen = self._to_screen(origin_x, origin_y, transform)
+            end_screen = self._to_screen(end_x, end_y, transform)
+            painter.save()
+            painter.setOpacity(0.75)
+            pen = QtGui.QPen(arrow_color, 3.0, QtCore.Qt.PenStyle.SolidLine, QtCore.Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.drawLine(origin_screen, end_screen)
+            screen_dx = end_screen.x() - origin_screen.x()
+            screen_dy = end_screen.y() - origin_screen.y()
+            screen_len = math.sqrt(screen_dx * screen_dx + screen_dy * screen_dy)
+            if screen_len > 1e-6:
+                ux = screen_dx / screen_len
+                uy = screen_dy / screen_len
+                arrow_size = 12.0
+                wing = 6.0
+                bx = end_screen.x() - ux * arrow_size
+                by = end_screen.y() - uy * arrow_size
+                wx = -uy * wing
+                wy = ux * wing
+                p1 = QtCore.QPointF(bx + wx, by + wy)
+                p2 = QtCore.QPointF(bx - wx, by - wy)
+                painter.setBrush(QtGui.QBrush(arrow_color))
+                painter.setPen(QtCore.Qt.PenStyle.NoPen)
+                painter.drawPolygon(QtGui.QPolygonF([end_screen, p1, p2]))
+            painter.restore()
             painter.setPen(QtGui.QPen(text_color))
             painter.drawText(end_screen + QtCore.QPointF(8.0, -8.0), f"{force:.2f} N")
 
