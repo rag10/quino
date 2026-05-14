@@ -101,6 +101,10 @@ class _FakeItemInterface:
     def SensorObject(**kwargs):
         return {"kind": "SensorObject", **kwargs}
 
+    @staticmethod
+    def SensorUserFunction(**kwargs):
+        return {"kind": "SensorUserFunction", **kwargs}
+
 
 class _FakeMbs:
     def __init__(self) -> None:

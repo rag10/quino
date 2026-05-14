@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from pathlib import Path
 
 from quino.gui.icons import get_icon
@@ -77,6 +78,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._project_dirty = False
         self._plot_windows: list[PlotWindow] = []
         self._tree_items: dict[str, QtWidgets.QTreeWidgetItem] = {}
+        self._expanded_tree_keys: set[str] = set()
         self._playback_timer = QtCore.QTimer(self)
         self._playback_timer.timeout.connect(self._advance_playback)
 
@@ -1521,6 +1523,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _populate_tree(self, project: Project) -> None:
         self.tree.blockSignals(True)
+        self._expanded_tree_keys = self._collect_expanded_tree_keys()
         self.tree.clear()
         self._tree_items.clear()
 
@@ -1612,7 +1615,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     self._entity_item(rxn.joint_name, "reaction", f"__reaction__{rxn.joint_id}")
                 )
 
-        self.tree.expandAll()
+        self._restore_expanded_tree_keys()
 
         if self._selected_entity_id:
             item = self._tree_items.get(self._selected_entity_id)
@@ -1620,6 +1623,34 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.tree.setCurrentItem(item)
 
         self.tree.blockSignals(False)
+
+    def _collect_expanded_tree_keys(self) -> set[str]:
+        keys: set[str] = set()
+        def walk(item: QtWidgets.QTreeWidgetItem) -> None:
+            if item.isExpanded():
+                key = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+                if key is not None:
+                    keys.add(key)
+                else:
+                    text = re.sub(r"\s+\(\d+\)$", "", item.text(0))
+                    keys.add(text)
+            for i in range(item.childCount()):
+                walk(item.child(i))
+        for i in range(self.tree.topLevelItemCount()):
+            walk(self.tree.topLevelItem(i))
+        return keys
+
+    def _restore_expanded_tree_keys(self) -> None:
+        def walk(item: QtWidgets.QTreeWidgetItem) -> None:
+            key = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+            if key is None:
+                key = re.sub(r"\s+\(\d+\)$", "", item.text(0))
+            if key in self._expanded_tree_keys:
+                item.setExpanded(True)
+            for i in range(item.childCount()):
+                walk(item.child(i))
+        for i in range(self.tree.topLevelItemCount()):
+            walk(self.tree.topLevelItem(i))
 
     def _entity_item(self, label: str, kind: str, entity_id: str) -> QtWidgets.QTreeWidgetItem:
         item = QtWidgets.QTreeWidgetItem([label, kind])

@@ -240,31 +240,18 @@ class ExudynAdapter(SolverAdapter):
                 simulation_settings.timeIntegration.endTime = duration
                 reaction_logs: dict[str, list[list[float]]] = {}
                 for jid, _jname, etype, _sid, nx, ny in reaction_info:
-                    if jid not in joint_objects:
+                    if etype != "slider":
                         continue
-                    body_id_r, marker_id_r = self._reaction_joint_marker_ep(assembled, jid)
-                    if body_id_r is None:
+                    joint_obj_num = joint_objects.get(jid)
+                    if joint_obj_num is None:
                         continue
-                    body_r = assembled.bodies[body_id_r]
-                    marker_r = body_r.markers[marker_id_r]
-                    lx_r, ly_r = _marker_local_rel_com(body_r, marker_r)
                     log: list[list[float]] = []
                     reaction_logs[jid] = log
-                    rxn_marker = mbs.AddMarker(
-                        item_interface.MarkerBodyRigid(
-                            bodyNumber=body_objects[body_id_r],
-                            localPosition=[lx_r * _MM_TO_M, ly_r * _MM_TO_M, 0.0],
-                        )
-                    )
-                    mbs.AddLoad(
-                        item_interface.LoadForceVector(
-                            markerNumber=rxn_marker,
-                            loadVector=[0.0, 0.0, 0.0],
-                            loadVectorUserFunction=self._make_reaction_log_fn(
-                                joint_objects[jid], log, etype, nx, ny, exu
-                            ),
-                        )
-                    )
+                    sensor_fn = self._make_slider_reaction_sensor_fn(joint_obj_num, nx, ny, log, exu)
+                    mbs.AddSensor(item_interface.SensorUserFunction(
+                        sensorNumbers=[],
+                        sensorUserFunction=sensor_fn,
+                    ))
                 mbs.Assemble()
                 with tempfile.TemporaryDirectory(prefix="quino_exudyn_") as temp_dir:
                     temp_dir_path = Path(temp_dir)
@@ -272,6 +259,7 @@ class ExudynAdapter(SolverAdapter):
                     simulation_settings.solutionSettings.writeSolutionToFile = True
                     simulation_settings.solutionSettings.coordinatesSolutionFileName = str(solution_path)
                     simulation_settings.solutionSettings.solutionWritePeriod = duration / max(steps, 1)
+                    simulation_settings.solutionSettings.sensorsWritePeriod = duration / max(steps, 1)
                     if hasattr(simulation_settings.solutionSettings, "binarySolutionFile"):
                         simulation_settings.solutionSettings.binarySolutionFile = False
                     try:
@@ -1401,31 +1389,91 @@ class ExudynAdapter(SolverAdapter):
             result.append(best[1:])
         return result
 
-    def _make_reaction_log_fn(
-        self,
-        joint_obj_num: int,
-        log: list,
-        endpoint_type: str,
-        nx: float,
-        ny: float,
-        exu,
-    ):
-        """Return a zero-force LoadForceVector user function that logs joint reactions each step."""
-        def fn(mbs, t, loadVector):
+    def _make_slider_reaction_sensor_fn(self, joint_obj_num: int, nx: float, ny: float, log: list, exu):
+        """SensorUserFunction that records Lagrange multiplier × normal after each converged step."""
+        def fn(mbs, t, sensorNumbers, factors, configuration):
             try:
-                forces = mbs.GetObjectOutput(joint_obj_num, exu.OutputVariableType.Force)
-                if endpoint_type == "ground":
-                    fx = float(forces[0]) if hasattr(forces, "__len__") and len(forces) > 0 else float(forces)
-                    fy = float(forces[1]) if hasattr(forces, "__len__") and len(forces) > 1 else 0.0
-                else:
-                    lam = float(forces[0]) if hasattr(forces, "__len__") and len(forces) > 0 else float(forces)
-                    fx = lam * nx
-                    fy = lam * ny
+                raw = mbs.GetObjectOutput(joint_obj_num, exu.OutputVariableType.Force)
+                lam = float(raw[0]) if hasattr(raw, "__len__") else float(raw)
+                fx = lam * nx
+                fy = lam * ny
             except Exception:
                 fx, fy = 0.0, 0.0
             log.append([float(t), fx, fy])
-            return [0.0, 0.0, 0.0]
+            return [fx, fy]
         return fn
+
+    def _body_subtree_ids(self, assembled: AssembledMechanism, joint_id: str) -> list[str]:
+        """BFS from the marker-side body of a ground/slider joint across all body-body joints."""
+        start_id, _ = self._reaction_joint_marker_ep(assembled, joint_id)
+        if start_id is None:
+            return []
+        visited: set[str] = set()
+        queue = [start_id]
+        while queue:
+            bid = queue.pop()
+            if bid in visited:
+                continue
+            visited.add(bid)
+            for joint in assembled.joints:
+                if joint.endpoint_a.kind is JointEndpointKind.MARKER and joint.endpoint_b.kind is JointEndpointKind.MARKER:
+                    if joint.endpoint_a.body_id == bid and joint.endpoint_b.body_id not in visited:
+                        queue.append(joint.endpoint_b.body_id)
+                    elif joint.endpoint_b.body_id == bid and joint.endpoint_a.body_id not in visited:
+                        queue.append(joint.endpoint_a.body_id)
+        return list(visited)
+
+    def _static_ground_reaction(self, assembled: AssembledMechanism, joint_id: str) -> tuple[float, float]:
+        """Newton's law for static case (a=0): F_reaction = -F_gravity for the body subtree."""
+        body_ids = self._body_subtree_ids(assembled, joint_id)
+        fx = fy = 0.0
+        for bid in body_ids:
+            body = assembled.bodies[bid]
+            if body.mass <= 0 or assembled.gravity is None:
+                continue
+            g = assembled.gravity
+            fx -= body.mass * g.magnitude * g.direction_x
+            fy -= body.mass * g.magnitude * g.direction_y
+        return fx, fy
+
+    def _dynamic_ground_reaction_from_frames(
+        self,
+        assembled: AssembledMechanism,
+        joint_id: str,
+        time: list[float],
+        frames: list[dict[str, float]],
+    ) -> list[list[float]]:
+        """Newton's law (sectioning): F_reaction = Σ(m_i * a_i) - Σ(F_gravity_i) for body subtree."""
+        body_ids = self._body_subtree_ids(assembled, joint_id)
+        n = len(frames)
+        result: list[list[float]] = []
+        for i in range(n):
+            total_fx = 0.0
+            total_fy = 0.0
+            for bid in body_ids:
+                body = assembled.bodies[bid]
+                m = body.mass
+                if assembled.gravity is not None:
+                    g = assembled.gravity
+                    total_fx -= m * g.magnitude * g.direction_x
+                    total_fy -= m * g.magnitude * g.direction_y
+                if m > 0 and 0 < i < n - 1:
+                    dt1 = time[i + 1] - time[i]
+                    dt0 = time[i] - time[i - 1]
+                    if dt1 > 0 and dt0 > 0:
+                        dt_avg = (dt1 + dt0) * 0.5
+                        bx = frames[i].get(f"{bid}.x", 0.0)
+                        bx_fwd = frames[i + 1].get(f"{bid}.x", 0.0)
+                        bx_bwd = frames[i - 1].get(f"{bid}.x", 0.0)
+                        by = frames[i].get(f"{bid}.y", 0.0)
+                        by_fwd = frames[i + 1].get(f"{bid}.y", 0.0)
+                        by_bwd = frames[i - 1].get(f"{bid}.y", 0.0)
+                        ax = (bx_fwd - 2.0 * bx + bx_bwd) / (dt_avg ** 2) * _MM_TO_M
+                        ay = (by_fwd - 2.0 * by + by_bwd) / (dt_avg ** 2) * _MM_TO_M
+                        total_fx += m * ax
+                        total_fy += m * ay
+            result.append([total_fx, total_fy])
+        return result
 
     def _record_reaction_data_dynamic(
         self,
@@ -1436,22 +1484,25 @@ class ExudynAdapter(SolverAdapter):
         reaction_info: list[tuple],
         reaction_logs: dict[str, list[list[float]]],
     ) -> None:
-        """Populate project.reaction_outputs from logs accumulated during dynamic solve."""
-        for joint_id, joint_name, endpoint_type, _slider_id, _nx, _ny in reaction_info:
-            rows = reaction_logs.get(joint_id, [])
-            values = self._resample_sensor_to_time_axis(rows, time)
-            if not values:
-                continue
+        """Populate project.reaction_outputs from dynamic solve frames."""
+        for joint_id, joint_name, endpoint_type, _slider_id, nx, ny in reaction_info:
             body_id, marker_id = self._reaction_joint_marker_ep(assembled, joint_id)
             if body_id is None:
                 continue
             positions = self._build_reaction_positions(assembled, frames, body_id, marker_id)
+            if endpoint_type == "ground":
+                force_rows = self._dynamic_ground_reaction_from_frames(assembled, joint_id, time, frames)
+            else:
+                rows = reaction_logs.get(joint_id, [])
+                values = self._resample_sensor_to_time_axis(rows, time)
+                force_rows = [[v[0] if len(v) > 0 else 0.0, v[1] if len(v) > 1 else 0.0] for v in values]
+            if not force_rows:
+                continue
             data: list[list[float]] = []
-            for v in values:
-                fx = v[0] if len(v) > 0 else 0.0
-                fy = v[1] if len(v) > 1 else 0.0
-                f_mag = math.sqrt(fx * fx + fy * fy)
-                data.append([fx, fy, f_mag])
+            for frow in force_rows:
+                fx = frow[0]
+                fy = frow[1]
+                data.append([fx, fy, math.sqrt(fx * fx + fy * fy)])
             project.reaction_outputs[joint_id] = ReactionOutput(
                 joint_id=joint_id,
                 joint_name=joint_name,
@@ -1475,20 +1526,20 @@ class ExudynAdapter(SolverAdapter):
     ) -> None:
         """Populate project.reaction_outputs via GetObjectOutput after static/no-driver solve."""
         for joint_id, joint_name, endpoint_type, slider_id, normal_x, normal_y in reaction_info:
-            joint_obj_num = joint_objects.get(joint_id)
-            if joint_obj_num is None:
-                continue
-            try:
-                raw = mbs.GetObjectOutput(joint_obj_num, exu.OutputVariableType.Force)
-            except Exception:
-                continue
             if endpoint_type == "ground":
-                fx = float(raw[0]) if hasattr(raw, "__len__") and len(raw) > 0 else float(raw)
-                fy = float(raw[1]) if hasattr(raw, "__len__") and len(raw) > 1 else 0.0
+                # Newton's law: F_reaction = m*a - F_gravity (a=0 for static)
+                fx, fy = self._static_ground_reaction(assembled, joint_id)
             else:
-                lam = float(raw[0]) if hasattr(raw, "__len__") and len(raw) > 0 else float(raw)
-                fx = lam * normal_x
-                fy = lam * normal_y
+                joint_obj_num = joint_objects.get(joint_id)
+                if joint_obj_num is None:
+                    continue
+                try:
+                    raw = mbs.GetObjectOutput(joint_obj_num, exu.OutputVariableType.Force)
+                    lam = float(raw[0]) if hasattr(raw, "__len__") else float(raw)
+                    fx = lam * normal_x
+                    fy = lam * normal_y
+                except Exception:
+                    continue
             f_mag = math.sqrt(fx * fx + fy * fy)
             body_id, marker_id = self._reaction_joint_marker_ep(assembled, joint_id)
             if body_id is None:
