@@ -36,3 +36,42 @@
 	• Revisa la restricción de concentricidad entre un arco y una circunferencia.
 	• La restricción de simetría debe tener como entrada dos markers y una linea o linea infinita que indique el plano de simetría.
 	• El Botón Solve no tiene efecto.
+
+
+-------------------------------
+Vamos a organizar el toolbar de la siguiente forma. Te indico por bloques y posiciones:
+
+Sketch Draw:
+point | line | rectangle 
+Circle | axis | arc
+
+Sketch Constraints:
+Bloques Point y Curve, los vamos a unificar y llamar Constraints, con los botones en dos lineas dividiendo a la mitad el número entre ambas filas.
+
+Elements:
+Point | Bar | Body
+Marker | Slider
+
+Joints:
+Revolute | Rigid
+Ground | To slide
+
+Drives:
+RotDrv
+LinDrv
+
+Sensors:
+Point | Dist
+Ang H | Ang V | AngRel
+
+Loads:
+Load | Torque (por crear)
+Gravity
+
+Springs:
+RotSpring
+LinSpring
+
+Actuators:
+RotAct
+LinAct
