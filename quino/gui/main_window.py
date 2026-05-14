@@ -1955,6 +1955,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return "driver"
         if isinstance(entity, Sensor):
             return "sensor"
+        if isinstance(entity, Spring):
+            return "spring"
         if isinstance(entity, Parameter):
             return "parameter"
         if isinstance(entity, Sketch):
@@ -1980,6 +1982,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return "rotate-driver"
         if isinstance(entity, Sensor):
             return "sensor-point"
+        if isinstance(entity, Spring):
+            return "spring"
         if isinstance(entity, SketchPoint):
             return "sketch-point"
         if isinstance(entity, SketchLineSegment):

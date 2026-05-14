@@ -225,6 +225,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._screen_slider_handles: list[tuple[str, str, QtCore.QPointF]] = []
         self._screen_joints: list[tuple[str, QtCore.QPointF]] = []
         self._screen_drivers: list[tuple[str, QtCore.QPointF]] = []
+        self._screen_sensors: list[tuple[str, QtCore.QPointF]] = []
         self._screen_loads: list[tuple[str, QtCore.QPointF]] = []
         self._screen_springs: list[tuple[str, QtCore.QPointF]] = []
         self._mode = CanvasMode.SELECT
@@ -523,6 +524,35 @@ class MechanismCanvas(QtWidgets.QWidget):
                     self.update()
                 except Exception:
                     pass
+                return
+        assembled = self._assembled_mechanism(project)
+        canvas_markers = self._collect_markers(project, assembled)
+        canvas_sliders = self._collect_sliders(project)
+        marker_pos = {cm.entity_id: (cm.x, cm.y) for cm in canvas_markers}
+        for driver in project.model.drivers:
+            if driver.id == entity_id:
+                joint = self.app_service.get_joint(driver.target_joint_id)
+                if joint is not None:
+                    slider_map = {s.entity_id: s for s in canvas_sliders}
+                    pos = self._joint_world_position(joint, {cm.entity_id: cm for cm in canvas_markers}, slider_map)
+                    if pos is not None:
+                        self._view_center_x, self._view_center_y = pos
+                        self._sync_view_state()
+                        self.update()
+                return
+        for sensor in project.model.sensors:
+            if sensor.id == entity_id:
+                xs, ys = [], []
+                for mid in sensor.marker_ids:
+                    pos = marker_pos.get(mid)
+                    if pos is not None:
+                        xs.append(pos[0])
+                        ys.append(pos[1])
+                if xs:
+                    self._view_center_x = sum(xs) / len(xs)
+                    self._view_center_y = sum(ys) / len(ys)
+                    self._sync_view_state()
+                    self.update()
                 return
 
     def set_selection(self, entity_id: str | None) -> None:
@@ -879,6 +909,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._draw_bodies(painter, project, markers, transform)
                 self._draw_joints(painter, project, markers, sliders, transform)
                 self._draw_drivers(painter, project, markers, sliders, transform)
+                self._draw_sensors(painter, project, markers, transform)
                 self._draw_markers(painter, markers, transform)
                 self._draw_forces(painter, project, markers, transform)
                 self._draw_loads(painter, project, markers, transform)
@@ -899,6 +930,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._draw_bodies(painter, project, markers, transform)
                 self._draw_joints(painter, project, markers, sliders, transform)
                 self._draw_drivers(painter, project, markers, sliders, transform)
+                self._draw_sensors(painter, project, markers, transform)
                 self._draw_markers(painter, markers, transform)
                 self._draw_forces(painter, project, markers, transform)
                 self._draw_loads(painter, project, markers, transform)
@@ -945,6 +977,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         clicked_slider_handle = self._slider_handle_at(clicked)
         clicked_joint = self._joint_at(clicked)
         clicked_driver = self._driver_at(clicked)
+        clicked_sensor = self._sensor_at(clicked)
         clicked_load = self._load_at(clicked)
         clicked_spring = self._spring_at(clicked)
         clicked_constraint = self._sketch_constraint_at(clicked)
@@ -1006,6 +1039,9 @@ class MechanismCanvas(QtWidgets.QWidget):
                 return
             if clicked_driver is not None and self._interaction_mode in ("model", "sim", "all"):
                 self._select_canvas_entity(clicked_driver, additive=additive_selection)
+                return
+            if clicked_sensor is not None and self._interaction_mode in ("model", "sim", "all"):
+                self._select_canvas_entity(clicked_sensor, additive=additive_selection)
                 return
             if clicked_load is not None and self._interaction_mode in ("model", "sim", "all"):
                 self._select_canvas_entity(clicked_load, additive=additive_selection)
@@ -1521,6 +1557,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         slider = self._slider_at(event.pos())
         joint_id = self._joint_at(event.pos())
         driver_id = self._driver_at(event.pos())
+        sensor_id = self._sensor_at(event.pos())
         load_id = self._load_at(event.pos())
         spring_id = self._spring_at(event.pos())
         menu = QtWidgets.QMenu(self)
@@ -1556,6 +1593,9 @@ class MechanismCanvas(QtWidgets.QWidget):
             rename_action = menu.addAction("Rename Driver")
             edit_driver_law_action = menu.addAction("Edit Driver Law")
             delete_action = menu.addAction("Delete")
+        elif sensor_id is not None:
+            rename_action = menu.addAction("Rename Sensor")
+            delete_action = menu.addAction("Delete")
         elif load_id is not None:
             rename_action = menu.addAction("Rename Load")
             delete_action = menu.addAction("Delete")
@@ -1576,6 +1616,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 slider.entity_id if slider is not None
                 else joint_id if joint_id is not None
                 else driver_id if driver_id is not None
+                else sensor_id if sensor_id is not None
                 else load_id if load_id is not None
                 else spring_id
             )
@@ -1598,6 +1639,8 @@ class MechanismCanvas(QtWidgets.QWidget):
                 if joint_id is not None
                 else driver_id
                 if driver_id is not None
+                else sensor_id
+                if sensor_id is not None
                 else load_id
                 if load_id is not None
                 else spring_id
@@ -2827,6 +2870,58 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._screen_drivers.append((driver.id, point))
             painter.setPen(QtGui.QPen(QtGui.QColor("#5a4634")))
             painter.drawText(anchor, driver.name)
+
+    def _draw_sensors(
+        self,
+        painter: QtGui.QPainter,
+        project: Project,
+        markers: list[CanvasMarker],
+        transform,
+    ) -> None:
+        self._screen_sensors = []
+        marker_map = {marker.entity_id: marker for marker in markers}
+        base_color = QtGui.QColor("#1a7a4a")
+        sel_color = QtGui.QColor("#27ae60")
+        for sensor in project.model.sensors:
+            positions: list[QtCore.QPointF] = []
+            for mid in sensor.marker_ids:
+                m = marker_map.get(mid)
+                if m is not None:
+                    positions.append(self._to_screen(m.x, m.y, transform))
+            if not positions:
+                continue
+            if len(positions) == 1:
+                center = positions[0]
+            else:
+                cx = sum(p.x() for p in positions) / len(positions)
+                cy = sum(p.y() for p in positions) / len(positions)
+                center = QtCore.QPointF(cx, cy)
+            is_selected = self._selected_entity_id == sensor.id
+            color = sel_color if is_selected else base_color
+            if is_selected:
+                painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
+                painter.setBrush(QtGui.QBrush(QtGui.QColor(39, 174, 96, 40)))
+                painter.drawEllipse(center, 16.0, 16.0)
+            if len(positions) > 1:
+                painter.setPen(QtGui.QPen(color, 1.0, QtCore.Qt.PenStyle.DashLine))
+                painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+                for p in positions:
+                    painter.drawLine(center, p)
+            painter.setPen(QtGui.QPen(color, 1.5))
+            painter.setBrush(QtGui.QBrush(QtGui.QColor("#faf8f2")))
+            painter.drawEllipse(center, 6.0, 6.0)
+            painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
+            painter.setBrush(QtGui.QBrush(color))
+            painter.drawEllipse(center, 2.5, 2.5)
+            painter.setPen(QtGui.QPen(QtGui.QColor("#0d4d2e") if not is_selected else QtGui.QColor("#1a7a4a")))
+            painter.drawText(center + QtCore.QPointF(9.0, -6.0), sensor.name)
+            self._screen_sensors.append((sensor.id, center))
+
+    def _sensor_at(self, screen_pos: QtCore.QPointF) -> str | None:
+        for entity_id, center in reversed(self._screen_sensors):
+            if QtCore.QLineF(screen_pos, center).length() <= 12.0:
+                return entity_id
+        return None
 
     def _draw_markers(self, painter: QtGui.QPainter, markers: list[CanvasMarker], transform) -> None:
         self._screen_markers = []

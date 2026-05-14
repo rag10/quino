@@ -1131,8 +1131,13 @@ class ApplicationService:
             self._snapshot()
             marker.x = new_x
             marker.y = new_y
-            self._translate_direct_joint_counterparts(marker_id, linked_joints, delta_x, delta_y)
-            self._sync_special_com_marker(body)
+            moved_marker_ids = self._translate_direct_joint_counterparts(marker_id, linked_joints, delta_x, delta_y)
+            for moved_marker_id in moved_marker_ids:
+                try:
+                    moved_body = self._find_body_by_marker(moved_marker_id)
+                    self._sync_special_com_marker(moved_body)
+                except ValueError:
+                    pass
             return
         self._snapshot()
         marker.x = new_x
@@ -1312,6 +1317,10 @@ class ApplicationService:
         if any(sensor.id == entity_id for sensor in project.model.sensors):
             self._snapshot()
             project.model.sensors = [item for item in project.model.sensors if item.id != entity_id]
+            return
+        if any(spring.id == entity_id for spring in project.model.springs):
+            self._snapshot()
+            project.model.springs = [item for item in project.model.springs if item.id != entity_id]
             return
         body = self._find_body_by_marker(entity_id)
         if any(marker.id == entity_id and marker.type is MarkerType.COM for marker in body.markers):
@@ -2360,7 +2369,7 @@ class ApplicationService:
         joints: list[Joint],
         delta_x_mm: float,
         delta_y_mm: float,
-    ) -> None:
+    ) -> set[str]:
         # Direct-only: move immediate counterparts of marker_id, no BFS transitives
         moved_marker_ids: set[str] = {marker_id}
         moved_slider_ids: set[str] = set()
@@ -2395,6 +2404,7 @@ class ApplicationService:
                         moved_marker_ids=moved_marker_ids,
                     )
                     moved_slider_ids.add(counterpart_slider_id)
+        return moved_marker_ids
 
     def _move_slider_origin(self, slider_id: str, x_expression: str, y_expression: str) -> None:
         slider = self._find_entity(slider_id)
