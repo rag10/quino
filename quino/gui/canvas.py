@@ -274,7 +274,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._show_origin: bool = True
         self._show_axes: bool = True
         self._show_grid: bool = True
-        self._background_color: str = "#f5f1e8"
+        self._background_color: str = "#ffffff"
         self.setMinimumSize(420, 320)
         self.setMouseTracking(True)
         self.setAutoFillBackground(True)
@@ -2338,27 +2338,29 @@ class MechanismCanvas(QtWidgets.QWidget):
         scale, center_x, center_y = transform
         if scale <= 0.0:
             return
-        gutter_left = 44.0
-        gutter_bottom = 28.0
+        gutter_left = 34.0
+        gutter_bottom = 20.0
         width = float(self.width())
         height = float(self.height())
         world_left = center_x - width * 0.5 / scale
         world_right = center_x + width * 0.5 / scale
         world_top = center_y + height * 0.5 / scale
         world_bottom = center_y - height * 0.5 / scale
-        step_world = self._nice_ruler_step(72.0 / scale)
+        step_world = self._nice_ruler_step(60.0 / scale)
         if step_world <= 0.0:
             return
 
+        bg = QtGui.QColor(self._background_color)
+        bg.setAlpha(230)
         painter.save()
         painter.setPen(QtCore.Qt.PenStyle.NoPen)
-        painter.setBrush(QtGui.QColor(248, 245, 238, 228))
+        painter.setBrush(bg)
         painter.drawRect(QtCore.QRectF(0.0, 0.0, gutter_left, height - gutter_bottom))
         painter.drawRect(QtCore.QRectF(gutter_left, height - gutter_bottom, width - gutter_left, gutter_bottom))
         painter.drawRect(QtCore.QRectF(0.0, height - gutter_bottom, gutter_left, gutter_bottom))
 
         font = painter.font()
-        font.setPointSizeF(max(7.0, font.pointSizeF() - 1.0 if font.pointSizeF() > 0 else 8.0))
+        font.setPointSizeF(max(6.5, font.pointSizeF() - 1.5 if font.pointSizeF() > 0 else 7.0))
         painter.setFont(font)
         label_pen = QtGui.QPen(QtGui.QColor("#5f666d"), 1.0)
         tick_pen = QtGui.QPen(QtGui.QColor("#8f969d"), 1.0)
@@ -2370,9 +2372,9 @@ class MechanismCanvas(QtWidgets.QWidget):
         while x <= world_right + 1e-9:
             screen_x = self._to_screen(x, center_y, transform).x()
             if gutter_left <= screen_x <= width:
-                painter.drawLine(QtCore.QPointF(screen_x, height - gutter_bottom), QtCore.QPointF(screen_x, height - gutter_bottom + 8.0))
+                painter.drawLine(QtCore.QPointF(screen_x, height - gutter_bottom), QtCore.QPointF(screen_x, height - gutter_bottom + 5.0))
                 painter.setPen(label_pen)
-                painter.drawText(QtCore.QPointF(screen_x + 3.0, height - 8.0), self._format_ruler_value(x))
+                painter.drawText(QtCore.QPointF(screen_x + 2.0, height - 5.0), self._format_ruler_value(x))
                 painter.setPen(tick_pen)
             x += step_world
 
@@ -2382,9 +2384,9 @@ class MechanismCanvas(QtWidgets.QWidget):
         while y <= world_top + 1e-9:
             screen_y = self._to_screen(center_x, y, transform).y()
             if 0.0 <= screen_y <= height - gutter_bottom:
-                painter.drawLine(QtCore.QPointF(gutter_left - 8.0, screen_y), QtCore.QPointF(gutter_left, screen_y))
+                painter.drawLine(QtCore.QPointF(gutter_left - 5.0, screen_y), QtCore.QPointF(gutter_left, screen_y))
                 painter.setPen(label_pen)
-                painter.drawText(QtCore.QRectF(0.0, screen_y - 8.0, gutter_left - 10.0, 16.0), QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter, self._format_ruler_value(y))
+                painter.drawText(QtCore.QRectF(0.0, screen_y - 8.0, gutter_left - 7.0, 16.0), QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter, self._format_ruler_value(y))
                 painter.setPen(tick_pen)
             y += step_world
 
@@ -2393,7 +2395,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         painter.drawLine(QtCore.QPointF(gutter_left, 0.0), QtCore.QPointF(gutter_left, height))
         painter.drawLine(QtCore.QPointF(0.0, height - gutter_bottom), QtCore.QPointF(width, height - gutter_bottom))
         painter.setPen(label_pen)
-        painter.drawText(QtCore.QRectF(0.0, height - gutter_bottom, gutter_left - 4.0, gutter_bottom), QtCore.Qt.AlignmentFlag.AlignCenter, "mm")
+        painter.drawText(QtCore.QRectF(0.0, height - gutter_bottom, gutter_left - 2.0, gutter_bottom), QtCore.Qt.AlignmentFlag.AlignCenter, "mm")
         painter.restore()
 
     def _nice_ruler_step(self, minimum_world_step: float) -> float:
@@ -2585,7 +2587,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 fill = QtGui.QColor("#c75b12")
             elif self._hovered_sketch_point_id == point.entity_id:
                 fill = QtGui.QColor(color_pt_hover)
-            painter.setPen(QtGui.QPen(QtGui.QColor("#f5f1e8"), 1.0))
+            painter.setPen(QtGui.QPen(QtGui.QColor("#f0f4f8"), 1.0))
             painter.setBrush(QtGui.QBrush(fill))
             painter.drawEllipse(screen_point, radius, radius)
             if self._should_draw_sketch_label(point.entity_id):
@@ -2786,9 +2788,21 @@ class MechanismCanvas(QtWidgets.QWidget):
                 painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
             else:
                 painter.drawPolyline(polygon)
-            name_pos = self._to_screen(ordered[0].x, ordered[0].y, transform)
+            # Calculate centroid of polygon for label placement
+            if len(polygon) > 0:
+                centroid = QtCore.QPointF(0.0, 0.0)
+                for point in polygon:
+                    centroid += point
+                centroid /= len(polygon)
+                name_pos = centroid
+            else:
+                name_pos = self._to_screen(ordered[0].x, ordered[0].y, transform)
             painter.setPen(QtGui.QPen(QtGui.QColor("#5b5247")))
-            painter.drawText(name_pos + QtCore.QPointF(8.0, -8.0), body.name)
+            # Draw text centered at the name_pos
+            fm = painter.fontMetrics()
+            text_width = fm.horizontalAdvance(body.name)
+            text_height = fm.height()
+            painter.drawText(name_pos.x() - text_width / 2, name_pos.y() + text_height / 4, body.name)
 
     def _draw_joints(
         self,

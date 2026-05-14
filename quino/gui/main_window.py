@@ -58,6 +58,193 @@ _PROPERTY_DIMENSION_HINTS: dict[str, str] = {
 }
 
 
+class InspectorPropertyWidget(QtWidgets.QWidget):
+    """Custom form widget for displaying entity properties with appropriate input controls."""
+
+    property_changed = QtCore.Signal(str, str, str)  # (property_path, new_value, kind)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.layout = QtWidgets.QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(8)
+        self._row_widgets: dict[str, QtWidgets.QWidget] = {}
+
+    def clear_properties(self):
+        """Remove all property rows."""
+        while self.layout.count() > 0:
+            child = self.layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        self._row_widgets.clear()
+
+    def add_property(self, label: str, path: str, value: str, kind: str, evaluated: str, enabled: bool = True):
+        """Add a single property row to the form."""
+        row_widget = QtWidgets.QWidget()
+        row_layout = QtWidgets.QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(8)
+
+        # Label
+        label_widget = QtWidgets.QLabel(label)
+        label_widget.setMinimumWidth(100)
+        label_widget.setMaximumWidth(150)
+        row_layout.addWidget(label_widget)
+
+        # Input widget (determined by kind)
+        input_widget = self._create_input_widget(path, value, kind, evaluated, enabled)
+        row_layout.addWidget(input_widget, stretch=1)
+
+        # Store for later reference
+        self._row_widgets[path] = row_widget
+        self.layout.addWidget(row_widget)
+
+    def _create_input_widget(self, path: str, value: str, kind: str, evaluated: str, enabled: bool) -> QtWidgets.QWidget:
+        """Factory method to create the appropriate input widget based on kind."""
+        container = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        if kind == "section_header":
+            section_label = QtWidgets.QLabel(value)
+            section_label.setStyleSheet("color: #888888; font-style: italic;")
+            layout.addWidget(section_label)
+            layout.addStretch()
+            return container
+
+        elif kind == "readonly":
+            value_label = QtWidgets.QLabel(evaluated)
+            layout.addWidget(value_label)
+            layout.addStretch()
+            return container
+
+        elif kind == "boolean":
+            combo = QtWidgets.QComboBox()
+            combo.addItems(["false", "true"])
+            combo.setCurrentText(value)
+            combo.setEnabled(enabled)
+            combo.currentTextChanged.connect(lambda text, p=path, k=kind: self.property_changed.emit(p, text, k))
+            layout.addWidget(combo)
+            layout.addStretch()
+            return container
+
+        elif kind == "color":
+            preview = QtWidgets.QLabel()
+            preview.setFixedSize(20, 20)
+            preview.setStyleSheet(f"background-color: {value}; border: 1px solid #888;")
+            layout.addWidget(preview)
+
+            def pick_color():
+                color = QtWidgets.QColorDialog.getColor(
+                    QtGui.QColor(value), self, "Choose Color"
+                )
+                if color.isValid():
+                    new_color = color.name()
+                    preview.setStyleSheet(f"background-color: {new_color}; border: 1px solid #888;")
+                    self.property_changed.emit(path, new_color, kind)
+
+            pick_btn = QtWidgets.QPushButton("…")
+            pick_btn.setFixedWidth(28)
+            pick_btn.setFixedHeight(20)
+            pick_btn.setEnabled(enabled)
+            pick_btn.clicked.connect(pick_color)
+            layout.addWidget(pick_btn)
+            layout.addStretch()
+            return container
+
+        elif kind in {"expression", "expression_or_null"}:
+            text_input = QtWidgets.QLineEdit(value)
+            text_input.setEnabled(enabled)
+            text_input.editingFinished.connect(lambda p=path, w=text_input, k=kind: self.property_changed.emit(p, w.text(), k))
+            layout.addWidget(text_input)
+
+            eval_label = QtWidgets.QLabel(evaluated)
+            eval_label.setStyleSheet("color: #666; font-size: 9pt;")
+            eval_label.setMaximumWidth(150)
+            layout.addWidget(eval_label)
+            return container
+
+        elif kind == "key":
+            key_label = QtWidgets.QLabel(value)
+            mono_font = QtGui.QFont("Courier New", key_label.font().pointSize() - 1)
+            key_label.setFont(mono_font)
+            key_label.setStyleSheet("color: #666; background-color: #f0f0f0; padding: 2px;")
+            layout.addWidget(key_label)
+            layout.addStretch()
+            return container
+
+        else:
+            fallback_label = QtWidgets.QLabel(value)
+            layout.addWidget(fallback_label)
+            layout.addStretch()
+            return container
+
+
+class TreeBranchDelegate(QtWidgets.QStyledItemDelegate):
+    """Custom delegate that draws tree branch lines and visibility checkbox."""
+
+    visibility_toggled = QtCore.Signal(str)  # entity_id
+
+    def paint(self, painter: QtGui.QPainter, option: QtWidgets.QStyleOptionViewItem, index: QtCore.QModelIndex) -> None:
+        super().paint(painter, option, index)
+
+        # Draw branch lines
+        if not index.parent().isValid():
+            return  # Skip root items
+
+        tree = self.parent()
+        if not isinstance(tree, QtWidgets.QTreeWidget):
+            return
+
+        item = tree.itemFromIndex(index)
+        if item is None:
+            return
+
+        # Calculate positions
+        painter.save()
+        painter.setPen(QtGui.QPen(QtGui.QColor("#d0d0d0"), 1))
+
+        # Vertical line for branch
+        indent = tree.indentation()
+        parent_item = item.parent()
+        if parent_item is not None:
+            depth = 0
+            temp = parent_item
+            while temp.parent() is not None:
+                depth += 1
+                temp = temp.parent()
+
+            # Draw vertical line
+            x = option.rect.left() + indent * depth - indent // 2
+            painter.drawLine(int(x), int(option.rect.top()), int(x), int(option.rect.bottom()))
+
+            # Draw horizontal line to item
+            y = option.rect.center().y()
+            painter.drawLine(int(x), int(y), int(option.rect.left()), int(y))
+
+        painter.restore()
+
+    def createEditor(self, parent: QtWidgets.QWidget, option: QtWidgets.QStyleOptionViewItem, index: QtCore.QModelIndex) -> QtWidgets.QWidget | None:
+        # Don't create inline editors
+        return None
+
+    def editorEvent(self, event: QtCore.QEvent, model: QtCore.QAbstractItemModel, option: QtWidgets.QStyleOptionViewItem, index: QtCore.QModelIndex) -> bool:
+        # Handle right-click context menu for visibility toggle
+        if event.type() == QtCore.QEvent.Type.MouseButtonPress:
+            mouse_event = event
+            if mouse_event.button() == QtCore.Qt.MouseButton.RightButton:
+                tree = self.parent()
+                if isinstance(tree, QtWidgets.QTreeWidget):
+                    item = tree.itemFromIndex(index)
+                    if item is not None and item.parent() is not None:  # Skip root items
+                        entity_id = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+                        if entity_id:
+                            self.visibility_toggled.emit(entity_id)
+                            return True
+        return super().editorEvent(event, model, option, index)
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, app_service: ApplicationService | None = None) -> None:
         super().__init__()
@@ -116,10 +303,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tree = QtWidgets.QTreeWidget()
         self.tree.setHeaderLabels(["Model", "Type"])
         self.tree.setIconSize(QtCore.QSize(18, 18))
-        self.tree.setIndentation(14)
+        self.tree.setIndentation(18)
         self.tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Stretch)
         self.tree.header().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
-        self.tree.setAlternatingRowColors(True)
+        self.tree.setAlternatingRowColors(False)
+        self.tree.setStyleSheet(
+            "QTreeWidget { background-color: #eef3f8; } "
+            "QTreeWidget::item { background-color: #eef3f8; color: #3d3d3d; padding: 2px; } "
+            "QTreeWidget::item:selected { background-color: #d4e5f7; color: #3d3d3d; outline: none; border: none; }"
+        )
+        self.tree.setUniformRowHeights(True)
+        self._tree_delegate = TreeBranchDelegate(self.tree)
+        self.tree.setItemDelegateForColumn(0, self._tree_delegate)
+        self._tree_delegate.visibility_toggled.connect(self._on_tree_visibility_toggled)
         self.tree.currentItemChanged.connect(self._on_tree_selection_changed)
         self.tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
         splitter.addWidget(self.tree)
@@ -254,14 +450,15 @@ class MainWindow(QtWidgets.QMainWindow):
         inspector_splitter.setChildrenCollapsible(False)
         inspector_vbox.addWidget(inspector_splitter, stretch=1)
 
-        self.inspector = QtWidgets.QTableWidget(0, 3)
-        self.inspector.setHorizontalHeaderLabels(["Property", "Value", "Evaluated"])
-        self.inspector.itemChanged.connect(self._on_inspector_item_changed)
-        header = self.inspector.horizontalHeader()
-        header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
-        inspector_splitter.addWidget(self.inspector)
+        # Inspector property form (replaces old table)
+        self.inspector = InspectorPropertyWidget()
+        self.inspector.property_changed.connect(self._on_inspector_property_changed)
+        inspector_scroll = QtWidgets.QScrollArea()
+        inspector_scroll.setWidget(self.inspector)
+        inspector_scroll.setWidgetResizable(True)
+        inspector_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        inspector_scroll.setStyleSheet("QScrollArea { border: none; }")
+        inspector_splitter.addWidget(inspector_scroll)
 
         # Relations area: rebuilt on each selection
         self.relations_widget = QtWidgets.QScrollArea()
@@ -337,7 +534,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_save.triggered.connect(self._save_project)
         self.action_save.setToolTip("Save project")
 
-        self.action_save_as = QtGui.QAction(get_icon("content-save", color_base), "Save As", self)
+        self.action_save_as = QtGui.QAction(get_icon("content-save-as", color_base), "Save As", self)
         self.action_save_as.triggered.connect(self._save_project_as)
         self.action_save_as.setToolTip("Save project to a new file")
 
@@ -386,6 +583,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.action_add_load = self._tool_action("Load", CanvasMode.CREATE_LOAD, get_icon("load-gravity", color_dynamic), "Add a point load to a marker (select a marker on canvas)")
 
+        self.action_add_torque = QtGui.QAction(get_icon("torque", color_dynamic), "Torque", self)
+        self.action_add_torque.setEnabled(False)
+        self.action_add_torque.setToolTip("Add a torque load (coming soon)")
+
         self.action_add_linear_spring = self._tool_action("Spring", CanvasMode.CREATE_LINEAR_SPRING, get_icon("spring", color_dynamic), "Add a linear spring between two markers (click 2 markers; second click on empty canvas attaches to ground)")
         self.action_add_rotational_spring = self._tool_action("RotSpring", CanvasMode.CREATE_ROTATIONAL_SPRING, get_icon("rot-spring", color_dynamic), "Add a rotational spring at a revolute joint (click the joint)")
         self.action_add_linear_actuator = self._tool_action("Actuator", CanvasMode.CREATE_LINEAR_ACTUATOR, get_icon("actuator", color_dynamic), "Add a linear force actuator between two markers (click 2 markers; second click on empty canvas attaches to ground)")
@@ -410,11 +611,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_show_trajectories.triggered.connect(self._on_toggle_trajectories)
         self.action_show_trajectories.setToolTip("Show/hide sensor position trajectories on canvas")
 
-        self.action_toggle_origin = QtGui.QAction(get_icon("origin", color_base), "Origin", self)
+        self.action_toggle_origin = QtGui.QAction(get_icon("origin", color_base), "Axis", self)
         self.action_toggle_origin.setCheckable(True)
         self.action_toggle_origin.setChecked(True)
         self.action_toggle_origin.triggered.connect(self._on_toggle_origin)
-        self.action_toggle_origin.setToolTip("Show/hide origin and axes")
+        self.action_toggle_origin.setToolTip("Show/hide coordinate axes (X/Y) and origin")
 
         self.action_toggle_grid = QtGui.QAction(get_icon("grid", color_base), "Grid", self)
         self.action_toggle_grid.setCheckable(True)
@@ -422,7 +623,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_toggle_grid.triggered.connect(self._on_toggle_grid)
         self.action_toggle_grid.setToolTip("Show/hide grid")
 
-        self.action_add_gravity = QtGui.QAction(get_icon("load-gravity", color_base), "Gravity", self)
+        self.action_add_gravity = QtGui.QAction(get_icon("gravity", color_dynamic), "Gravity", self)
         self.action_add_gravity.setToolTip("Add gravity — or select it if already present")
         self.action_add_gravity.triggered.connect(self._on_add_gravity)
 
@@ -674,7 +875,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._add_toolbar_block(toolbar, [
             [self.action_new, self.action_open, self.action_save],
-            [self.action_undo, self.action_redo, self.action_refresh],
+            [self.action_undo, self.action_redo, self.action_save_as],
         ], "File / Edit")
         self._add_toolbar_sep(toolbar)
 
@@ -691,20 +892,15 @@ class MainWindow(QtWidgets.QMainWindow):
         t = self._sketch_toolbar
 
         self._add_toolbar_block(t, [
-            [self.action_sketch_point_tool, self.action_sketch_line_tool, self.action_sketch_rectangle_tool, self.action_sketch_circle_tool, self.action_sketch_arc_tool],
-            [self.action_sketch_infinite_line_tool, None, None, None, None],
+            [self.action_sketch_point_tool, self.action_sketch_line_tool, self.action_sketch_rectangle_tool],
+            [self.action_sketch_circle_tool, self.action_sketch_infinite_line_tool, self.action_sketch_arc_tool],
         ], "Draw")
         self._add_toolbar_sep(t)
 
         self._add_toolbar_block(t, [
-            [self.action_sketch_fix_tool, self.action_sketch_horizontal_tool, self.action_sketch_vertical_tool, self.action_sketch_coincident_tool, self.action_sketch_distance_tool, self.action_sketch_horizontal_distance_tool],
-            [self.action_sketch_vertical_distance_tool, self.action_sketch_angle_tool, self.action_sketch_midpoint_tool, self.action_sketch_collinear_tool, self.action_sketch_symmetric_tool, self.action_sketch_on_circle_tool],
-        ], "Point")
-        self._add_toolbar_sep(t)
-
-        self._add_toolbar_block(t, [
-            [self.action_sketch_parallel_tool, self.action_sketch_perpendicular_tool, self.action_sketch_equal_length_tool, self.action_sketch_tangent_tool, self.action_sketch_concentric_tool],
-        ], "Curve")
+            [self.action_sketch_fix_tool, self.action_sketch_horizontal_tool, self.action_sketch_vertical_tool, self.action_sketch_coincident_tool, self.action_sketch_distance_tool, self.action_sketch_horizontal_distance_tool, self.action_sketch_vertical_distance_tool, self.action_sketch_angle_tool, self.action_sketch_midpoint_tool],
+            [self.action_sketch_collinear_tool, self.action_sketch_symmetric_tool, self.action_sketch_on_circle_tool, self.action_sketch_parallel_tool, self.action_sketch_perpendicular_tool, self.action_sketch_equal_length_tool, self.action_sketch_tangent_tool, self.action_sketch_concentric_tool],
+        ], "Constraints")
         self._add_toolbar_sep(t)
 
         self._add_toolbar_block(t, [
@@ -721,34 +917,45 @@ class MainWindow(QtWidgets.QMainWindow):
         t = self._model_toolbar
 
         self._add_toolbar_block(t, [
-            [self.action_bar_tool, self.action_point_mass_tool, self.action_body_tool, self.action_add_marker_tool, self.action_slider_tool],
-        ], "Parts")
+            [self.action_point_mass_tool, self.action_bar_tool, self.action_body_tool],
+            [self.action_add_marker_tool, self.action_slider_tool],
+        ], "Elements")
         self._add_toolbar_sep(t)
 
         self._add_toolbar_block(t, [
-            [self.action_joint_tool, self.action_rigid_joint_tool, self.action_ground_tool, self.action_slider_connect_tool],
+            [self.action_joint_tool, self.action_rigid_joint_tool],
+            [self.action_ground_tool, self.action_slider_connect_tool],
         ], "Joints")
         self._add_toolbar_sep(t)
 
         self._add_toolbar_block(t, [
-            [self.action_add_rotation_driver, self.action_add_translation_driver],
+            [self.action_add_rotation_driver],
+            [self.action_add_translation_driver],
         ], "Drives")
         self._add_toolbar_sep(t)
 
         self._add_toolbar_block(t, [
-            [self.action_point_sensor, self.action_distance_sensor, self.action_angle_h_sensor, self.action_angle_v_sensor, self.action_angle_vector_sensor],
+            [self.action_point_sensor, self.action_distance_sensor],
+            [self.action_angle_h_sensor, self.action_angle_v_sensor, self.action_angle_vector_sensor],
         ], "Sensors")
         self._add_toolbar_sep(t)
 
         self._add_toolbar_block(t, [
-            [self.action_add_load, self.action_add_gravity],
+            [self.action_add_load, self.action_add_torque],
+            [self.action_add_gravity],
         ], "Loads")
         self._add_toolbar_sep(t)
 
         self._add_toolbar_block(t, [
-            [self.action_add_linear_spring, self.action_add_rotational_spring,
-             self.action_add_linear_actuator, self.action_add_rotational_actuator],
+            [self.action_add_rotational_spring],
+            [self.action_add_linear_spring],
         ], "Springs")
+        self._add_toolbar_sep(t)
+
+        self._add_toolbar_block(t, [
+            [self.action_add_rotational_actuator],
+            [self.action_add_linear_actuator],
+        ], "Actuators")
 
         self._model_toolbar.setVisible(True)
 
@@ -860,7 +1067,7 @@ class MainWindow(QtWidgets.QMainWindow):
         }
         for entry in self._example_registry.list_examples():
             icon_name = icon_map.get(entry.name, "example")
-            action = QtGui.QAction(get_icon(icon_name, "#7f5539"), f"Load {entry.name}", self)
+            action = QtGui.QAction(get_icon(icon_name, "#4a7ba7"), f"Load {entry.name}", self)
             action.setToolTip(entry.description)
             action.triggered.connect(lambda _checked=False, e=entry: self._load_example(e))
             menu.addAction(action)
@@ -1244,7 +1451,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.set_show_trajectories(self.action_show_trajectories.isChecked())
 
     def _on_toggle_origin(self) -> None:
-        self.canvas.set_show_origin(self.action_toggle_origin.isChecked())
+        show = self.action_toggle_origin.isChecked()
+        self.canvas.set_show_origin(show)
+        self.canvas.set_show_axes(show)
 
     def _on_toggle_grid(self) -> None:
         self.canvas.set_show_grid(self.action_toggle_grid.isChecked())
@@ -1272,8 +1481,8 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog.setMinimumWidth(320)
         layout = QtWidgets.QFormLayout(dialog)
 
-        origin_checkbox = QtWidgets.QCheckBox("Show origin & axes")
-        origin_checkbox.setChecked(self.canvas.show_origin())
+        origin_checkbox = QtWidgets.QCheckBox("Show coordinate axes & origin")
+        origin_checkbox.setChecked(self.canvas.show_axes())
         layout.addRow(origin_checkbox)
 
         grid_checkbox = QtWidgets.QCheckBox("Show grid")
@@ -1314,11 +1523,12 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addRow(buttons)
 
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
-            self.canvas.set_show_origin(origin_checkbox.isChecked())
-            self.canvas.set_show_axes(origin_checkbox.isChecked())
+            show_axes = origin_checkbox.isChecked()
+            self.canvas.set_show_origin(show_axes)
+            self.canvas.set_show_axes(show_axes)
             self.canvas.set_show_grid(grid_checkbox.isChecked())
             self.canvas.set_background_color(current_color)
-            self.action_toggle_origin.setChecked(self.canvas.show_origin())
+            self.action_toggle_origin.setChecked(show_axes)
             self.action_toggle_grid.setChecked(self.canvas.show_grid())
 
     def _update_trajectories(self) -> None:
@@ -1545,7 +1755,8 @@ class MainWindow(QtWidgets.QMainWindow):
         joints_root = _root("Joints", len(project.model.joints))
         drivers_root = _root("Drivers", len(project.model.drivers))
         sensors_root = _root("Sensors", len(project.model.sensors))
-        loads_root = _root("Loads", len(project.model.loads) + 1)
+        loads_count = len(project.model.loads) + (1 if project.model.gravity is not None else 0)
+        loads_root = _root("Loads", loads_count)
         springs_root = _root("Springs", len(project.model.springs))
         sketch_count = (len(project.sketch.entities) + len(project.sketch.constraints)) if project.sketch is not None else 0
         sketch_root = _root("Sketch", sketch_count)
@@ -1872,76 +2083,54 @@ class MainWindow(QtWidgets.QMainWindow):
                 f'{icon_html}<b>{name}</b> &nbsp;<span style="color:#888;font-weight:normal">{kind_label}</span>'
             )
 
-            # --- property rows ---
+            # --- property rows (using new widget) ---
             prop_rows = self._inspector_rows(entity)
-            self.inspector.setRowCount(len(prop_rows))
-            for row_index, (label, path, value, kind, evaluated, _) in enumerate(prop_rows):
-                label_item = QtWidgets.QTableWidgetItem(label)
-                label_item.setFlags(label_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
-                hint = _PROPERTY_DIMENSION_HINTS.get(path)
-                if hint:
-                    label_item.setToolTip(hint)
-                self.inspector.setItem(row_index, 0, label_item)
+            for label, path, value, kind, evaluated, _ in prop_rows:
+                enabled = self._editing_allowed() and kind not in {"readonly", "key", "section_header"}
+                self.inspector.add_property(label, path, value, kind, evaluated, enabled)
 
-                evaluated_item = QtWidgets.QTableWidgetItem(evaluated)
-                evaluated_item.setFlags(evaluated_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
-                if evaluated.startswith("ERROR:"):
-                    evaluated_item.setForeground(QtGui.QColor("#c0392b"))
+            # --- marker reordering for Body/Bar ---
+            if isinstance(entity, Body) and entity.edge_order:
+                structural_markers = [m for m in entity.markers if m.type is MarkerType.STRUCTURAL]
+                if len(structural_markers) >= 2:
+                    # Add marker reordering section
+                    reorder_label = QtWidgets.QLabel("Markers (drag to reorder)")
+                    reorder_font = reorder_label.font()
+                    reorder_font.setPointSize(reorder_font.pointSize() - 1)
+                    reorder_label.setFont(reorder_font)
+                    reorder_label.setStyleSheet("color: #888; margin-top: 6px;")
+                    reorder_label.setContentsMargins(0, 4, 0, 0)
+                    self.relations_vbox.insertWidget(self.relations_vbox.count() - 1, reorder_label)
 
-                if kind == "section_header":
-                    header_color = QtGui.QColor("#888888")
-                    for col in range(3):
-                        h_item = QtWidgets.QTableWidgetItem(label if col == 0 else "")
-                        h_item.setFlags(h_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
-                        h_item.setForeground(header_color)
-                        font = h_item.font()
-                        font.setItalic(True)
-                        h_item.setFont(font)
-                        self.inspector.setItem(row_index, col, h_item)
-                elif kind == "boolean":
-                    value_item = QtWidgets.QTableWidgetItem(value)
-                    value_item.setFlags(value_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
-                    value_item.setData(QtCore.Qt.ItemDataRole.UserRole, (path, kind))
-                    self.inspector.setItem(row_index, 1, value_item)
-                    combo = QtWidgets.QComboBox(self.inspector)
-                    combo.addItems(["false", "true"])
-                    combo.setCurrentText(value)
-                    combo.setEnabled(self._editing_allowed())
-                    combo.currentTextChanged.connect(
-                        lambda text, current_path=path: self._on_inspector_boolean_changed(current_path, text)
-                    )
-                    self.inspector.setCellWidget(row_index, 1, combo)
-                elif kind == "color":
-                    color_widget = QtWidgets.QWidget(self.inspector)
-                    color_layout = QtWidgets.QHBoxLayout(color_widget)
-                    color_layout.setContentsMargins(2, 2, 2, 2)
-                    color_layout.setSpacing(4)
-                    preview = QtWidgets.QLabel()
-                    preview.setFixedSize(20, 20)
-                    preview.setStyleSheet(f"background-color: {value}; border: 1px solid #888;")
-                    color_layout.addWidget(preview)
-                    pick_btn = QtWidgets.QPushButton("…")
-                    pick_btn.setFixedWidth(24)
-                    pick_btn.setEnabled(self._editing_allowed())
-                    pick_btn.clicked.connect(
-                        lambda _checked=False, current_path=path, current_value=value: self._pick_inspector_color(current_path, current_value)
-                    )
-                    color_layout.addWidget(pick_btn)
-                    color_layout.addStretch()
-                    self.inspector.setItem(row_index, 1, QtWidgets.QTableWidgetItem(value))
-                    self.inspector.setCellWidget(row_index, 1, color_widget)
-                else:
-                    value_item = QtWidgets.QTableWidgetItem(value)
-                    value_item.setData(QtCore.Qt.ItemDataRole.UserRole, (path, kind))
-                    if not self._editing_allowed() or kind in {"readonly", "key"}:
-                        value_item.setFlags(value_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
-                    if kind == "key":
-                        mono_font = QtGui.QFont("Courier New", label_item.font().pointSize())
-                        label_item.setFont(mono_font)
-                        label_item.setToolTip("Use this key in load expressions")
-                    self.inspector.setItem(row_index, 1, value_item)
-                if kind != "section_header":
-                    self.inspector.setItem(row_index, 2, evaluated_item)
+                    for idx, marker_id in enumerate(entity.edge_order):
+                        marker = next((m for m in entity.markers if m.id == marker_id), None)
+                        if marker and marker.type is MarkerType.STRUCTURAL:
+                            row_w = QtWidgets.QWidget()
+                            row_h = QtWidgets.QHBoxLayout(row_w)
+                            row_h.setContentsMargins(0, 1, 0, 1)
+                            row_h.setSpacing(5)
+
+                            # Marker name
+                            marker_lbl = QtWidgets.QLabel(marker.name)
+                            row_h.addWidget(marker_lbl, stretch=1)
+
+                            # Up button
+                            up_btn = QtWidgets.QPushButton("↑")
+                            up_btn.setFixedWidth(28)
+                            up_btn.setFixedHeight(20)
+                            up_btn.setEnabled(self._editing_allowed() and idx > 0)
+                            up_btn.clicked.connect(lambda checked=False, mid=marker_id: self._on_marker_reorder(mid, -1))
+                            row_h.addWidget(up_btn)
+
+                            # Down button
+                            down_btn = QtWidgets.QPushButton("↓")
+                            down_btn.setFixedWidth(28)
+                            down_btn.setFixedHeight(20)
+                            down_btn.setEnabled(self._editing_allowed() and idx < len(entity.edge_order) - 1)
+                            down_btn.clicked.connect(lambda checked=False, mid=marker_id: self._on_marker_reorder(mid, 1))
+                            row_h.addWidget(down_btn)
+
+                            self.relations_vbox.insertWidget(self.relations_vbox.count() - 1, row_w)
 
             # --- relations below the table ---
             relations = self._inspector_relations(entity)
@@ -2061,6 +2250,42 @@ class MainWindow(QtWidgets.QMainWindow):
         if entity_id:
             self._select_entity_by_id(entity_id)
             self.canvas.center_on_entity(entity_id)
+
+    def _on_tree_visibility_toggled(self, entity_id: str) -> None:
+        """Handle visibility toggle via right-click on tree item."""
+        project = self.app_service.project
+        if project is None:
+            return
+        entity = self.app_service.get_entity(entity_id)
+        if entity is None:
+            return
+        # Toggle visibility
+        if hasattr(entity, "visible"):
+            from quino.domain.inputs import PropertyValueInput
+            try:
+                self.app_service.update_property(entity_id, "visible", PropertyValueInput("boolean", not entity.visible))
+                self._mark_project_dirty()
+                self.refresh_all()
+            except Exception as e:
+                self._append_message(f"Cannot toggle visibility: {e}")
+
+    def _on_marker_reorder(self, marker_id: str, direction: int) -> None:
+        """Reorder markers in a body by swapping positions in edge_order."""
+        if not self._selected_entity_id:
+            return
+        body = self.app_service.get_entity(self._selected_entity_id)
+        if not isinstance(body, Body) or not body.edge_order:
+            return
+        try:
+            idx = body.edge_order.index(marker_id)
+            new_idx = idx + direction
+            if 0 <= new_idx < len(body.edge_order):
+                # Swap the markers in edge_order
+                body.edge_order[idx], body.edge_order[new_idx] = body.edge_order[new_idx], body.edge_order[idx]
+                self._mark_project_dirty()
+                self.refresh_all()
+        except (ValueError, IndexError):
+            pass
 
     def _inspector_rows(self, entity: object) -> list[tuple[str, str, str, str, str, str | None]]:
         # Returns prop rows only: (label, path, value, kind, evaluated, None)
@@ -2377,17 +2602,14 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as exc:
             return f"ERROR: {exc}"
 
-    def _on_inspector_item_changed(self, item: QtWidgets.QTableWidgetItem) -> None:
-        if self._suspend_property_updates or item.column() != 1 or not self._selected_entity_id or not self._editing_allowed():
+    def _on_inspector_property_changed(self, path: str, value: str, kind: str) -> None:
+        """Handle property changes from the inspector widget."""
+        if self._suspend_property_updates or not self._selected_entity_id or not self._editing_allowed():
             return
-        data = item.data(QtCore.Qt.ItemDataRole.UserRole)
-        if not data:
-            return
-        path, kind = data
-        if not path or kind == "readonly":
+        if kind == "readonly" or kind == "section_header" or kind == "key":
             return
         try:
-            self._apply_property_update(self._selected_entity_id, path, item.text(), kind)
+            self._apply_property_update(self._selected_entity_id, path, value, kind)
             self._mark_project_dirty()
         except Exception as exc:  # pragma: no cover - UI feedback
             self._append_message(f"Property update failed: {exc}")
@@ -2412,28 +2634,6 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as exc:  # pragma: no cover - UI feedback
             self._append_message(f"Parameter update failed: {exc}")
         self.refresh_all()
-
-    def _on_inspector_boolean_changed(self, path: str, text: str) -> None:
-        if self._suspend_property_updates or not self._selected_entity_id or not self._editing_allowed():
-            return
-        try:
-            self._apply_property_update(self._selected_entity_id, path, text, "boolean")
-            self._mark_project_dirty()
-        except Exception as exc:  # pragma: no cover - UI feedback
-            self._append_message(f"Property update failed: {exc}")
-        self.refresh_all()
-
-    def _pick_inspector_color(self, path: str, current_value: str) -> None:
-        if self._suspend_property_updates or not self._selected_entity_id or not self._editing_allowed():
-            return
-        color = QtWidgets.QColorDialog.getColor(QtGui.QColor(current_value), self, "Select Color")
-        if color.isValid():
-            try:
-                self._apply_property_update(self._selected_entity_id, path, color.name(), "expression")
-                self._mark_project_dirty()
-            except Exception as exc:  # pragma: no cover - UI feedback
-                self._append_message(f"Property update failed: {exc}")
-            self.refresh_all()
 
     def _apply_property_update(self, entity_id: str, path: str, raw_value: str, kind: str) -> None:
         entity = self.app_service.get_entity(entity_id)
