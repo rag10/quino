@@ -38,17 +38,43 @@ def test_initial_pose_roundtrip_and_backwards_compat(tmp_path) -> None:
 
     loaded = ApplicationService()
     loaded.load_project(str(path))
-    assert loaded.project.initial_pose is not None
-    assert body_id in loaded.project.initial_pose.body_poses
+    sim_pose = loaded.get_simulation_initial_pose()
+    assert sim_pose is not None
+    assert body_id in sim_pose.body_poses
 
     data = json.loads(path.read_text(encoding="utf-8"))
+    data.pop("poses", None)
+    data.pop("simulation_initial_pose_id", None)
     data.pop("initial_pose", None)
     legacy_path = tmp_path / "legacy.quino.json"
     legacy_path.write_text(json.dumps(data), encoding="utf-8")
 
     legacy = ApplicationService()
     legacy.load_project(str(legacy_path))
-    assert legacy.project.initial_pose is None
+    assert legacy.project.poses == []
+    assert legacy.project.simulation_initial_pose_id is None
+
+
+def test_load_legacy_initial_pose_migrates_to_poses_list(tmp_path) -> None:
+    """An old project with `initial_pose` should migrate to poses[] + simulation_initial_pose_id."""
+    app = make_pose_app()
+    body_id = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    app.reset_current_pose_to_reference()
+    app.set_initial_pose_from_current()
+    path = tmp_path / "with_poses.quino.json"
+    app.save_project(str(path))
+    data = json.loads(path.read_text(encoding="utf-8"))
+    poses = data.pop("poses")
+    data.pop("simulation_initial_pose_id", None)
+    data["initial_pose"] = poses[0]
+    legacy_path = tmp_path / "legacy_initial_pose.quino.json"
+    legacy_path.write_text(json.dumps(data), encoding="utf-8")
+
+    legacy = ApplicationService()
+    legacy.load_project(str(legacy_path))
+    assert len(legacy.project.poses) == 1
+    assert legacy.project.simulation_initial_pose_id == legacy.project.poses[0].id
+    assert body_id in legacy.project.poses[0].body_poses
 
 
 def test_create_reference_pose_and_marker_world_position() -> None:
@@ -166,7 +192,70 @@ def test_simulation_uses_initial_pose_frame() -> None:
     assert sim.success
     assert sim.frames
     frame = sim.frames[0]
-    expected = app.project.initial_pose.body_poses[body_id]
+    sim_pose = app.get_simulation_initial_pose()
+    assert sim_pose is not None
+    expected = sim_pose.body_poses[body_id]
     assert frame[f"{body_id}.x"] == pytest.approx(expected.x, abs=1e-3)
     assert frame[f"{body_id}.y"] == pytest.approx(expected.y, abs=1e-3)
     assert frame[f"{body_id}.angle"] == pytest.approx(expected.angle, abs=1e-3)
+
+
+def test_multiple_poses_crud_and_simulation_selection() -> None:
+    app = make_pose_app()
+    body_id = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    marker_a = _find_marker_id(app, body_id, "A")
+    app.connect_marker_to_ground(marker_a)
+
+    pose1 = app.create_pose("Down")
+    pose1.body_poses[body_id].angle = -math.pi / 2.0
+
+    pose2 = app.duplicate_pose(pose1.id)
+    app.rename_pose(pose2.id, "Up")
+    pose2.body_poses[body_id].angle = math.pi / 2.0
+
+    assert len(app.list_poses()) == 2
+    assert {pose.name for pose in app.list_poses()} == {"Down", "Up"}
+
+    app.set_simulation_initial_pose(pose2.id)
+    assert app.get_simulation_initial_pose_id() == pose2.id
+    assert app.get_simulation_initial_pose().name == "Up"
+
+    app.delete_pose(pose2.id)
+    assert app.get_simulation_initial_pose_id() is None
+    assert [p.id for p in app.list_poses()] == [pose1.id]
+
+
+def test_pose_initial_velocity_per_driver_persisted(tmp_path) -> None:
+    app = make_pose_app()
+    body_id = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    marker_a = _find_marker_id(app, body_id, "A")
+    ground_a = app.connect_marker_to_ground(marker_a)
+    driver_id = app.create_driver("Drive", "rotation", ground_a, "0 deg", "deg")
+
+    pose = app.create_pose("Start")
+    app.set_current_pose_id(pose.id)
+    app.set_driver_initial_velocity(driver_id, 1.5)
+    assert app.get_driver_initial_velocity(driver_id) == pytest.approx(1.5)
+
+    path = tmp_path / "vel.quino.json"
+    app.save_project(str(path))
+    loaded = ApplicationService()
+    loaded.load_project(str(path))
+    saved_pose = loaded.get_pose(pose.id)
+    assert saved_pose is not None
+    assert saved_pose.initial_velocities[driver_id] == pytest.approx(1.5)
+
+
+def test_delete_driver_cleans_initial_velocity_entries() -> None:
+    app = make_pose_app()
+    body_id = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    marker_a = _find_marker_id(app, body_id, "A")
+    ground_a = app.connect_marker_to_ground(marker_a)
+    driver_id = app.create_driver("Drive", "rotation", ground_a, "0 deg", "deg")
+    pose = app.create_pose()
+    app.set_current_pose_id(pose.id)
+    app.set_driver_initial_velocity(driver_id, 1.0)
+    assert pose.initial_velocities.get(driver_id) == pytest.approx(1.0)
+
+    app.delete_entity(driver_id)
+    assert driver_id not in pose.initial_velocities

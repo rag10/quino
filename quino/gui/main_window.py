@@ -11,7 +11,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from quino.application.example_registry import ExampleEntry, ExampleRegistry
 from quino.application.service import ApplicationService
 from quino.domain.inputs import PropertyValueInput
-from quino.domain.types import MarkerType
+from quino.domain.types import DriverType, MarkerType
 from quino.domain.model import (
     Body,
     Driver,
@@ -323,6 +323,196 @@ class TreeBranchDelegate(QtWidgets.QStyledItemDelegate):
         return super().editorEvent(event, model, option, index)
 
 
+class PosesPanel(QtWidgets.QWidget):
+    """List + CRUD widget for the project's poses, with a star indicator for
+    the simulation initial pose."""
+
+    current_pose_changed = QtCore.Signal(str)        # pose_id selected for editing
+    simulation_pose_changed = QtCore.Signal(object)  # pose_id or None
+    poses_mutated = QtCore.Signal()                  # any add/remove/rename
+
+    _STAR_FILLED = "★"
+    _STAR_EMPTY = "☆"
+
+    def __init__(self, app_service: ApplicationService) -> None:
+        super().__init__()
+        self.app_service = app_service
+        self._suspend = False
+
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setContentsMargins(8, 8, 8, 8)
+        outer.setSpacing(6)
+
+        toolbar = QtWidgets.QHBoxLayout()
+        toolbar.setSpacing(4)
+        self._new_btn = QtWidgets.QToolButton()
+        self._new_btn.setText("New")
+        self._new_btn.setIcon(get_icon("add", "#3d3d3d"))
+        self._new_btn.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self._new_btn.clicked.connect(self._on_new)
+        self._duplicate_btn = QtWidgets.QToolButton()
+        self._duplicate_btn.setText("Duplicate")
+        self._duplicate_btn.setIcon(get_icon("content-save", "#3d3d3d"))
+        self._duplicate_btn.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self._duplicate_btn.clicked.connect(self._on_duplicate)
+        self._rename_btn = QtWidgets.QToolButton()
+        self._rename_btn.setText("Rename")
+        self._rename_btn.clicked.connect(self._on_rename)
+        self._delete_btn = QtWidgets.QToolButton()
+        self._delete_btn.setText("Delete")
+        self._delete_btn.setIcon(get_icon("remove", "#8b2500"))
+        self._delete_btn.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self._delete_btn.clicked.connect(self._on_delete)
+        toolbar.addWidget(self._new_btn)
+        toolbar.addWidget(self._duplicate_btn)
+        toolbar.addWidget(self._rename_btn)
+        toolbar.addWidget(self._delete_btn)
+        toolbar.addStretch(1)
+        outer.addLayout(toolbar)
+
+        self._list = QtWidgets.QListWidget()
+        self._list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+        self._list.currentItemChanged.connect(self._on_current_changed)
+        self._list.itemClicked.connect(self._on_item_clicked)
+        self._list.itemDoubleClicked.connect(self._on_item_double_clicked)
+        outer.addWidget(self._list, stretch=1)
+
+        hint = QtWidgets.QLabel(
+            "Click the star to mark the pose used as the simulation initial state.\n"
+            "Double-click to rename."
+        )
+        hint.setStyleSheet("color: #6a6a6a;")
+        hint.setWordWrap(True)
+        outer.addWidget(hint)
+
+    def refresh(self) -> None:
+        self._suspend = True
+        try:
+            self._list.clear()
+            project = self.app_service.project
+            if project is None:
+                return
+            sim_id = self.app_service.get_simulation_initial_pose_id()
+            current_id = self.app_service.get_current_pose_id()
+            current_row = -1
+            for idx, pose in enumerate(self.app_service.list_poses()):
+                star = self._STAR_FILLED if pose.id == sim_id else self._STAR_EMPTY
+                item = QtWidgets.QListWidgetItem(f"{star}  {pose.name}")
+                item.setData(QtCore.Qt.ItemDataRole.UserRole, pose.id)
+                item.setToolTip(
+                    "Active simulation initial pose" if pose.id == sim_id else "Click star to mark as simulation initial"
+                )
+                self._list.addItem(item)
+                if pose.id == current_id:
+                    current_row = idx
+            if current_row >= 0:
+                self._list.setCurrentRow(current_row)
+            self._update_button_state()
+        finally:
+            self._suspend = False
+
+    def _update_button_state(self) -> None:
+        has_project = self.app_service.project is not None
+        has_selection = self._list.currentItem() is not None
+        self._new_btn.setEnabled(has_project)
+        self._duplicate_btn.setEnabled(has_project and has_selection)
+        self._rename_btn.setEnabled(has_project and has_selection)
+        self._delete_btn.setEnabled(has_project and has_selection)
+
+    def _selected_pose_id(self) -> str | None:
+        item = self._list.currentItem()
+        return item.data(QtCore.Qt.ItemDataRole.UserRole) if item else None
+
+    def _on_current_changed(self, current, previous) -> None:
+        if self._suspend or current is None:
+            self._update_button_state()
+            return
+        pose_id = current.data(QtCore.Qt.ItemDataRole.UserRole)
+        if pose_id:
+            self.app_service.set_current_pose_id(pose_id)
+            self.current_pose_changed.emit(pose_id)
+        self._update_button_state()
+
+    def _on_item_clicked(self, item: QtWidgets.QListWidgetItem) -> None:
+        if self._suspend or item is None:
+            return
+        # If user clicked on the star glyph area (first ~3 characters),
+        # treat it as toggling the simulation initial flag.
+        cursor_pos = self._list.viewport().mapFromGlobal(QtGui.QCursor.pos())
+        rect = self._list.visualItemRect(item)
+        # Hit-test the first ~22px (star + spacing).
+        if rect.contains(cursor_pos) and cursor_pos.x() - rect.left() <= 22:
+            pose_id = item.data(QtCore.Qt.ItemDataRole.UserRole)
+            current_sim = self.app_service.get_simulation_initial_pose_id()
+            new_sim: str | None = None if current_sim == pose_id else pose_id
+            self.app_service.set_simulation_initial_pose(new_sim)
+            self.simulation_pose_changed.emit(new_sim)
+            self.refresh()
+
+    def _on_item_double_clicked(self, item: QtWidgets.QListWidgetItem) -> None:
+        self._on_rename()
+
+    def _on_new(self) -> None:
+        if self.app_service.project is None:
+            return
+        pose = self.app_service.create_pose()
+        self.poses_mutated.emit()
+        self.refresh()
+        self.current_pose_changed.emit(pose.id)
+
+    def _on_duplicate(self) -> None:
+        pose_id = self._selected_pose_id()
+        if pose_id is None:
+            return
+        pose = self.app_service.duplicate_pose(pose_id)
+        self.poses_mutated.emit()
+        self.refresh()
+        self.current_pose_changed.emit(pose.id)
+
+    def _on_rename(self) -> None:
+        pose_id = self._selected_pose_id()
+        if pose_id is None:
+            return
+        pose = self.app_service.get_pose(pose_id)
+        if pose is None:
+            return
+        new_name, ok = QtWidgets.QInputDialog.getText(
+            self, "Rename pose", "Pose name:", QtWidgets.QLineEdit.EchoMode.Normal, pose.name
+        )
+        if not ok:
+            return
+        try:
+            self.app_service.rename_pose(pose_id, new_name)
+        except ValueError as exc:
+            QtWidgets.QMessageBox.warning(self, "Rename pose", str(exc))
+            return
+        self.poses_mutated.emit()
+        self.refresh()
+
+    def _on_delete(self) -> None:
+        pose_id = self._selected_pose_id()
+        if pose_id is None:
+            return
+        pose = self.app_service.get_pose(pose_id)
+        if pose is None:
+            return
+        confirm = QtWidgets.QMessageBox.question(
+            self,
+            "Delete pose",
+            f"Delete pose '{pose.name}'?",
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No,
+        )
+        if confirm != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        self.app_service.delete_pose(pose_id)
+        self.poses_mutated.emit()
+        self.refresh()
+        new_current = self.app_service.get_current_pose_id()
+        if new_current is not None:
+            self.current_pose_changed.emit(new_current)
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, app_service: ApplicationService | None = None) -> None:
         super().__init__()
@@ -592,6 +782,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas_summary = QtWidgets.QPlainTextEdit()
         self.canvas_summary.setReadOnly(True)
         right_panel.addTab(self.canvas_summary, "Info")
+
+        self.poses_panel = PosesPanel(self.app_service)
+        self.poses_panel.current_pose_changed.connect(self._on_poses_panel_current_changed)
+        self.poses_panel.simulation_pose_changed.connect(self._on_poses_panel_sim_initial_changed)
+        self.poses_panel.poses_mutated.connect(self._on_poses_panel_mutated)
+        self._right_panel_tabs = right_panel
+        self._poses_panel_index = right_panel.addTab(self.poses_panel, "Poses")
 
         splitter.setSizes([260, 720, 440])
         self.tree.setMinimumWidth(200)
@@ -1158,6 +1355,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._pose_toolbar.setVisible(True)
             self._sim_toolbar.setVisible(False)
             self._ensure_pose_session()
+            self.poses_panel.refresh()
+            if hasattr(self, "_right_panel_tabs"):
+                self._right_panel_tabs.setCurrentIndex(self._poses_panel_index)
             self.refresh_all()
         elif mode == "sim":
             self._mode_sketch_btn.setChecked(False)
@@ -1190,6 +1390,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def refresh_all(self) -> None:
         project = self.app_service.project
         if project is None:
+            if hasattr(self, "poses_panel"):
+                self.poses_panel.refresh()
             return
         if self._app_mode == "pose":
             self._ensure_pose_session()
@@ -1199,6 +1401,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._populate_tree(project)
         self._populate_parameters(project)
         self._populate_inspector()
+        if hasattr(self, "poses_panel"):
+            self.poses_panel.refresh()
         self.action_toggle_sketch_visible.setChecked(project.sketch.visible if project.sketch is not None else False)
         self.canvas.set_selection(self._selected_entity_id)
         self._update_interaction_state()
@@ -1210,15 +1414,31 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if self.app_service.get_current_pose() is not None:
             return
-        if project.initial_pose is not None:
-            self.app_service.set_current_pose(project.initial_pose)
+        # If the project already has poses, select the simulation initial
+        # (or the first one) as the editing target. Otherwise create one.
+        if project.poses:
+            sim_id = self.app_service.get_simulation_initial_pose_id()
+            target = sim_id if sim_id is not None else project.poses[0].id
+            self.app_service.set_current_pose_id(target)
         else:
-            self.app_service.reset_current_pose_to_reference()
+            self.app_service.create_pose(name="Reference")
 
     def _reset_pose_ui_state(self) -> None:
         self._pose_drag_timer.stop()
         self._pending_pose_drag = None
         self._pose_constraints.clear()
+        if hasattr(self, "poses_panel"):
+            self.poses_panel.refresh()
+
+    def _on_poses_panel_current_changed(self, pose_id: str) -> None:
+        self._apply_current_frame()
+        self._populate_inspector()
+
+    def _on_poses_panel_sim_initial_changed(self, pose_id) -> None:
+        self._mark_project_dirty()
+
+    def _on_poses_panel_mutated(self) -> None:
+        self._mark_project_dirty()
 
     def _update_window_title(self) -> None:
         project = self.app_service.project
@@ -2578,7 +2798,13 @@ class MainWindow(QtWidgets.QMainWindow):
             # --- property rows (using new widget) ---
             prop_rows = self._inspector_rows(entity)
             for label, path, value, kind, evaluated, _ in prop_rows:
-                enabled = self._editing_allowed() and self._app_mode != "pose" and kind not in {"readonly", "key", "section_header"}
+                is_pose_field = path.startswith("pose:")
+                if is_pose_field:
+                    # Pose-scoped fields (e.g. driver initial velocity) are
+                    # editable in pose mode but locked elsewhere.
+                    enabled = self._app_mode == "pose" and kind not in {"readonly", "key", "section_header"}
+                else:
+                    enabled = self._editing_allowed() and self._app_mode != "pose" and kind not in {"readonly", "key", "section_header"}
                 self.inspector.add_property(label, path, value, kind, evaluated, enabled)
             self.inspector.layout.addStretch()
 
@@ -2870,6 +3096,19 @@ class MainWindow(QtWidgets.QMainWindow):
         elif isinstance(entity, Driver):
             prop("type", "", entity.type.value, "readonly", entity.type.value)
             prop("law", "law", entity.law.expression, "expression", self._evaluate_scalar(entity.law, with_time=True))
+            if self._app_mode == "pose":
+                vel_unit = "rad/s" if entity.type is DriverType.ROTATION else "m/s"
+                stored = self.app_service.get_driver_initial_velocity(entity.id)
+                # Display empty when unset; otherwise as a SI quantity.
+                display = "" if stored is None else f"{stored:g} {vel_unit}"
+                evaluated = "(unset)" if stored is None else f"{stored:g} {vel_unit}"
+                prop(
+                    f"initial velocity (this pose, {vel_unit})",
+                    "pose:initial_velocity",
+                    display,
+                    "expression_or_null",
+                    evaluated,
+                )
 
         elif isinstance(entity, Load):
             prop("target_marker_id", "", entity.target_marker_id, "readonly", entity.target_marker_id)
@@ -3126,9 +3365,23 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_inspector_property_changed(self, path: str, value: str, kind: str) -> None:
         """Handle property changes from the inspector widget."""
-        if self._suspend_property_updates or not self._selected_entity_id or not self._editing_allowed() or self._app_mode == "pose":
+        if self._suspend_property_updates or not self._selected_entity_id:
             return
-        if kind == "readonly" or kind == "section_header" or kind == "key":
+        if kind in {"readonly", "section_header", "key"}:
+            return
+        # Pose-scoped fields are handled separately so they remain editable in
+        # pose mode even though the rest of the model is locked.
+        if path.startswith("pose:"):
+            if self._app_mode != "pose":
+                return
+            try:
+                self._apply_pose_property_update(self._selected_entity_id, path, value)
+                self._mark_project_dirty()
+            except Exception as exc:  # pragma: no cover - UI feedback
+                self._append_message(f"Pose property update failed: {exc}")
+            self.refresh_all()
+            return
+        if not self._editing_allowed() or self._app_mode == "pose":
             return
         try:
             self._apply_property_update(self._selected_entity_id, path, value, kind)
@@ -3136,6 +3389,24 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as exc:  # pragma: no cover - UI feedback
             self._append_message(f"Property update failed: {exc}")
         self.refresh_all()
+
+    def _apply_pose_property_update(self, entity_id: str, path: str, raw_value: str) -> None:
+        entity = self.app_service.get_entity(entity_id)
+        if entity is None:
+            return
+        if path == "pose:initial_velocity" and isinstance(entity, Driver):
+            text = raw_value.strip()
+            if not text:
+                self.app_service.set_driver_initial_velocity(entity_id, None)
+                return
+            target_unit = "rad/s" if entity.type is DriverType.ROTATION else "m/s"
+            quantity = self.app_service.expression_service.evaluate_expression(
+                text, self.app_service.project.parameters
+            )
+            si_value = self.app_service.unit_service.convert(quantity, target_unit)
+            self.app_service.set_driver_initial_velocity(entity_id, float(si_value))
+            return
+        raise ValueError(f"Unknown pose property path: {path}")
 
     def _on_parameter_item_changed(self, item: QtWidgets.QTableWidgetItem) -> None:
         if self._suspend_parameter_updates or not self._editing_allowed():

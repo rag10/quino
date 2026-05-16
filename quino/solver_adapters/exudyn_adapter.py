@@ -28,6 +28,16 @@ _KGMM2_TO_KGM2 = 1e-6  # assembled inertia is in kgmm²; Exudyn expects kg·m²
 _M_TO_MM = 1e3          # convert Exudyn ODE2 displacements (m) back to mm for output
 
 
+def _simulation_initial_pose(project: "Project | None"):
+    """Resolve the Pose used as the simulation starting state, or None."""
+    if project is None:
+        return None
+    pose_id = getattr(project, "simulation_initial_pose_id", None)
+    if pose_id is None:
+        return None
+    return next((pose for pose in project.poses if pose.id == pose_id), None)
+
+
 def _body_com_global_mm(body: "AssembledBody") -> tuple[float, float]:
     """Global CoM position in mm (reference configuration)."""
     cos_a = math.cos(body.angle)
@@ -216,7 +226,7 @@ class ExudynAdapter(SolverAdapter):
             mbs,
             item_interface,
             assembled,
-            initial_pose=project.initial_pose,
+            initial_pose=_simulation_initial_pose(project),
         )
         joint_objects: dict[str, int] = {}
         for joint in assembled.joints:
@@ -386,7 +396,7 @@ class ExudynAdapter(SolverAdapter):
                 self._record_reaction_data_static(
                     project, assembled, mbs, exu, time, frames, reaction_info, joint_objects
                 )
-                if project.initial_pose is not None:
+                if _simulation_initial_pose(project) is not None:
                     messages.append("No drivers defined; returning the configured initial pose")
                 else:
                     messages.append("No drivers defined; returning assembled reference configuration")
@@ -405,13 +415,16 @@ class ExudynAdapter(SolverAdapter):
         body_objects: dict[str, int] = {}
         node_numbers: dict[str, int] = {}
         body_order: list[str] = []
+        initial_velocities = self._initial_body_velocities(assembled, initial_pose)
         for body in assembled.bodies.values():
             com_x_mm, com_y_mm = _body_com_global_mm(body)
             initial_coordinates = self._initial_body_coordinates(body, initial_pose)
+            body_vel = initial_velocities.get(body.body_id, [0.0, 0.0, 0.0])
             node = mbs.AddNode(
                 item_interface.NodeRigidBody2D(
                     referenceCoordinates=[com_x_mm * _MM_TO_M, com_y_mm * _MM_TO_M, body.angle],
                     initialCoordinates=initial_coordinates,
+                    initialVelocities=body_vel,
                 )
             )
             body_object = mbs.AddObject(
@@ -439,6 +452,61 @@ class ExudynAdapter(SolverAdapter):
             body_objects[body.body_id] = body_object
             body_order.append(body.body_id)
         return body_objects, node_numbers, body_order
+
+    def _initial_body_velocities(
+        self, assembled: AssembledMechanism, initial_pose
+    ) -> dict[str, list[float]]:
+        """Compute per-body initial velocities (vx, vy, ω) in SI units.
+
+        V1: applies each driver's initial_velocity to the body it drives
+        (rotation → ω; translation → linear velocity along slider axis).
+        Dependent bodies in closed loops keep zero initial velocity; Exudyn's
+        integrator absorbs the small constraint-velocity mismatch at t=0.
+        """
+        velocities: dict[str, list[float]] = {body.body_id: [0.0, 0.0, 0.0] for body in assembled.bodies.values()}
+        if initial_pose is None or not getattr(initial_pose, "initial_velocities", None):
+            return velocities
+        joint_by_id = {joint.id: joint for joint in assembled.joints}
+        for driver in assembled.drivers:
+            v = initial_pose.initial_velocities.get(driver.driver_id)
+            if v is None or abs(v) < 1e-15:
+                continue
+            joint = joint_by_id.get(driver.target_joint_id)
+            if joint is None:
+                continue
+            marker_endpoint = (
+                joint.endpoint_a if joint.endpoint_a.kind is JointEndpointKind.MARKER else joint.endpoint_b
+            )
+            body_id = marker_endpoint.body_id
+            if body_id is None or body_id not in velocities:
+                continue
+            if driver.driver_type == "rotation":
+                # Body's angular velocity equals the driver's value. The COM has a
+                # tangential velocity ω × r_com_from_pivot; compute it so the joint
+                # constraint G(q)·v = 0 is satisfied at t=0.
+                body = assembled.bodies[body_id]
+                marker = body.markers.get(marker_endpoint.marker_id)
+                if marker is None:
+                    continue
+                # Pivot is the joint position in world frame (taken from reference here;
+                # at t=0 it matches the initial pose since this body owns the marker).
+                com_x_mm, com_y_mm = _body_com_global_mm(body)
+                pivot_x, pivot_y = marker.global_x, marker.global_y
+                r_x = (com_x_mm - pivot_x) * _MM_TO_M
+                r_y = (com_y_mm - pivot_y) * _MM_TO_M
+                velocities[body_id][0] += -float(v) * r_y
+                velocities[body_id][1] += float(v) * r_x
+                velocities[body_id][2] += float(v)
+            elif driver.driver_type == "translation":
+                slider_endpoint = (
+                    joint.endpoint_a if joint.endpoint_a.kind is JointEndpointKind.SLIDER else joint.endpoint_b
+                )
+                slider = assembled.sliders.get(slider_endpoint.slider_id) if slider_endpoint.slider_id else None
+                if slider is None:
+                    continue
+                velocities[body_id][0] += float(v) * slider.axis_x
+                velocities[body_id][1] += float(v) * slider.axis_y
+        return velocities
 
     def _initial_body_coordinates(self, body: AssembledBody, initial_pose) -> list[float]:
         if initial_pose is None or body.body_id not in initial_pose.body_poses:

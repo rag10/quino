@@ -86,20 +86,33 @@ class JsonMapper:
                 "show_sliders": project.view_state.show_sliders,
             },
         }
-        if project.initial_pose is not None:
-            result["initial_pose"] = self._pose_to_dict(project.initial_pose)
+        if project.poses:
+            result["poses"] = [self._pose_to_dict(pose) for pose in project.poses]
+        if project.simulation_initial_pose_id is not None:
+            result["simulation_initial_pose_id"] = project.simulation_initial_pose_id
         return result
 
     def load(self, data: dict) -> Project:
         project_block = data["project"]
         model_block = data["model"]
+        poses_data = data.get("poses")
+        sim_initial_pose_id = data.get("simulation_initial_pose_id")
+        if poses_data is None:
+            # Backwards-compat: old projects had a single `initial_pose` field.
+            legacy = self._pose_from_dict(data.get("initial_pose"))
+            poses = [legacy] if legacy is not None else []
+            if legacy is not None and sim_initial_pose_id is None:
+                sim_initial_pose_id = legacy.id
+        else:
+            poses = [self._pose_from_dict(item) for item in poses_data if item is not None]
         return Project(
             id=project_block["id"],
             name=project_block["name"],
             schema_version=data["schema_version"],
             parameters=[self._parameter_from_dict(item) for item in data.get("parameters", [])],
             sketch=self._sketch_from_dict(data.get("sketch")),
-            initial_pose=self._pose_from_dict(data.get("initial_pose")),
+            poses=poses,
+            simulation_initial_pose_id=sim_initial_pose_id,
             model=Model(
                 bodies=[self._body_from_dict(item) for item in model_block.get("bodies", [])],
                 sliders=[self._slider_from_dict(item) for item in model_block.get("sliders", [])],
@@ -159,7 +172,7 @@ class JsonMapper:
     def _pose_to_dict(self, pose: Pose | None) -> dict | None:
         if pose is None:
             return None
-        return {
+        result: dict = {
             "id": pose.id,
             "name": pose.name,
             "body_poses": {
@@ -168,6 +181,9 @@ class JsonMapper:
             },
             "metadata": pose.metadata.values,
         }
+        if pose.initial_velocities:
+            result["initial_velocities"] = dict(pose.initial_velocities)
+        return result
 
     def _pose_from_dict(self, data: dict | None) -> Pose | None:
         if data is None:
@@ -178,6 +194,10 @@ class JsonMapper:
             body_poses={
                 body_id: self._body_pose_from_dict(body_pose)
                 for body_id, body_pose in data.get("body_poses", {}).items()
+            },
+            initial_velocities={
+                str(driver_id): float(value)
+                for driver_id, value in data.get("initial_velocities", {}).items()
             },
             metadata=Metadata(data.get("metadata", {})),
         )
