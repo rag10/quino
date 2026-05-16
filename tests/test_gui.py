@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 
 import pytest
 from PySide6 import QtCore, QtGui, QtTest, QtWidgets
@@ -8,6 +9,8 @@ from PySide6 import QtCore, QtGui, QtTest, QtWidgets
 from quino.application.service import ApplicationService
 from quino.domain.inputs import MarkerInput, PropertyValueInput, SliderInput
 from quino.gui.main_window import MainWindow
+from quino.pose.geometry import marker_world_position
+from quino.pose.model import PoseConstraint, PoseSolveResult
 
 
 def _expr_value(expression: str) -> float:
@@ -90,9 +93,11 @@ def test_mode_switch_toggles_toolbars() -> None:
     assert window._app_mode == "model"
     assert window._mode_model_btn.isChecked()
     assert not window._mode_sketch_btn.isChecked()
+    assert not window._mode_pose_btn.isChecked()
     assert not window._mode_sim_btn.isChecked()
     assert window._model_toolbar.isVisible()
     assert not window._sketch_toolbar.isVisible()
+    assert not window._pose_toolbar.isVisible()
     assert not window._sim_toolbar.isVisible()
 
     # Switch to Sketch mode
@@ -101,12 +106,27 @@ def test_mode_switch_toggles_toolbars() -> None:
     assert window._app_mode == "sketch"
     assert window._mode_sketch_btn.isChecked()
     assert not window._mode_model_btn.isChecked()
+    assert not window._mode_pose_btn.isChecked()
     assert not window._mode_sim_btn.isChecked()
     assert window._sketch_toolbar.isVisible()
     assert not window._model_toolbar.isVisible()
+    assert not window._pose_toolbar.isVisible()
     assert not window._sim_toolbar.isVisible()
     assert window.app_service.project.sketch is not None
     assert window.app_service.project.sketch.visible is True
+
+    # Switch to Pose mode
+    window._set_app_mode("pose")
+    qt_app.processEvents()
+    assert window._app_mode == "pose"
+    assert window._mode_pose_btn.isChecked()
+    assert not window._mode_sketch_btn.isChecked()
+    assert not window._mode_model_btn.isChecked()
+    assert not window._mode_sim_btn.isChecked()
+    assert window._pose_toolbar.isVisible()
+    assert not window._sketch_toolbar.isVisible()
+    assert not window._model_toolbar.isVisible()
+    assert not window._sim_toolbar.isVisible()
 
     # Switch to Sim mode
     window._set_app_mode("sim")
@@ -115,9 +135,11 @@ def test_mode_switch_toggles_toolbars() -> None:
     assert window._mode_sim_btn.isChecked()
     assert not window._mode_sketch_btn.isChecked()
     assert not window._mode_model_btn.isChecked()
+    assert not window._mode_pose_btn.isChecked()
     assert window._sim_toolbar.isVisible()
     assert not window._sketch_toolbar.isVisible()
     assert not window._model_toolbar.isVisible()
+    assert not window._pose_toolbar.isVisible()
     assert hasattr(window, "action_export_script")
     assert window.action_export_script.isEnabled()  # Exudyn is the default backend
 
@@ -127,10 +149,252 @@ def test_mode_switch_toggles_toolbars() -> None:
     assert window._app_mode == "model"
     assert window._mode_model_btn.isChecked()
     assert not window._mode_sketch_btn.isChecked()
+    assert not window._mode_pose_btn.isChecked()
     assert not window._mode_sim_btn.isChecked()
     assert window._model_toolbar.isVisible()
     assert not window._sketch_toolbar.isVisible()
+    assert not window._pose_toolbar.isVisible()
     assert not window._sim_toolbar.isVisible()
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_pose_mode_creates_current_pose_and_prescribe_x(monkeypatch) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "P"))
+    marker_a = next(marker.id for marker in window.app_service._find_body(body_id).markers if marker.name == "A")
+    marker_p = next(marker.id for marker in window.app_service._find_body(body_id).markers if marker.name == "P")
+    window.app_service.connect_marker_to_ground(marker_a)
+    pose = window.app_service.reset_current_pose_to_reference()
+    pose.body_poses[body_id].angle = 0.7
+    window.app_service.set_current_pose(pose)
+    window.refresh_all()
+
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args, **kwargs: ("80", True))
+    window._set_app_mode("pose")
+    window._select_entity_by_id(marker_p)
+    qt_app.processEvents()
+    window.action_pose_prescribe_x.trigger()
+    qt_app.processEvents()
+
+    current_pose = window.app_service.get_current_pose()
+    assert current_pose is not None
+    assert current_pose.body_poses[body_id].angle != pytest.approx(0.7)
+    body = window.app_service._find_body(body_id)
+    marker = next(item for item in body.markers if item.id == marker_p)
+    assert marker.x.expression == "100 mm"
+    assert marker.y.expression == "0 mm"
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_pose_mode_click_selects_marker_without_running_drag_solve() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "P"))
+    marker_a = next(marker.id for marker in window.app_service._find_body(body_id).markers if marker.name == "A")
+    marker_p = next(marker.id for marker in window.app_service._find_body(body_id).markers if marker.name == "P")
+    window.app_service.connect_marker_to_ground(marker_a)
+    pose = window.app_service.reset_current_pose_to_reference()
+    pose.body_poses[body_id].angle = 0.7
+    window.app_service.set_current_pose(pose)
+    window._set_app_mode("pose")
+    qt_app.processEvents()
+
+    QtTest.QTest.mouseClick(
+        window.canvas,
+        QtCore.Qt.MouseButton.LeftButton,
+        pos=window.canvas.screen_position_for_entity(marker_p),
+    )
+    qt_app.processEvents()
+
+    current_pose = window.app_service.get_current_pose()
+    assert current_pose is not None
+    assert current_pose.body_poses[body_id].angle == pytest.approx(0.7)
+    assert window._selected_entity_id == marker_p
+    assert "Pose drag solve failed" not in window.messages.toPlainText()
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_pose_mode_drag_success_updates_pose_without_mutating_model() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "P"))
+    marker_a = next(marker.id for marker in window.app_service._find_body(body_id).markers if marker.name == "A")
+    marker_p = next(marker.id for marker in window.app_service._find_body(body_id).markers if marker.name == "P")
+    window.app_service.connect_marker_to_ground(marker_a)
+    pose = window.app_service.reset_current_pose_to_reference()
+    pose.body_poses[body_id].angle = 0.7
+    window.app_service.set_current_pose(pose)
+    window._set_app_mode("pose")
+    qt_app.processEvents()
+
+    window._on_canvas_pose_marker_drag(marker_p, 70.0, 71.414284, True)
+    qt_app.processEvents()
+
+    current_pose = window.app_service.get_current_pose()
+    assert current_pose is not None
+    assert current_pose.body_poses[body_id].angle != pytest.approx(0.7)
+    body = window.app_service._find_body(body_id)
+    marker = next(item for item in body.markers if item.id == marker_p)
+    assert marker.x.expression == "100 mm"
+    assert marker.y.expression == "0 mm"
+    assert "Pose drag solve failed" not in window.messages.toPlainText()
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_pose_mode_drag_replaces_same_marker_prescriptions() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "P"))
+    marker_a = next(marker.id for marker in window.app_service._find_body(body_id).markers if marker.name == "A")
+    marker_p = next(marker.id for marker in window.app_service._find_body(body_id).markers if marker.name == "P")
+    window.app_service.connect_marker_to_ground(marker_a)
+    pose = window.app_service.reset_current_pose_to_reference()
+    pose.body_poses[body_id].angle = 0.7
+    window.app_service.set_current_pose(pose)
+    window._set_app_mode("pose")
+    window._select_entity_by_id(marker_p)
+    qt_app.processEvents()
+
+    window._pose_constraints["x:P"] = PoseConstraint(
+        id="pose_x_marker",
+        kind="marker_projected_coordinate",
+        target_id=marker_p,
+        metadata={
+            "reference_x": 0.0,
+            "reference_y": 0.0,
+            "axis_x": 1.0,
+            "axis_y": 0.0,
+            "value": 80.0,
+        },
+    )
+    window._solve_pose()
+    qt_app.processEvents()
+
+    window._on_canvas_pose_marker_drag(marker_p, 60.0, 80.0, True)
+    qt_app.processEvents()
+
+    current_pose = window.app_service.get_current_pose()
+    assert current_pose is not None
+    body_pose = current_pose.body_poses[body_id]
+    assert body_pose.angle == pytest.approx(0.9272952180016122)
+    assert not any(constraint.target_id == marker_p for constraint in window._pose_constraints.values())
+
+    window._solve_pose()
+    qt_app.processEvents()
+    current_pose = window.app_service.get_current_pose()
+    assert current_pose is not None
+    assert current_pose.body_poses[body_id].angle == pytest.approx(0.9272952180016122)
+    assert "Pose drag solve failed" not in window.messages.toPlainText()
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_pose_mode_prescribe_coordinate_uses_intermediate_steps(monkeypatch) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "P"))
+    marker_a = next(marker.id for marker in window.app_service._find_body(body_id).markers if marker.name == "A")
+    marker_p = next(marker.id for marker in window.app_service._find_body(body_id).markers if marker.name == "P")
+    window.app_service.connect_marker_to_ground(marker_a)
+    pose = window.app_service.reset_current_pose_to_reference()
+    pose.body_poses[body_id].angle = 0.2
+    window.app_service.set_current_pose(pose)
+    window._set_app_mode("pose")
+    window._select_entity_by_id(marker_p)
+    qt_app.processEvents()
+
+    attempted_targets: list[float] = []
+    original_solve = window.app_service.solve_current_pose
+
+    def fake_solve(temporary_constraints=None, settings=None):
+        constraints = temporary_constraints or []
+        constraint = next(item for item in constraints if item.target_id == marker_p and item.kind == "marker_projected_coordinate")
+        target_value = float(constraint.metadata["value"])
+        current_pose = window.app_service.get_current_pose()
+        current_x, _ = marker_world_position(window.app_service.project, marker_p, current_pose)
+        attempted_targets.append(target_value)
+        if abs(target_value - current_x) > 15.0:
+            return PoseSolveResult(success=False, error="step too large")
+        updated_pose = window.app_service.get_current_pose()
+        assert updated_pose is not None
+        updated_pose = window.app_service._complete_pose(updated_pose)
+        updated_pose.body_poses[body_id].angle = math.acos(max(-1.0, min(1.0, target_value / 100.0)))
+        window.app_service.set_current_pose(updated_pose)
+        return PoseSolveResult(success=True, pose=updated_pose)
+
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args, **kwargs: ("0", True))
+    monkeypatch.setattr(window.app_service, "solve_current_pose", fake_solve)
+
+    window.action_pose_prescribe_x.trigger()
+    qt_app.processEvents()
+
+    assert len(attempted_targets) >= 3
+    assert max(abs(b - a) for a, b in zip(attempted_targets, attempted_targets[1:])) <= 25.0
+    current_pose = window.app_service.get_current_pose()
+    assert current_pose is not None
+    marker_x, marker_y = marker_world_position(window.app_service.project, marker_p, current_pose)
+    assert marker_x == pytest.approx(0.0, abs=1e-6)
+    assert marker_y == pytest.approx(100.0, abs=1e-6)
+    assert window._pose_constraints[f"x:{marker_p}"].metadata["value"] == pytest.approx(0.0)
+    assert "intermediate steps" in window.messages.toPlainText()
+
+    monkeypatch.setattr(window.app_service, "solve_current_pose", original_solve)
+    window.close()
+    qt_app.processEvents()
+
+
+def test_pose_mode_drag_moves_mechanism_toward_target_without_mutating_model() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "P"))
+    marker_a = next(marker.id for marker in window.app_service._find_body(body_id).markers if marker.name == "A")
+    marker_p = next(marker.id for marker in window.app_service._find_body(body_id).markers if marker.name == "P")
+    window.app_service.connect_marker_to_ground(marker_a)
+    pose = window.app_service.reset_current_pose_to_reference()
+    pose.body_poses[body_id].angle = 0.7
+    window.app_service.set_current_pose(pose)
+    window._set_app_mode("pose")
+    qt_app.processEvents()
+
+    window._on_canvas_pose_marker_drag(marker_p, 140.0, 60.0, True)
+    qt_app.processEvents()
+
+    current_pose = window.app_service.get_current_pose()
+    assert current_pose is not None
+    # Drag succeeds: mechanism moves toward target staying on kinematic curve (bar length = 100mm)
+    assert current_pose.body_poses[body_id].angle != pytest.approx(0.7)
+    body = window.app_service._find_body(body_id)
+    marker = next(item for item in body.markers if item.id == marker_p)
+    assert marker.x.expression == "100 mm"
+    assert marker.y.expression == "0 mm"
 
     window.close()
     qt_app.processEvents()

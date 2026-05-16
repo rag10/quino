@@ -16,6 +16,7 @@ from quino.domain.inputs import (
 )
 from quino.domain.model import (
     Body,
+    BodyPose,
     Driver,
     Expression,
     Joint,
@@ -24,6 +25,7 @@ from quino.domain.model import (
     Metadata,
     Model,
     Parameter,
+    Pose,
     Project,
     ScalarProperty,
     Sketch,
@@ -58,6 +60,7 @@ from quino.domain.types import (
 __all__ = [
     "ApplicationService",
     "Body",
+    "BodyPose",
     "BodyType",
     "Dimension",
     "Driver",
@@ -77,6 +80,7 @@ __all__ = [
     "Metadata",
     "Model",
     "Parameter",
+    "Pose",
     "Project",
     "PropertyValueInput",
     "ScalarProperty",

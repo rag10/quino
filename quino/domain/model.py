@@ -204,6 +204,22 @@ class ReactionOutput:
 
 
 @dataclass(slots=True)
+class BodyPose:
+    body_id: str
+    x: float
+    y: float
+    angle: float
+
+
+@dataclass(slots=True)
+class Pose:
+    id: str
+    name: str
+    body_poses: dict[str, BodyPose] = field(default_factory=dict)
+    metadata: Metadata = field(default_factory=Metadata)
+
+
+@dataclass(slots=True)
 class SketchPoint:
     id: str
     name: str
@@ -363,6 +379,7 @@ class Project:
     model: Model = field(default_factory=Model)
     parameters: list[Parameter] = field(default_factory=list)
     sketch: Sketch | None = None
+    initial_pose: Pose | None = None
     view_state: ViewState = field(default_factory=ViewState)
     metadata: Metadata = field(default_factory=Metadata)
     sensor_outputs: dict[str, SensorOutput] = field(default_factory=dict)

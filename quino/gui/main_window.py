@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import math
 import re
 from pathlib import Path
@@ -36,6 +37,9 @@ from quino.domain.model import (
     Spring,
 )
 from quino.gui.canvas import CanvasMode, MechanismCanvas
+from quino.pose.geometry import marker_world_position, pose_to_state_overlay
+from quino.pose.kinematics import build_drag_initial_pose, get_drag_driver, has_ground_revolute
+from quino.pose.model import PoseConstraint, PoseSolveResult, PoseSolveSettings
 from quino.services.expressions import DimensionMismatchError
 from quino.simulation.sensor_expressions import safe_sensor_var, sensor_channel_keys
 from quino.viewer.plot_window import PlotWindow
@@ -58,6 +62,45 @@ _PROPERTY_DIMENSION_HINTS: dict[str, str] = {
 }
 
 
+class _InspectorCompatItem:
+    def __init__(self, owner: "InspectorPropertyWidget", row_info: dict[str, object], column: int) -> None:
+        self._owner = owner
+        self._row_info = row_info
+        self._column = column
+
+    def text(self) -> str:
+        if self._column == 0:
+            return str(self._row_info["label"])
+        if self._column == 2:
+            return str(self._row_info["evaluated"])
+        editor = self._row_info.get("editor")
+        if isinstance(editor, QtWidgets.QLineEdit):
+            return editor.text()
+        if isinstance(editor, QtWidgets.QComboBox):
+            return editor.currentText()
+        return str(self._row_info["value"])
+
+    def setText(self, value: str) -> None:
+        if self._column != 1:
+            return
+        editor = self._row_info.get("editor")
+        path = str(self._row_info["path"])
+        kind = str(self._row_info["kind"])
+        if isinstance(editor, QtWidgets.QLineEdit):
+            editor.setText(value)
+            self._owner.property_changed.emit(path, value, kind)
+        elif isinstance(editor, QtWidgets.QComboBox):
+            editor.setCurrentText(value)
+
+    def flags(self) -> QtCore.Qt.ItemFlag:
+        flags = QtCore.Qt.ItemFlag.ItemIsEnabled | QtCore.Qt.ItemFlag.ItemIsSelectable
+        if self._column == 1 and bool(self._row_info.get("enabled", False)):
+            kind = str(self._row_info["kind"])
+            if kind not in {"readonly", "key", "section_header"}:
+                flags |= QtCore.Qt.ItemFlag.ItemIsEditable
+        return flags
+
+
 class InspectorPropertyWidget(QtWidgets.QWidget):
     """Custom form widget for displaying entity properties with appropriate input controls."""
 
@@ -69,6 +112,7 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(2)
         self._row_widgets: dict[str, QtWidgets.QWidget] = {}
+        self._compat_rows: list[dict[str, object]] = []
 
     def clear_properties(self):
         """Remove all property rows."""
@@ -77,6 +121,7 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
             if child.widget():
                 child.widget().deleteLater()
         self._row_widgets.clear()
+        self._compat_rows.clear()
 
     def add_property(self, label: str, path: str, value: str, kind: str, evaluated: str, enabled: bool = True):
         """Add a single property row to the form."""
@@ -97,7 +142,40 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
 
         # Store for later reference
         self._row_widgets[path] = row_widget
+        self._compat_rows.append({
+            "label": label,
+            "path": path,
+            "value": value,
+            "kind": kind,
+            "evaluated": evaluated,
+            "enabled": enabled,
+            "editor": self._extract_editor(input_widget),
+            "widget": input_widget,
+        })
         self.layout.addWidget(row_widget)
+
+    def rowCount(self) -> int:
+        return len(self._compat_rows)
+
+    def item(self, row: int, column: int):
+        if row < 0 or row >= len(self._compat_rows):
+            return None
+        if column not in {0, 1, 2}:
+            return None
+        return _InspectorCompatItem(self, self._compat_rows[row], column)
+
+    def cellWidget(self, row: int, column: int):
+        if row < 0 or row >= len(self._compat_rows) or column != 1:
+            return None
+        return self._compat_rows[row].get("editor")
+
+    def _extract_editor(self, widget: QtWidgets.QWidget) -> QtWidgets.QWidget | None:
+        if isinstance(widget, (QtWidgets.QLineEdit, QtWidgets.QComboBox)):
+            return widget
+        editor = widget.findChild(QtWidgets.QLineEdit)
+        if editor is not None:
+            return editor
+        return widget.findChild(QtWidgets.QComboBox)
 
     def _create_input_widget(self, path: str, value: str, kind: str, evaluated: str, enabled: bool) -> QtWidgets.QWidget:
         """Factory method to create the appropriate input widget based on kind."""
@@ -266,8 +344,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._plot_windows: list[PlotWindow] = []
         self._tree_items: dict[str, QtWidgets.QTreeWidgetItem] = {}
         self._expanded_tree_keys: set[str] = set()
+        self._pose_constraints: dict[str, PoseConstraint] = {}
+        self._pending_pose_drag: tuple[str, float, float] | None = None
         self._playback_timer = QtCore.QTimer(self)
         self._playback_timer.timeout.connect(self._advance_playback)
+        self._pose_drag_timer = QtCore.QTimer(self)
+        self._pose_drag_timer.setInterval(50)
+        self._pose_drag_timer.timeout.connect(self._process_pending_pose_drag)
 
         self._update_window_title()
         _icon_path = Path(__file__).parent / "icons" / "quino_app_icon_transparent_1024.png"
@@ -285,12 +368,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self._build_common_toolbar()
         self._build_sketch_toolbar()
         self._build_model_toolbar()
+        self._build_pose_toolbar()
         self._build_sim_toolbar()
         self._mode_model_btn.setChecked(True)
         self._mode_sketch_btn.setChecked(False)
+        self._mode_pose_btn.setChecked(False)
         self._mode_sim_btn.setChecked(False)
         self._sketch_toolbar.setVisible(False)
         self._model_toolbar.setVisible(True)
+        self._pose_toolbar.setVisible(False)
         self._sim_toolbar.setVisible(False)
 
         central = QtWidgets.QWidget()
@@ -327,6 +413,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.modelChanged.connect(self._on_canvas_model_changed)
         self.canvas.modeChanged.connect(self._on_canvas_mode_changed)
         self.canvas.dofInfoChanged.connect(self._on_dof_info_changed)
+        self.canvas.poseMarkerDragged.connect(self._on_canvas_pose_marker_drag)
         self.canvas.set_edit_guard(self._prepare_for_model_edit)
         self.action_fit_view.triggered.connect(self.canvas.fit_view)
         self._canvas_stack = QtWidgets.QWidget()
@@ -678,6 +765,30 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_toggle_sketch_visible.toggled.connect(self._toggle_sketch_visible)
         self.action_toggle_sketch_visible.setToolTip("Show/hide sketch")
 
+        self.action_pose_reset = QtGui.QAction(get_icon("refresh", color_dynamic), "Reset Pose", self)
+        self.action_pose_reset.triggered.connect(self._reset_pose)
+        self.action_pose_reset.setToolTip("Reset the current pose to the reference configuration")
+
+        self.action_pose_solve = QtGui.QAction(get_icon("sketch-solve", color_dynamic), "Solve Pose", self)
+        self.action_pose_solve.triggered.connect(self._solve_pose)
+        self.action_pose_solve.setToolTip("Solve the current pose with the active temporary constraints")
+
+        self.action_pose_set_initial = QtGui.QAction(get_icon("content-save", color_dynamic), "Set as Initial", self)
+        self.action_pose_set_initial.triggered.connect(self._set_current_pose_as_initial)
+        self.action_pose_set_initial.setToolTip("Persist the current pose as the project's initial pose")
+
+        self.action_pose_clear_initial = QtGui.QAction(get_icon("remove", color_dynamic_dark), "Clear Initial", self)
+        self.action_pose_clear_initial.triggered.connect(self._clear_initial_pose)
+        self.action_pose_clear_initial.setToolTip("Remove the persisted initial pose")
+
+        self.action_pose_prescribe_x = QtGui.QAction(get_icon("constraint-horizontal", color_dynamic), "Prescribe X", self)
+        self.action_pose_prescribe_x.triggered.connect(lambda: self._prescribe_pose_coordinate("x"))
+        self.action_pose_prescribe_x.setToolTip("Prescribe the global X coordinate of the selected structural marker")
+
+        self.action_pose_prescribe_y = QtGui.QAction(get_icon("constraint-vertical", color_dynamic), "Prescribe Y", self)
+        self.action_pose_prescribe_y.triggered.connect(lambda: self._prescribe_pose_coordinate("y"))
+        self.action_pose_prescribe_y.setToolTip("Prescribe the global Y coordinate of the selected structural marker")
+
         self.tool_group = QtGui.QActionGroup(self)
         self.tool_group.setExclusive(True)
         for action in (
@@ -816,7 +927,7 @@ class MainWindow(QtWidgets.QMainWindow):
         toolbar.addAction(wa)
 
     def _build_mode_selector(self) -> QtWidgets.QWidget:
-        """Create a pill-style mode selector (Sketch / Model / Sim)."""
+        """Create a pill-style mode selector (Sketch / Model / Pose / Sim)."""
         container = QtWidgets.QWidget()
         container.setObjectName("modeSelectorOverlay")
         layout = QtWidgets.QHBoxLayout(container)
@@ -851,6 +962,17 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self._mode_model_btn.clicked.connect(lambda: self._set_app_mode("model"))
 
+        self._mode_pose_btn = QtWidgets.QToolButton()
+        self._mode_pose_btn.setText("Pose")
+        self._mode_pose_btn.setCheckable(True)
+        self._mode_pose_btn.setFixedSize(70, 32)
+        self._mode_pose_btn.setStyleSheet(
+            "QToolButton { border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; border-left: none; border-right: none; background: #f0f0f0; color: #666; font-weight: bold; font-size: 11px; }"
+            "QToolButton:checked { background: #31556f; color: white; border-color: #31556f; }"
+            "QToolButton:hover:!checked { background: #e0e0e0; }"
+        )
+        self._mode_pose_btn.clicked.connect(lambda: self._set_app_mode("pose"))
+
         self._mode_sim_btn = QtWidgets.QToolButton()
         self._mode_sim_btn.setText("Sim")
         self._mode_sim_btn.setCheckable(True)
@@ -864,6 +986,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         layout.addWidget(self._mode_sketch_btn)
         layout.addWidget(self._mode_model_btn)
+        layout.addWidget(self._mode_pose_btn)
         layout.addWidget(self._mode_sim_btn)
         return container
 
@@ -959,6 +1082,25 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._model_toolbar.setVisible(True)
 
+    def _build_pose_toolbar(self) -> None:
+        self._pose_toolbar = self.addToolBar("Pose")
+        self._pose_toolbar.setIconSize(QtCore.QSize(28, 28))
+        self._pose_toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        self._pose_toolbar.setMovable(False)
+        t = self._pose_toolbar
+
+        self._add_toolbar_block(t, [
+            [self.action_pose_reset, self.action_pose_solve],
+            [self.action_pose_set_initial, self.action_pose_clear_initial],
+        ], "Pose")
+        self._add_toolbar_sep(t)
+
+        self._add_toolbar_block(t, [
+            [self.action_pose_prescribe_x, self.action_pose_prescribe_y],
+        ], "Constraints")
+
+        self._pose_toolbar.setVisible(False)
+
     def _build_sim_toolbar(self) -> None:
         self._sim_toolbar = self.addToolBar("Simulation")
         self._sim_toolbar.setIconSize(QtCore.QSize(28, 28))
@@ -991,9 +1133,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if mode == "sketch":
             self._mode_sketch_btn.setChecked(True)
             self._mode_model_btn.setChecked(False)
+            self._mode_pose_btn.setChecked(False)
             self._mode_sim_btn.setChecked(False)
             self._sketch_toolbar.setVisible(True)
             self._model_toolbar.setVisible(False)
+            self._pose_toolbar.setVisible(False)
             self._sim_toolbar.setVisible(False)
             # Ensure sketch is visible when entering sketch mode
             if self.app_service.project and self.app_service.project.sketch is not None:
@@ -1004,12 +1148,25 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.app_service.create_sketch()
                 self.action_toggle_sketch_visible.setChecked(True)
             self.refresh_all()
+        elif mode == "pose":
+            self._mode_sketch_btn.setChecked(False)
+            self._mode_model_btn.setChecked(False)
+            self._mode_pose_btn.setChecked(True)
+            self._mode_sim_btn.setChecked(False)
+            self._sketch_toolbar.setVisible(False)
+            self._model_toolbar.setVisible(False)
+            self._pose_toolbar.setVisible(True)
+            self._sim_toolbar.setVisible(False)
+            self._ensure_pose_session()
+            self.refresh_all()
         elif mode == "sim":
             self._mode_sketch_btn.setChecked(False)
             self._mode_model_btn.setChecked(False)
+            self._mode_pose_btn.setChecked(False)
             self._mode_sim_btn.setChecked(True)
             self._sketch_toolbar.setVisible(False)
             self._model_toolbar.setVisible(False)
+            self._pose_toolbar.setVisible(False)
             self._sim_toolbar.setVisible(True)
             is_exudyn = self.app_service.simulation_runner.backend_name() == "exudyn"
             self.action_export_script.setEnabled(is_exudyn)
@@ -1017,9 +1174,11 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self._mode_sketch_btn.setChecked(False)
             self._mode_model_btn.setChecked(True)
+            self._mode_pose_btn.setChecked(False)
             self._mode_sim_btn.setChecked(False)
             self._sketch_toolbar.setVisible(False)
             self._model_toolbar.setVisible(True)
+            self._pose_toolbar.setVisible(False)
             self._sim_toolbar.setVisible(False)
             self.refresh_all()
 
@@ -1032,6 +1191,8 @@ class MainWindow(QtWidgets.QMainWindow):
         project = self.app_service.project
         if project is None:
             return
+        if self._app_mode == "pose":
+            self._ensure_pose_session()
         self._update_window_title()
         self._update_timeline_controls()
         self._apply_current_frame()
@@ -1042,6 +1203,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.set_selection(self._selected_entity_id)
         self._update_interaction_state()
         self._update_status_message()
+
+    def _ensure_pose_session(self) -> None:
+        project = self.app_service.project
+        if project is None:
+            return
+        if self.app_service.get_current_pose() is not None:
+            return
+        if project.initial_pose is not None:
+            self.app_service.set_current_pose(project.initial_pose)
+        else:
+            self.app_service.reset_current_pose_to_reference()
+
+    def _reset_pose_ui_state(self) -> None:
+        self._pose_drag_timer.stop()
+        self._pending_pose_drag = None
+        self._pose_constraints.clear()
 
     def _update_window_title(self) -> None:
         project = self.app_service.project
@@ -1397,7 +1574,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def _apply_current_frame(self) -> None:
         frame = None
         time_value = 0.0
-        if self._last_simulation_result is not None and self._last_simulation_result.frames:
+        if self._app_mode == "pose":
+            frame = pose_to_state_overlay(self.app_service.get_current_pose())
+        elif self._last_simulation_result is not None and self._last_simulation_result.frames:
             index = max(0, min(self._current_frame_index, len(self._last_simulation_result.frames) - 1))
             frame = self._last_simulation_result.frames[index]
             time_value = self._last_simulation_result.time[index] if index < len(self._last_simulation_result.time) else 0.0
@@ -1435,8 +1614,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._last_simulation_result = None
         self._last_simulation_state = None
         self._current_frame_index = 0
-        self.canvas.set_state_overlay(None)
-        self.canvas.set_simulation_time(0.0)
+        self._apply_current_frame()
         self.canvas.set_trajectories([])
         self.action_show_trajectories.setEnabled(False)
         self._update_timeline_controls()
@@ -1592,6 +1770,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._current_project_path = None
         self._mark_project_clean()
         self._selected_entity_id = None
+        self._reset_pose_ui_state()
         self._clear_simulation_state()
         self.messages.clear()
         self.validation_view.clear()
@@ -1613,6 +1792,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._current_project_path = Path(path)
         self._mark_project_clean()
         self._selected_entity_id = None
+        self._reset_pose_ui_state()
         self._clear_simulation_state()
         self.messages.clear()
         self.validation_view.clear()
@@ -1980,6 +2160,318 @@ class MainWindow(QtWidgets.QMainWindow):
         self._mark_project_dirty()
         self.refresh_all()
 
+    def _on_canvas_pose_marker_drag(self, marker_id: str, x: float, y: float, final: bool) -> None:
+        if self._app_mode != "pose":
+            return
+        marker = self.app_service.get_entity(marker_id)
+        if not isinstance(marker, Marker) or marker.type is not MarkerType.STRUCTURAL:
+            return
+        if final:
+            self._pose_drag_timer.stop()
+            self._pending_pose_drag = None
+            self._solve_pose_with_drag(marker_id, x, y, final=True)
+            return
+        self._pending_pose_drag = (marker_id, x, y)
+        if not self._pose_drag_timer.isActive():
+            self._pose_drag_timer.start()
+
+    def _process_pending_pose_drag(self) -> None:
+        if self._pending_pose_drag is None:
+            self._pose_drag_timer.stop()
+            return
+        marker_id, x, y = self._pending_pose_drag
+        self._pending_pose_drag = None
+        self._solve_pose_with_drag(marker_id, x, y, final=False)
+
+    def _selected_structural_marker_for_pose(self) -> Marker | None:
+        if self._selected_entity_id is None:
+            return None
+        entity = self.app_service.get_entity(self._selected_entity_id)
+        if isinstance(entity, Marker) and entity.type is MarkerType.STRUCTURAL:
+            return entity
+        return None
+
+    def _active_pose_constraints(self) -> list[PoseConstraint]:
+        return list(self._pose_constraints.values())
+
+    def _pose_constraints_for_drag(self, marker_id: str) -> list[PoseConstraint]:
+        return [
+            constraint
+            for constraint in self._pose_constraints.values()
+            if constraint.target_id != marker_id
+        ]
+
+    def _solve_pose_constraint_progressively(
+        self,
+        constraint_key: str,
+        axis: str,
+        marker_id: str,
+        target_value: float,
+    ) -> tuple[bool, PoseSolveResult, int]:
+        self._ensure_pose_session()
+        starting_pose = copy.deepcopy(self.app_service.get_current_pose())
+        base_constraints = [
+            constraint
+            for key, constraint in self._pose_constraints.items()
+            if key != constraint_key
+        ]
+        template = PoseConstraint(
+            id=f"pose_{axis}_{marker_id}",
+            kind="marker_projected_coordinate",
+            target_id=marker_id,
+            metadata={
+                "reference_x": 0.0,
+                "reference_y": 0.0,
+                "axis_x": 1.0 if axis == "x" else 0.0,
+                "axis_y": 0.0 if axis == "x" else 1.0,
+                "value": target_value,
+            },
+        )
+        max_step_mm = 25.0
+        min_step_mm = 0.25
+        tolerance_mm = 1e-3
+        step_limit = max_step_mm
+        steps_completed = 0
+        last_result = PoseSolveResult(
+            success=False,
+            error="Pose solve did not start",
+            messages=["Progressive pose solve did not start"],
+        )
+
+        for _ in range(120):
+            pose = self.app_service.get_current_pose()
+            world_x, world_y = marker_world_position(self.app_service.project, marker_id, pose)
+            current_value = world_x if axis == "x" else world_y
+            remaining = target_value - current_value
+            if abs(remaining) <= tolerance_mm:
+                final_constraint = copy.deepcopy(template)
+                last_result = self.app_service.solve_current_pose(
+                    temporary_constraints=[*base_constraints, final_constraint],
+                    settings=PoseSolveSettings(),
+                )
+                if last_result.success:
+                    self._pose_constraints[constraint_key] = final_constraint
+                    self._apply_current_frame()
+                    self._populate_inspector()
+                    return True, last_result, steps_completed
+                if step_limit <= min_step_mm:
+                    break
+                step_limit *= 0.5
+                continue
+
+            step_value = target_value if abs(remaining) <= step_limit else current_value + math.copysign(step_limit, remaining)
+            working_constraint = copy.deepcopy(template)
+            working_constraint.metadata["value"] = step_value
+            last_result = self.app_service.solve_current_pose(
+                temporary_constraints=[*base_constraints, working_constraint],
+                settings=PoseSolveSettings(
+                    tolerance=1e-7,
+                    max_iterations=40,
+                    verbose=False,
+                ),
+            )
+            if last_result.success:
+                new_pose = self.app_service.get_current_pose()
+                new_world_x, new_world_y = marker_world_position(self.app_service.project, marker_id, new_pose)
+                new_value = new_world_x if axis == "x" else new_world_y
+                if abs(new_value - current_value) <= tolerance_mm and abs(remaining) > tolerance_mm:
+                    if step_limit <= min_step_mm:
+                        last_result = PoseSolveResult(
+                            success=False,
+                            error="Pose solve stalled before reaching the prescribed coordinate",
+                            messages=["Progressive pose solve stalled"],
+                        )
+                        break
+                    step_limit *= 0.5
+                    continue
+                steps_completed += 1
+                self._apply_current_frame()
+                self._populate_inspector()
+                QtWidgets.QApplication.processEvents()
+                continue
+
+            if step_limit <= min_step_mm:
+                break
+            step_limit *= 0.5
+
+        if starting_pose is not None:
+            self.app_service.set_current_pose(starting_pose)
+            self._apply_current_frame()
+            self._populate_inspector()
+        return False, last_result, steps_completed
+
+    def _reset_pose(self) -> None:
+        if self._app_mode != "pose":
+            return
+        self._reset_pose_ui_state()
+        self.app_service.reset_current_pose_to_reference()
+        self._apply_current_frame()
+        self._populate_inspector()
+        self._append_message("Pose reset to reference")
+
+    def _solve_pose(self) -> None:
+        self._ensure_pose_session()
+        result = self.app_service.solve_current_pose(
+            temporary_constraints=self._active_pose_constraints(),
+            settings=PoseSolveSettings(),
+        )
+        self._apply_current_frame()
+        self._populate_inspector()
+        if result.success:
+            self._append_message("Pose solved")
+            for warning in result.warnings:
+                self._append_message(f"Pose warning: {warning}")
+        else:
+            detail = f": {result.error}" if result.error else ""
+            self._append_message(f"Pose solve failed{detail}")
+
+    def _set_current_pose_as_initial(self) -> None:
+        if self._app_mode != "pose":
+            return
+        try:
+            self.app_service.set_initial_pose_from_current()
+            self._mark_project_dirty()
+            self._append_message("Current pose saved as initial pose")
+            self.refresh_all()
+        except Exception as exc:
+            self._append_message(f"Set initial pose failed: {exc}")
+
+    def _clear_initial_pose(self) -> None:
+        try:
+            self.app_service.clear_initial_pose()
+            self._mark_project_dirty()
+            self._append_message("Initial pose cleared")
+            self.refresh_all()
+        except Exception as exc:
+            self._append_message(f"Clear initial pose failed: {exc}")
+
+    def _prescribe_pose_coordinate(self, axis: str) -> None:
+        if self._app_mode != "pose":
+            return
+        self._ensure_pose_session()
+        marker = self._selected_structural_marker_for_pose()
+        if marker is None:
+            self._append_message("Select a structural marker to prescribe a pose coordinate")
+            return
+        pose = self.app_service.get_current_pose()
+        world_x, world_y = marker_world_position(self.app_service.project, marker.id, pose)
+        current_value = world_x if axis == "x" else world_y
+        label = "X" if axis == "x" else "Y"
+        text, accepted = QtWidgets.QInputDialog.getText(
+            self,
+            f"Prescribe {label}",
+            f"Target {label} for {marker.name} [mm]:",
+            text=f"{current_value:.6g}",
+        )
+        if not accepted or not text.strip():
+            return
+        try:
+            value_mm = float(text.strip().replace(",", "."))
+        except ValueError:
+            self._append_message(f"{label} must be a number in mm")
+            return
+        success, result, steps_completed = self._solve_pose_constraint_progressively(
+            f"{axis}:{marker.id}",
+            axis,
+            marker.id,
+            value_mm,
+        )
+        if success:
+            if steps_completed > 1:
+                self._append_message(f"Pose solved in {steps_completed} intermediate steps")
+            else:
+                self._append_message("Pose solved")
+            for warning in result.warnings:
+                self._append_message(f"Pose warning: {warning}")
+            return
+        detail = f": {result.error}" if result.error else ""
+        self._append_message(f"Pose solve failed{detail}")
+
+    def _solve_pose_with_drag(self, marker_id: str, x: float, y: float, *, final: bool) -> None:
+        self._ensure_pose_session()
+        project = self.app_service.project
+        if project is None:
+            return
+        saved_pose = self.app_service.get_current_pose()
+        if saved_pose is None:
+            return
+        try:
+            assembled = self.app_service.simulation_runner.adapter.assembler.assemble(project)
+        except Exception:
+            return
+
+        base_constraints = self._pose_constraints_for_drag(marker_id)
+        fixed_angles = {
+            c.target_id: float(c.metadata["angle"])
+            for c in base_constraints
+            if c.kind == "body_angle" and "angle" in c.metadata
+        }
+
+        # Find the kinematic driver and build an initial-guess pose.
+        driver_info = get_drag_driver(assembled, saved_pose, marker_id, x, y, fixed_angles=fixed_angles)
+        drag_constraint: PoseConstraint
+        use_body_angle = False
+        if driver_info is not None:
+            driver_body_id, driver_angle, guess_pose = driver_info
+            driver_body = assembled.bodies.get(driver_body_id)
+            marker_on_driver = driver_body is not None and marker_id in driver_body.markers
+            # The kinematic propagator does not close loops, so its guess is only
+            # trustworthy when the dragged marker lives on the driver body (open
+            # chain or driver-body marker). For couplers in four-bar / slider-crank
+            # we keep the last solved pose and let Exudyn close the loop via spring.
+            use_body_angle = marker_on_driver and has_ground_revolute(assembled, driver_body_id)
+            if use_body_angle:
+                self.app_service.set_current_pose(guess_pose)
+                drag_constraint = PoseConstraint(
+                    id=f"pose_drag_{marker_id}",
+                    kind="body_angle",
+                    target_id=driver_body_id,
+                    metadata={"angle": driver_angle},
+                )
+            else:
+                drag_constraint = PoseConstraint(
+                    id=f"pose_drag_{marker_id}",
+                    kind="marker_position",
+                    target_id=marker_id,
+                    metadata={"x": x, "y": y},
+                )
+        else:
+            drag_constraint = PoseConstraint(
+                id=f"pose_drag_{marker_id}",
+                kind="marker_position",
+                target_id=marker_id,
+                metadata={"x": x, "y": y},
+            )
+
+        result = self.app_service.solve_current_pose(
+            temporary_constraints=[*base_constraints, drag_constraint],
+            settings=PoseSolveSettings(
+                tolerance=1e-8 if final else 1e-4,
+                max_iterations=50 if final else 40,
+                verbose=False,
+            ),
+        )
+
+        if not result.success:
+            # Restore the last good pose so no stretched bars are ever displayed.
+            # Exception: if Exudyn is simply not installed, the kinematic estimate
+            # is still better than the saved pose for single-DOF open chains.
+            if self.app_service.pose_runner.backend_available():
+                self.app_service.set_current_pose(saved_pose)
+
+        self._apply_current_frame()
+        if final:
+            if result.success:
+                self._pose_constraints = {
+                    key: constraint
+                    for key, constraint in self._pose_constraints.items()
+                    if constraint.target_id != marker_id
+                }
+            self._populate_inspector()
+        if not result.success and final:
+            detail = f": {result.error}" if result.error else ""
+            self._append_message(f"Pose drag solve failed{detail}")
+
     def _on_canvas_mode_changed(self, mode: str) -> None:
         action_for_mode = {
             CanvasMode.SELECT: self.action_select_tool,
@@ -2086,7 +2578,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # --- property rows (using new widget) ---
             prop_rows = self._inspector_rows(entity)
             for label, path, value, kind, evaluated, _ in prop_rows:
-                enabled = self._editing_allowed() and kind not in {"readonly", "key", "section_header"}
+                enabled = self._editing_allowed() and self._app_mode != "pose" and kind not in {"readonly", "key", "section_header"}
                 self.inspector.add_property(label, path, value, kind, evaluated, enabled)
             self.inspector.layout.addStretch()
 
@@ -2147,14 +2639,14 @@ class MainWindow(QtWidgets.QMainWindow):
                             up_btn = QtWidgets.QPushButton("↑")
                             up_btn.setFixedWidth(28)
                             up_btn.setFixedHeight(20)
-                            up_btn.setEnabled(self._editing_allowed() and edge_idx > 0)
+                            up_btn.setEnabled(self._editing_allowed() and self._app_mode != "pose" and edge_idx > 0)
                             up_btn.clicked.connect(lambda checked=False, mid=marker.id: self._on_marker_reorder(mid, -1))
                             row_h.addWidget(up_btn)
 
                             down_btn = QtWidgets.QPushButton("↓")
                             down_btn.setFixedWidth(28)
                             down_btn.setFixedHeight(20)
-                            down_btn.setEnabled(self._editing_allowed() and edge_idx < len(entity.edge_order) - 1)
+                            down_btn.setEnabled(self._editing_allowed() and self._app_mode != "pose" and edge_idx < len(entity.edge_order) - 1)
                             down_btn.clicked.connect(lambda checked=False, mid=marker.id: self._on_marker_reorder(mid, 1))
                             row_h.addWidget(down_btn)
 
@@ -2634,7 +3126,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_inspector_property_changed(self, path: str, value: str, kind: str) -> None:
         """Handle property changes from the inspector widget."""
-        if self._suspend_property_updates or not self._selected_entity_id or not self._editing_allowed():
+        if self._suspend_property_updates or not self._selected_entity_id or not self._editing_allowed() or self._app_mode == "pose":
             return
         if kind == "readonly" or kind == "section_header" or kind == "key":
             return
@@ -2765,6 +3257,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._prepare_for_model_edit():
             return
         if self.app_service.undo():
+            self._reset_pose_ui_state()
             self._append_message("Undo")
             self._mark_project_dirty()
             self.refresh_all()
@@ -2776,6 +3269,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._prepare_for_model_edit():
             return
         if self.app_service.redo():
+            self._reset_pose_ui_state()
             self._append_message("Redo")
             self._mark_project_dirty()
             self.refresh_all()
@@ -2848,6 +3342,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _update_interaction_state(self) -> None:
         editing_allowed = self._editing_allowed()
+        non_pose_editing_allowed = editing_allowed and self._app_mode != "pose"
+        pose_editing_allowed = editing_allowed and self._app_mode == "pose"
         has_simulation = self._has_simulation_frames()
         self.canvas.set_editing_enabled(editing_allowed)
         if not editing_allowed and self.canvas.mode() != CanvasMode.SELECT:
@@ -2856,6 +3352,10 @@ class MainWindow(QtWidgets.QMainWindow):
         for action in (
             self.action_undo,
             self.action_redo,
+            self.action_delete,
+        ):
+            action.setEnabled(non_pose_editing_allowed)
+        for action in (
             self.action_bar_tool,
             self.action_point_mass_tool,
             self.action_body_tool,
@@ -2865,6 +3365,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_slider_tool,
             self.action_ground_tool,
             self.action_slider_connect_tool,
+            self.action_add_rotation_driver,
+            self.action_add_translation_driver,
+            self.action_add_load,
+        ):
+            action.setEnabled(non_pose_editing_allowed)
+        for action in (
             self.action_sketch_point_tool,
             self.action_sketch_line_tool,
             self.action_sketch_rectangle_tool,
@@ -2890,22 +3396,27 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_sketch_concentric_tool,
             self.action_sketch_arc_center_tool,
             self.action_solve_sketch,
-            self.action_delete,
-            self.action_add_rotation_driver,
-            self.action_add_translation_driver,
-            self.action_add_load,
         ):
-            action.setEnabled(editing_allowed)
+            action.setEnabled(non_pose_editing_allowed)
+        for action in (
+            self.action_pose_reset,
+            self.action_pose_solve,
+            self.action_pose_set_initial,
+            self.action_pose_clear_initial,
+            self.action_pose_prescribe_x,
+            self.action_pose_prescribe_y,
+        ):
+            action.setEnabled(pose_editing_allowed)
         in_sketch_mode = self._app_mode == "sketch"
-        self.action_toggle_sketch_visible.setEnabled(not in_sketch_mode)
+        self.action_toggle_sketch_visible.setEnabled(self._app_mode != "sketch" and self._app_mode != "pose")
         if in_sketch_mode:
             self.action_toggle_sketch_visible.setChecked(True)
-        self.add_parameter_button.setEnabled(editing_allowed)
-        self.delete_parameter_button.setEnabled(editing_allowed)
+        self.add_parameter_button.setEnabled(non_pose_editing_allowed)
+        self.delete_parameter_button.setEnabled(non_pose_editing_allowed)
         self.action_play_pause.setEnabled(has_simulation)
         self.action_stop.setEnabled(has_simulation)
         self.timeline_slider.setEnabled(has_simulation)
-        if editing_allowed:
+        if non_pose_editing_allowed:
             edit_triggers = (
                 QtWidgets.QAbstractItemView.EditTrigger.DoubleClicked
                 | QtWidgets.QAbstractItemView.EditTrigger.EditKeyPressed

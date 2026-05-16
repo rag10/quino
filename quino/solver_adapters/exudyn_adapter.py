@@ -212,7 +212,12 @@ class ExudynAdapter(SolverAdapter):
         sc = exu.SystemContainer()
         mbs = sc.AddSystem()
         ground_object = mbs.AddObject(item_interface.ObjectGround())
-        body_objects, node_numbers, body_order = self._create_bodies(mbs, item_interface, assembled)
+        body_objects, node_numbers, body_order = self._create_bodies(
+            mbs,
+            item_interface,
+            assembled,
+            initial_pose=project.initial_pose,
+        )
         joint_objects: dict[str, int] = {}
         for joint in assembled.joints:
             joint_objects[joint.id] = self._create_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, joint)
@@ -381,7 +386,10 @@ class ExudynAdapter(SolverAdapter):
                 self._record_reaction_data_static(
                     project, assembled, mbs, exu, time, frames, reaction_info, joint_objects
                 )
-            messages.append("No drivers defined; returning assembled reference configuration")
+                if project.initial_pose is not None:
+                    messages.append("No drivers defined; returning the configured initial pose")
+                else:
+                    messages.append("No drivers defined; returning assembled reference configuration")
         return SimulationResult(
             success=True,
             backend=self.name,
@@ -392,16 +400,18 @@ class ExudynAdapter(SolverAdapter):
         )
 
     def _create_bodies(
-        self, mbs, item_interface, assembled: AssembledMechanism
+        self, mbs, item_interface, assembled: AssembledMechanism, initial_pose=None
     ) -> tuple[dict[str, int], dict[str, int], list[str]]:
         body_objects: dict[str, int] = {}
         node_numbers: dict[str, int] = {}
         body_order: list[str] = []
         for body in assembled.bodies.values():
             com_x_mm, com_y_mm = _body_com_global_mm(body)
+            initial_coordinates = self._initial_body_coordinates(body, initial_pose)
             node = mbs.AddNode(
                 item_interface.NodeRigidBody2D(
-                    referenceCoordinates=[com_x_mm * _MM_TO_M, com_y_mm * _MM_TO_M, body.angle]
+                    referenceCoordinates=[com_x_mm * _MM_TO_M, com_y_mm * _MM_TO_M, body.angle],
+                    initialCoordinates=initial_coordinates,
                 )
             )
             body_object = mbs.AddObject(
@@ -429,6 +439,22 @@ class ExudynAdapter(SolverAdapter):
             body_objects[body.body_id] = body_object
             body_order.append(body.body_id)
         return body_objects, node_numbers, body_order
+
+    def _initial_body_coordinates(self, body: AssembledBody, initial_pose) -> list[float]:
+        if initial_pose is None or body.body_id not in initial_pose.body_poses:
+            return [0.0, 0.0, 0.0]
+        body_pose = initial_pose.body_poses[body.body_id]
+        reference_com_x, reference_com_y = _body_com_global_mm(body)
+        target_angle = self._equivalent_angle_near(body_pose.angle, body.angle)
+        cos_a = math.cos(target_angle)
+        sin_a = math.sin(target_angle)
+        target_com_x = body_pose.x + cos_a * body.com_local_x - sin_a * body.com_local_y
+        target_com_y = body_pose.y + sin_a * body.com_local_x + cos_a * body.com_local_y
+        return [
+            (target_com_x - reference_com_x) * _MM_TO_M,
+            (target_com_y - reference_com_y) * _MM_TO_M,
+            target_angle - body.angle,
+        ]
 
     def _create_joint(self, mbs, item_interface, assembled, body_objects, node_numbers, ground_object, joint) -> int:
         a = joint.endpoint_a

@@ -208,6 +208,7 @@ class MechanismCanvas(QtWidgets.QWidget):
     modeChanged = QtCore.Signal(str)
     dofInfoChanged = QtCore.Signal(str)
     displaySettingsChanged = QtCore.Signal()
+    poseMarkerDragged = QtCore.Signal(str, float, float, bool)
 
     def __init__(self, app_service: ApplicationService, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -244,6 +245,9 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._hovered_sketch_point_id: str | None = None
         self._hovered_sketch_entity_id: str | None = None
         self._dragging_marker: CanvasMarker | None = None
+        self._dragging_pose_marker: CanvasMarker | None = None
+        self._dragging_pose_marker_start: QtCore.QPointF | None = None
+        self._dragging_pose_marker_active = False
         self._drag_preview: tuple[str, float, float] | None = None
         self._dragging_sketch_point: CanvasSketchPoint | None = None
         self._dragging_sketch_point_preview: tuple[str, float, float] | None = None
@@ -274,7 +278,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._show_origin: bool = True
         self._show_axes: bool = True
         self._show_grid: bool = True
-        self._background_color: str = "#ffffff"
+        self._background_color: str = "#f5f1e8"
         self.setMinimumSize(420, 320)
         self.setMouseTracking(True)
         self.setAutoFillBackground(True)
@@ -326,15 +330,22 @@ class MechanismCanvas(QtWidgets.QWidget):
                     self._selected_entity_ids.clear()
                     self.selectionCleared.emit()
             self._dragging_marker = None
+            self._dragging_pose_marker = None
+            self._dragging_pose_marker_start = None
+            self._dragging_pose_marker_active = False
             self._drag_preview = None
             self._dragging_slider = None
             self._dragging_slider_preview = None
-        elif mode == "model":
+        elif mode in {"model", "pose", "sim"}:
             if self._selected_entity_id is not None:
                 if self._is_sketch_entity(self._selected_entity_id):
                     self._selected_entity_id = None
                     self._selected_entity_ids.clear()
                     self.selectionCleared.emit()
+            self._dragging_pose_marker = None
+            self._dragging_pose_marker_start = None
+            self._dragging_pose_marker_active = False
+            self._drag_preview = None
             self._dragging_sketch_point = None
             self._dragging_sketch_point_preview = None
             self._dragging_sketch_circle_id = None
@@ -378,6 +389,9 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._hovered_sketch_point_id = None
         self._hovered_sketch_entity_id = None
         self._dragging_marker = None
+        self._dragging_pose_marker = None
+        self._dragging_pose_marker_start = None
+        self._dragging_pose_marker_active = False
         self._drag_preview = None
         self._dragging_sketch_point = None
         self._dragging_sketch_point_preview = None
@@ -560,7 +574,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             is_sketch = self._is_sketch_entity(entity_id)
             if self._interaction_mode == "sketch" and not is_sketch:
                 entity_id = None
-            elif self._interaction_mode in ("model", "sim") and is_sketch:
+            elif self._interaction_mode in ("model", "pose", "sim") and is_sketch:
                 entity_id = None
         self._selected_entity_id = entity_id
         self._selected_entity_ids = {entity_id} if entity_id is not None else set()
@@ -619,6 +633,9 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._creation_entity_ids = []
             self._pending_distance_constraint_refs = []
             self._dragging_marker = None
+            self._dragging_pose_marker = None
+            self._dragging_pose_marker_start = None
+            self._dragging_pose_marker_active = False
             self._drag_preview = None
             self._dragging_sketch_point = None
             self._dragging_sketch_point_preview = None
@@ -1022,37 +1039,42 @@ class MechanismCanvas(QtWidgets.QWidget):
                             cy = self.app_service._evaluate_sketch_expression(center_point.y, self.app_service.project.parameters)
                             self._dragging_sketch_circle_preview_radius = max(1e-6, math.hypot(world[0] - cx, world[1] - cy))
                 return
-            if clicked_marker is not None and self._interaction_mode in ("model", "sim", "all"):
+            if clicked_marker is not None and self._interaction_mode in ("model", "pose", "sim", "all"):
                 self._select_canvas_entity(clicked_marker.entity_id, additive=additive_selection)
                 if self._editing_enabled:
-                    self._dragging_marker = clicked_marker
-                    self._drag_preview = (clicked_marker.entity_id, clicked_marker.x, clicked_marker.y)
+                    if self._interaction_mode == "pose" and clicked_marker.marker_type is MarkerType.STRUCTURAL:
+                        self._dragging_pose_marker = clicked_marker
+                        self._dragging_pose_marker_start = event.position()
+                        self._dragging_pose_marker_active = False
+                    elif self._interaction_mode != "pose":
+                        self._dragging_marker = clicked_marker
+                        self._drag_preview = (clicked_marker.entity_id, clicked_marker.x, clicked_marker.y)
                 self.update()
                 return
-            if clicked_slider is not None and self._interaction_mode in ("model", "sim", "all"):
+            if clicked_slider is not None and self._interaction_mode in ("model", "pose", "sim", "all"):
                 self._select_canvas_entity(clicked_slider.entity_id, additive=additive_selection)
-                if self._editing_enabled:
+                if self._editing_enabled and self._interaction_mode != "pose":
                     handle = clicked_slider_handle or (clicked_slider.entity_id, "center")
                     self._dragging_slider = (handle[0], handle[1])
                     self._dragging_slider_preview = self._slider_preview_for_handle(handle[0], handle[1], world)
                 self.update()
                 return
-            if clicked_joint is not None and self._interaction_mode in ("model", "sim", "all"):
+            if clicked_joint is not None and self._interaction_mode in ("model", "pose", "sim", "all"):
                 self._select_canvas_entity(clicked_joint, additive=additive_selection)
                 return
-            if clicked_driver is not None and self._interaction_mode in ("model", "sim", "all"):
+            if clicked_driver is not None and self._interaction_mode in ("model", "pose", "sim", "all"):
                 self._select_canvas_entity(clicked_driver, additive=additive_selection)
                 return
-            if clicked_sensor is not None and self._interaction_mode in ("model", "sim", "all"):
+            if clicked_sensor is not None and self._interaction_mode in ("model", "pose", "sim", "all"):
                 self._select_canvas_entity(clicked_sensor, additive=additive_selection)
                 return
-            if clicked_load is not None and self._interaction_mode in ("model", "sim", "all"):
+            if clicked_load is not None and self._interaction_mode in ("model", "pose", "sim", "all"):
                 self._select_canvas_entity(clicked_load, additive=additive_selection)
                 return
-            if clicked_spring is not None and self._interaction_mode in ("model", "sim", "all"):
+            if clicked_spring is not None and self._interaction_mode in ("model", "pose", "sim", "all"):
                 self._select_canvas_entity(clicked_spring, additive=additive_selection)
                 return
-            if clicked_body is not None and self._interaction_mode in ("model", "sim", "all"):
+            if clicked_body is not None and self._interaction_mode in ("model", "pose", "sim", "all"):
                 self._select_canvas_entity(clicked_body, additive=additive_selection)
                 return
             if self._interaction_mode in ("sketch", "all"):
@@ -1308,7 +1330,27 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._box_selection_current = event.position()
             self.update()
             return
-        if self._editing_enabled and self._mode == CanvasMode.SELECT and self._dragging_marker is not None:
+        if self._editing_enabled and self._mode == CanvasMode.SELECT and self._dragging_pose_marker is not None:
+            if not self._dragging_pose_marker_active:
+                start = self._dragging_pose_marker_start
+                if start is None:
+                    self._dragging_pose_marker_start = event.position()
+                elif QtCore.QLineF(start, event.position()).length() >= float(QtWidgets.QApplication.startDragDistance()):
+                    self._dragging_pose_marker_active = True
+            if not self._dragging_pose_marker_active:
+                self._snap_preview_world = None
+                self._drag_preview = None
+                self.update()
+                super().mouseMoveEvent(event)
+                return
+            snapped = self._snap_world(self._hover_world, include_model=False)
+            self._snap_preview_world = snapped
+            # Keep _drag_preview up to date so the mouse-release emit fires with
+            # the cursor position (not the stale click position). Visual rendering
+            # ignores _drag_preview in pose mode — see _collect_markers.
+            self._drag_preview = (self._dragging_pose_marker.entity_id, snapped[0], snapped[1])
+            self.poseMarkerDragged.emit(self._dragging_pose_marker.entity_id, snapped[0], snapped[1], False)
+        elif self._editing_enabled and self._mode == CanvasMode.SELECT and self._dragging_marker is not None:
             snapped = self._snap_world(self._hover_world, include_model=False)
             self._snap_preview_world = snapped
             self._drag_preview = (self._dragging_marker.entity_id, snapped[0], snapped[1])
@@ -1397,6 +1439,19 @@ class MechanismCanvas(QtWidgets.QWidget):
         if event.button() == QtCore.Qt.MouseButton.LeftButton and self._box_selection_start is not None:
             additive_selection = bool(event.modifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier)
             self._finish_box_selection(additive=additive_selection)
+            self.update()
+            return
+        if event.button() == QtCore.Qt.MouseButton.LeftButton and self._dragging_pose_marker is not None:
+            if self._dragging_pose_marker_active:
+                if self._drag_preview is None:
+                    x, y = self._to_world(event.position(), self._current_transform())
+                    self._drag_preview = (self._dragging_pose_marker.entity_id, x, y)
+                marker_id, x, y = self._drag_preview
+                self.poseMarkerDragged.emit(marker_id, x, y, True)
+            self._dragging_pose_marker = None
+            self._dragging_pose_marker_start = None
+            self._dragging_pose_marker_active = False
+            self._drag_preview = None
             self.update()
             return
         if event.button() == QtCore.Qt.MouseButton.LeftButton and self._dragging_marker is not None:
@@ -2030,7 +2085,10 @@ class MechanismCanvas(QtWidgets.QWidget):
     ) -> list[CanvasMarker]:
         markers: list[CanvasMarker] = []
         preview_map = {}
-        if self._drag_preview is not None:
+        # In pose mode the mechanism geometry comes from the kinematic solve, so
+        # don't override the dragged marker's display position — that would
+        # detach it from the bars and produce visible stretching.
+        if self._drag_preview is not None and self._dragging_pose_marker is None:
             preview_map[self._drag_preview[0]] = (self._drag_preview[1], self._drag_preview[2])
         for body in project.model.bodies:
             structural_has_preview = (
@@ -5598,6 +5656,8 @@ class MechanismCanvas(QtWidgets.QWidget):
             self.set_mode(CanvasMode.SELECT)
 
     def _require_editing(self) -> bool:
+        if self._interaction_mode == "pose":
+            return self._editing_enabled
         if self._editing_enabled:
             if self._edit_guard is None or self._edit_guard():
                 return True

@@ -3,7 +3,6 @@ from __future__ import annotations
 import copy
 import math
 import re
-from pathlib import Path
 
 from quino.domain.inputs import JointEndpointInput, MarkerInput, PropertyValueInput, SliderInput
 from quino.domain.sketch_constraints import CONSTRAINT_SPECS
@@ -20,9 +19,9 @@ from quino.domain.model import (
     Model,
     Parameter,
     Project,
+    Pose,
     ScalarProperty,
     Sensor,
-    SensorOutput,
     SimulationResult,
     Sketch,
     SketchConstraint,
@@ -50,10 +49,12 @@ from quino.domain.types import (
     SensorType,
     SketchConstraintType,
     SketchEntityType,
-    SpringEndpointKind,
     SpringType,
 )
 from quino.serialization.json_io import JsonMapper
+from quino.pose.geometry import create_reference_pose as build_reference_pose
+from quino.pose.model import PoseConstraint, PoseSolveResult, PoseSolveSettings
+from quino.pose.runner import PoseRunner
 from quino.services.expressions import ExpressionService
 from quino.services.ids import IdService
 from quino.services.units import UnitService
@@ -62,6 +63,7 @@ from quino.services.sketch_solver import SketchSolveResult, SketchSolver
 from quino.simulation.runner import SimulationRunner
 from quino.simulation.sensor_expressions import sensor_expression_variables
 from quino.solver_adapters.exudyn_adapter import ExudynAdapter
+from quino.solver_adapters.exudyn_pose_adapter import ExudynPoseAdapter
 
 
 class ApplicationService:
@@ -87,8 +89,10 @@ class ApplicationService:
         self._in_operation = False
         self._entity_index: dict[str, object] | None = None
         self._sketch_solve_cache: tuple[str, SketchSolveResult] | None = None
+        self._current_pose: Pose | None = None
         self.sketch_solver = SketchSolver(self.expression_service, self.unit_service)
         self.simulation_runner = SimulationRunner(ExudynAdapter(self.expression_service))
+        self.pose_runner = PoseRunner(ExudynPoseAdapter(self.expression_service))
 
     def new_project(self, name: str) -> Project:
         self.id_service = IdService()
@@ -103,6 +107,7 @@ class ApplicationService:
         )
         self._undo_stack.clear()
         self._redo_stack.clear()
+        self._current_pose = None
         return self.project
 
     def load_project(self, path: str) -> Project:
@@ -110,6 +115,7 @@ class ApplicationService:
         self._sync_id_service()
         self._undo_stack.clear()
         self._redo_stack.clear()
+        self._current_pose = None
         self._sync_all_special_com_markers()
         if self.project is not None and self.project.sketch is not None:
             self.project.sketch.solve_error = None
@@ -119,6 +125,54 @@ class ApplicationService:
     def save_project(self, path: str) -> None:
         project = self._require_project()
         self.json_mapper.save_file(project, path)
+
+    def create_reference_pose(self, name: str = "Reference") -> Pose:
+        project = self._require_project()
+        return build_reference_pose(project, pose_id=self.id_service.new("pose"), name=name)
+
+    def get_current_pose(self) -> Pose | None:
+        return self._current_pose
+
+    def set_current_pose(self, pose: Pose | None) -> None:
+        self._current_pose = self._complete_pose(pose) if pose is not None else None
+
+    def reset_current_pose_to_reference(self) -> Pose:
+        pose = self.create_reference_pose()
+        self._current_pose = pose
+        return pose
+
+    def set_initial_pose_from_current(self) -> None:
+        project = self._require_project()
+        if self._current_pose is None:
+            raise ValueError("No current pose is available")
+        self._snapshot()
+        project.initial_pose = copy.deepcopy(self._complete_pose(self._current_pose))
+
+    def clear_initial_pose(self) -> None:
+        project = self._require_project()
+        if project.initial_pose is None:
+            return
+        self._snapshot()
+        project.initial_pose = None
+
+    def solve_current_pose(
+        self,
+        temporary_constraints: list[PoseConstraint] | None = None,
+        settings: PoseSolveSettings | None = None,
+    ) -> PoseSolveResult:
+        project = self._require_project()
+        working_pose = self._current_pose
+        if working_pose is None:
+            working_pose = copy.deepcopy(project.initial_pose) if project.initial_pose is not None else self.create_reference_pose()
+        result = self.pose_runner.solve(
+            project,
+            self._complete_pose(working_pose),
+            temporary_constraints=temporary_constraints,
+            settings=settings,
+        )
+        if result.success and result.pose is not None:
+            self._current_pose = self._complete_pose(result.pose)
+        return result
 
     def create_parameter(self, name: str, expression: str, unit: str, description: str = "") -> str:
         project = self._require_project()
@@ -768,6 +822,7 @@ class ApplicationService:
         )
         body.markers.append(self._make_com_marker(body))
         project.model.bodies.append(body)
+        self._invalidate_pose_state()
         return body.id
 
     def create_bar(self, name: str, start: MarkerInput, end: MarkerInput) -> str:
@@ -837,6 +892,7 @@ class ApplicationService:
         body.closed_shape = False
         body.com_marker().metadata.values["position_percent"] = 50.0
         self._set_bar_com_from_percent(body, 50.0)
+        self._invalidate_pose_state()
 
     def add_marker_to_body(self, body_id: str, marker: MarkerInput) -> str:
         body = self._find_body(body_id)
@@ -862,6 +918,7 @@ class ApplicationService:
             body.type = BodyType.BODY
             body.closed_shape = True
         self._sync_special_com_marker(body)
+        self._invalidate_pose_state()
         return created.id
 
     def add_marker_to_body_at(
@@ -891,6 +948,7 @@ class ApplicationService:
             self.expression_service.evaluate_property(slider_obj.travel_max, project.parameters)
         self._snapshot()
         project.model.sliders.append(slider_obj)
+        self._invalidate_pose_state()
         return slider_obj.id
 
     def create_slider_from_points(
@@ -950,6 +1008,7 @@ class ApplicationService:
         self._snapshot()
         project.model.joints.append(joint)
         self._entity_index = None
+        self._invalidate_pose_state()
         return joint.id
 
     def create_rigid_joint(
@@ -1001,6 +1060,7 @@ class ApplicationService:
             raise ValueError("Cannot change joint type while it has a driver attached")
         self._snapshot()
         joint.type = new_type
+        self._invalidate_pose_state()
 
     def connect_marker_to_ground(
         self, marker_id: str, joint_type: str = "revolute", name: str | None = None
@@ -1123,6 +1183,7 @@ class ApplicationService:
                 target_y = self.unit_service.convert(self.unit_service.quantity(target_y_eval.value, target_y_eval.unit), "mm")
                 self._snapshot()
                 self._set_bar_com_from_point(body, target_x, target_y)
+                self._invalidate_pose_state()
                 return
         project = self._require_project()
         new_x = ScalarProperty(expression=x_expression, unit=marker.x.unit, expected_dimension=Dimension.LENGTH)
@@ -1151,11 +1212,13 @@ class ApplicationService:
                     self._sync_special_com_marker(moved_body)
                 except ValueError:
                     pass
+            self._invalidate_pose_state()
             return
         self._snapshot()
         marker.x = new_x
         marker.y = new_y
         self._sync_special_com_marker(body)
+        self._invalidate_pose_state()
 
     def update_property(self, entity_id: str, property_path: str, value: PropertyValueInput) -> None:
         if entity_id == "__gravity__":
@@ -1296,6 +1359,7 @@ class ApplicationService:
                 load for load in project.model.loads if load.target_marker_id not in marker_ids
             ]
             project.model.bodies = [item for item in project.model.bodies if item.id != entity_id]
+            self._invalidate_pose_state()
             return
         if any(slider.id == entity_id for slider in project.model.sliders):
             self._snapshot()
@@ -1313,11 +1377,13 @@ class ApplicationService:
                 driver for driver in project.model.drivers if driver.target_joint_id not in slider_joint_ids
             ]
             project.model.sliders = [item for item in project.model.sliders if item.id != entity_id]
+            self._invalidate_pose_state()
             return
         if any(joint.id == entity_id for joint in project.model.joints):
             self._snapshot()
             project.model.joints = [item for item in project.model.joints if item.id != entity_id]
             project.model.drivers = [driver for driver in project.model.drivers if driver.target_joint_id != entity_id]
+            self._invalidate_pose_state()
             return
         if any(driver.id == entity_id for driver in project.model.drivers):
             self._snapshot()
@@ -1370,6 +1436,7 @@ class ApplicationService:
         elif body.type is BodyType.BODY and len(body.structural_markers()) == 2:
             body.closed_shape = True
         self._sync_special_com_marker(body)
+        self._invalidate_pose_state()
 
     def validate_model(self, duration: float = 1.0, steps: int = 20) -> ValidationReport:
         project = self._require_project()
@@ -1422,6 +1489,7 @@ class ApplicationService:
             self._redo_stack.append(copy.deepcopy(self.project))
         self.project = self._undo_stack.pop()
         self._entity_index = None
+        self._current_pose = None
         return True
 
     def redo(self) -> bool:
@@ -1431,6 +1499,7 @@ class ApplicationService:
             self._undo_stack.append(copy.deepcopy(self.project))
         self.project = self._redo_stack.pop()
         self._entity_index = None
+        self._current_pose = None
         return True
 
     def _require_project(self) -> Project:
@@ -1444,6 +1513,19 @@ class ApplicationService:
             self._redo_stack.clear()
             self._entity_index = None
             self._sketch_solve_cache = None
+
+    def _invalidate_pose_state(self) -> None:
+        self._current_pose = None
+        if self.project is not None:
+            self.project.initial_pose = None
+
+    def _complete_pose(self, pose: Pose) -> Pose:
+        project = self._require_project()
+        complete = build_reference_pose(project, pose_id=pose.id, name=pose.name)
+        complete.metadata = copy.deepcopy(pose.metadata)
+        for body_id, body_pose in pose.body_poses.items():
+            complete.body_poses[body_id] = copy.deepcopy(body_pose)
+        return complete
 
     def _operation(self):
         """Context manager that takes a single snapshot for the whole operation."""
@@ -2458,12 +2540,14 @@ class ApplicationService:
                 self._snapshot()
                 slider.origin_x = new_x
                 slider.origin_y = new_y
+                self._invalidate_pose_state()
             return
         self._snapshot()
         slider.origin_x = new_x
         slider.origin_y = new_y
         moved_marker_ids: set[str] = set()
         self._translate_markers_linked_to_slider(slider.id, delta_x, delta_y, moved_marker_ids)
+        self._invalidate_pose_state()
 
     def _rotate_slider(self, slider_id: str, angle_expression: str) -> None:
         slider = self._find_entity(slider_id)
@@ -2501,11 +2585,13 @@ class ApplicationService:
                 return
             self._snapshot()
             slider.angle = new_angle
+            self._invalidate_pose_state()
             return
         self._snapshot()
         slider.angle = new_angle
         for marker, marker_x, marker_y in marker_targets:
             self._set_marker_absolute_mm(marker, marker_x, marker_y)
+        self._invalidate_pose_state()
 
     def update_slider_geometry(
         self,
@@ -2595,6 +2681,7 @@ class ApplicationService:
                 )
         for marker, marker_x, marker_y in marker_targets:
             self._set_marker_absolute_mm(marker, marker_x, marker_y)
+        self._invalidate_pose_state()
 
     def _translate_slider_expression(
         self,

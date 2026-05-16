@@ -5,6 +5,7 @@ from pathlib import Path
 
 from quino.domain.model import (
     Body,
+    BodyPose,
     Driver,
     Expression,
     GravityLoad,
@@ -15,6 +16,7 @@ from quino.domain.model import (
     Metadata,
     Model,
     Parameter,
+    Pose,
     Project,
     ScalarProperty,
     Sensor,
@@ -51,7 +53,7 @@ from quino.domain.types import (
 
 class JsonMapper:
     def dump(self, project: Project) -> dict:
-        return {
+        result = {
             "schema_version": project.schema_version,
             "project": {
                 "id": project.id,
@@ -84,6 +86,9 @@ class JsonMapper:
                 "show_sliders": project.view_state.show_sliders,
             },
         }
+        if project.initial_pose is not None:
+            result["initial_pose"] = self._pose_to_dict(project.initial_pose)
+        return result
 
     def load(self, data: dict) -> Project:
         project_block = data["project"]
@@ -94,6 +99,7 @@ class JsonMapper:
             schema_version=data["schema_version"],
             parameters=[self._parameter_from_dict(item) for item in data.get("parameters", [])],
             sketch=self._sketch_from_dict(data.get("sketch")),
+            initial_pose=self._pose_from_dict(data.get("initial_pose")),
             model=Model(
                 bodies=[self._body_from_dict(item) for item in model_block.get("bodies", [])],
                 sliders=[self._slider_from_dict(item) for item in model_block.get("sliders", [])],
@@ -131,6 +137,48 @@ class JsonMapper:
             expression=data["expression"],
             unit=data["unit"],
             description=data.get("description", ""),
+            metadata=Metadata(data.get("metadata", {})),
+        )
+
+    def _body_pose_to_dict(self, body_pose: BodyPose) -> dict:
+        return {
+            "body_id": body_pose.body_id,
+            "x": body_pose.x,
+            "y": body_pose.y,
+            "angle": body_pose.angle,
+        }
+
+    def _body_pose_from_dict(self, data: dict) -> BodyPose:
+        return BodyPose(
+            body_id=data["body_id"],
+            x=float(data["x"]),
+            y=float(data["y"]),
+            angle=float(data["angle"]),
+        )
+
+    def _pose_to_dict(self, pose: Pose | None) -> dict | None:
+        if pose is None:
+            return None
+        return {
+            "id": pose.id,
+            "name": pose.name,
+            "body_poses": {
+                body_id: self._body_pose_to_dict(body_pose)
+                for body_id, body_pose in pose.body_poses.items()
+            },
+            "metadata": pose.metadata.values,
+        }
+
+    def _pose_from_dict(self, data: dict | None) -> Pose | None:
+        if data is None:
+            return None
+        return Pose(
+            id=data["id"],
+            name=data["name"],
+            body_poses={
+                body_id: self._body_pose_from_dict(body_pose)
+                for body_id, body_pose in data.get("body_poses", {}).items()
+            },
             metadata=Metadata(data.get("metadata", {})),
         )
 
