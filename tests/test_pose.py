@@ -6,7 +6,8 @@ import math
 import pytest
 
 from quino.application.service import ApplicationService
-from quino.domain.inputs import MarkerInput
+from quino.domain.inputs import JointEndpointInput, MarkerInput
+from quino.domain.types import JointEndpointKind
 from quino.pose.geometry import marker_world_position
 from quino.pose.model import PoseConstraint
 
@@ -259,3 +260,95 @@ def test_delete_driver_cleans_initial_velocity_entries() -> None:
 
     app.delete_entity(driver_id)
     assert driver_id not in pose.initial_velocities
+
+
+def test_body_angle_constraint_prescribes_horizontal() -> None:
+    app = make_pose_app()
+    body_id = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    marker_a = _find_marker_id(app, body_id, "A")
+    app.connect_marker_to_ground(marker_a)
+
+    pose = app.reset_current_pose_to_reference()
+    pose.body_poses[body_id].angle = 0.7
+    app.set_current_pose(pose)
+
+    result = app.solve_current_pose(
+        [PoseConstraint(id="h", kind="body_angle", target_id=body_id, metadata={"angle": 0.0})]
+    )
+
+    assert result.success
+    solved_pose = app.get_current_pose()
+    assert solved_pose is not None
+    assert solved_pose.body_poses[body_id].angle == pytest.approx(0.0, abs=1e-5)
+
+
+def test_body_angle_constraint_prescribes_vertical() -> None:
+    app = make_pose_app()
+    body_id = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    marker_a = _find_marker_id(app, body_id, "A")
+    app.connect_marker_to_ground(marker_a)
+
+    pose = app.reset_current_pose_to_reference()
+    pose.body_poses[body_id].angle = 0.1
+    app.set_current_pose(pose)
+
+    result = app.solve_current_pose(
+        [PoseConstraint(id="v", kind="body_angle", target_id=body_id, metadata={"angle": math.pi / 2.0})]
+    )
+
+    assert result.success
+    solved_pose = app.get_current_pose()
+    assert solved_pose is not None
+    assert solved_pose.body_poses[body_id].angle == pytest.approx(math.pi / 2.0, abs=1e-5)
+
+
+def test_relative_body_angle_constraint_prescribes_angle() -> None:
+    """Crank + coupler open chain: prescribe crank angle and the relative angle between them."""
+    app = make_pose_app()
+    crank_id = app.create_bar("Crank", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("50 mm", "0 mm", "B"))
+    marker_crank_a = _find_marker_id(app, crank_id, "A")
+    marker_crank_b = _find_marker_id(app, crank_id, "B")
+    coupler_id = app.create_bar("Coupler", MarkerInput("0 mm", "0 mm", "C"), MarkerInput("100 mm", "0 mm", "D"))
+    marker_coupler_c = _find_marker_id(app, coupler_id, "C")
+
+    app.connect_marker_to_ground(marker_crank_a)
+    app.create_joint(
+        "CrankCoupler",
+        "revolute",
+        JointEndpointInput(kind=JointEndpointKind.MARKER, body_id=crank_id, marker_id=marker_crank_b),
+        JointEndpointInput(kind=JointEndpointKind.MARKER, body_id=coupler_id, marker_id=marker_coupler_c),
+    )
+
+    app.reset_current_pose_to_reference()
+
+    # 2 DOF open chain: pin crank angle AND prescribe relative angle → 0 DOF
+    crank_target = math.pi / 6.0   # 30°
+    relative_target = math.pi / 4.0  # 45°
+
+    result = app.solve_current_pose([
+        PoseConstraint(
+            id="crank_angle",
+            kind="body_angle",
+            target_id=crank_id,
+            metadata={"angle": crank_target},
+        ),
+        PoseConstraint(
+            id="rel_angle",
+            kind="relative_body_angle",
+            target_id=crank_id,
+            metadata={
+                "body_a_id": crank_id,
+                "body_b_id": coupler_id,
+                "local_phi_a": 0.0,
+                "local_phi_b": 0.0,
+                "angle": relative_target,
+            },
+        ),
+    ])
+
+    assert result.success
+    solved = app.get_current_pose()
+    assert solved is not None
+    assert solved.body_poses[crank_id].angle == pytest.approx(crank_target, abs=1e-4)
+    # coupler.angle = crank.angle - relative_target
+    assert solved.body_poses[coupler_id].angle == pytest.approx(crank_target - relative_target, abs=1e-4)

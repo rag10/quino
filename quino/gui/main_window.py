@@ -11,7 +11,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from quino.application.example_registry import ExampleEntry, ExampleRegistry
 from quino.application.service import ApplicationService
 from quino.domain.inputs import PropertyValueInput
-from quino.domain.types import DriverType, MarkerType
+from quino.domain.types import DriverType, JointEndpointKind, MarkerType
 from quino.domain.model import (
     Body,
     Driver,
@@ -37,8 +37,8 @@ from quino.domain.model import (
     Spring,
 )
 from quino.gui.canvas import CanvasMode, MechanismCanvas
-from quino.pose.geometry import marker_world_position, pose_to_state_overlay
-from quino.pose.kinematics import build_drag_initial_pose, get_drag_driver, has_ground_revolute
+from quino.pose.geometry import assembled_reference_mechanism, marker_world_position, pose_to_state_overlay
+from quino.pose.kinematics import _pose_at_angle, build_drag_initial_pose, get_drag_driver, has_ground_revolute
 from quino.pose.model import PoseConstraint, PoseSolveResult, PoseSolveSettings
 from quino.services.expressions import DimensionMismatchError
 from quino.simulation.sensor_expressions import safe_sensor_var, sensor_channel_keys
@@ -535,6 +535,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tree_items: dict[str, QtWidgets.QTreeWidgetItem] = {}
         self._expanded_tree_keys: set[str] = set()
         self._pose_constraints: dict[str, PoseConstraint] = {}
+        self._pose_pick_state: dict | None = None
+        self._active_prescribe_action: QtGui.QAction | None = None
         self._pending_pose_drag: tuple[str, float, float] | None = None
         self._playback_timer = QtCore.QTimer(self)
         self._playback_timer.timeout.connect(self._advance_playback)
@@ -604,6 +606,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.modeChanged.connect(self._on_canvas_mode_changed)
         self.canvas.dofInfoChanged.connect(self._on_dof_info_changed)
         self.canvas.poseMarkerDragged.connect(self._on_canvas_pose_marker_drag)
+        self.canvas.poseMarkerPicked.connect(self._advance_pose_pick)
         self.canvas.set_edit_guard(self._prepare_for_model_edit)
         self.action_fit_view.triggered.connect(self.canvas.fit_view)
         self._canvas_stack = QtWidgets.QWidget()
@@ -979,12 +982,29 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_pose_clear_initial.setToolTip("Remove the persisted initial pose")
 
         self.action_pose_prescribe_x = QtGui.QAction(get_icon("constraint-horizontal", color_dynamic), "Prescribe X", self)
-        self.action_pose_prescribe_x.triggered.connect(lambda: self._prescribe_pose_coordinate("x"))
+        self.action_pose_prescribe_x.setCheckable(True)
+        self.action_pose_prescribe_x.triggered.connect(lambda checked: self._prescribe_pose_coordinate("x") if checked else self._cancel_pose_pick())
         self.action_pose_prescribe_x.setToolTip("Prescribe the global X coordinate of the selected structural marker")
 
         self.action_pose_prescribe_y = QtGui.QAction(get_icon("constraint-vertical", color_dynamic), "Prescribe Y", self)
-        self.action_pose_prescribe_y.triggered.connect(lambda: self._prescribe_pose_coordinate("y"))
+        self.action_pose_prescribe_y.setCheckable(True)
+        self.action_pose_prescribe_y.triggered.connect(lambda checked: self._prescribe_pose_coordinate("y") if checked else self._cancel_pose_pick())
         self.action_pose_prescribe_y.setToolTip("Prescribe the global Y coordinate of the selected structural marker")
+
+        self.action_pose_prescribe_horizontal = QtGui.QAction(get_icon("sensor-angle-h", color_dynamic), "Horiz. Angle", self)
+        self.action_pose_prescribe_horizontal.setCheckable(True)
+        self.action_pose_prescribe_horizontal.triggered.connect(lambda checked: self._prescribe_horizontal_angle() if checked else self._cancel_pose_pick())
+        self.action_pose_prescribe_horizontal.setToolTip("Prescribe the selected body's angle to horizontal (0°)")
+
+        self.action_pose_prescribe_vertical = QtGui.QAction(get_icon("sensor-angle-v", color_dynamic), "Vert. Angle", self)
+        self.action_pose_prescribe_vertical.setCheckable(True)
+        self.action_pose_prescribe_vertical.triggered.connect(lambda checked: self._prescribe_vertical_angle() if checked else self._cancel_pose_pick())
+        self.action_pose_prescribe_vertical.setToolTip("Prescribe the selected body's angle to vertical (90°)")
+
+        self.action_pose_prescribe_angle = QtGui.QAction(get_icon("angle-constraint", color_dynamic), "Rel. Angle", self)
+        self.action_pose_prescribe_angle.setCheckable(True)
+        self.action_pose_prescribe_angle.triggered.connect(lambda checked: self._prescribe_relative_angle() if checked else self._cancel_pose_pick())
+        self.action_pose_prescribe_angle.setToolTip("Prescribe the angle between two marker pairs on different bodies")
 
         self.tool_group = QtGui.QActionGroup(self)
         self.tool_group.setExclusive(True)
@@ -1294,6 +1314,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._add_toolbar_block(t, [
             [self.action_pose_prescribe_x, self.action_pose_prescribe_y],
+            [self.action_pose_prescribe_horizontal, self.action_pose_prescribe_vertical],
+            [self.action_pose_prescribe_angle],
         ], "Constraints")
 
         self._pose_toolbar.setVisible(False)
@@ -1426,6 +1448,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def _reset_pose_ui_state(self) -> None:
         self._pose_drag_timer.stop()
         self._pending_pose_drag = None
+        if self._active_prescribe_action is not None:
+            self._active_prescribe_action.setChecked(False)
+            self._active_prescribe_action = None
+        self._pose_pick_state = None
         self._pose_constraints.clear()
         if hasattr(self, "poses_panel"):
             self.poses_panel.refresh()
@@ -2355,6 +2381,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._selected_entity_id = entity_id
         self._populate_inspector()
         self.canvas.set_selection(entity_id)
+        if self._app_mode == "pose" and self._pose_pick_state is not None and entity_id is not None:
+            self._advance_pose_pick(entity_id)
 
     def _select_entity_by_id(self, entity_id: str) -> None:
         self._selected_entity_id = entity_id
@@ -2367,6 +2395,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._suspend_tree_injection = False
         self._populate_inspector()
         self.canvas.set_selection(entity_id)
+        if self._app_mode == "pose" and self._pose_pick_state is not None:
+            self._advance_pose_pick(entity_id)
 
     def _clear_selection(self) -> None:
         self._selected_entity_id = None
@@ -2374,6 +2404,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tree.setCurrentItem(None)
         self._populate_inspector()
         self.canvas.set_selection(None)
+        if self._pose_pick_state is not None:
+            self._cancel_pose_pick()
 
     def _on_canvas_model_changed(self, message: str) -> None:
         self._append_message(message)
@@ -2420,6 +2452,428 @@ class MainWindow(QtWidgets.QMainWindow):
             for constraint in self._pose_constraints.values()
             if constraint.target_id != marker_id
         ]
+
+    def _seed_pose_toward_marker_target(
+        self,
+        marker_id: str,
+        x: float,
+        y: float,
+        base_constraints: list[PoseConstraint],
+        projected_axis: str | None = None,
+        projected_value: float | None = None,
+    ) -> bool:
+        project = self.app_service.project
+        if project is None:
+            return False
+        saved_pose = self.app_service.get_current_pose()
+        if saved_pose is None:
+            return False
+        try:
+            assembled = self.app_service.simulation_runner.adapter.assembler.assemble(project)
+        except Exception:
+            return False
+
+        fixed_angles = {
+            constraint.target_id: float(constraint.metadata["angle"])
+            for constraint in base_constraints
+            if constraint.kind == "body_angle" and "angle" in constraint.metadata
+        }
+        driver_info = get_drag_driver(assembled, saved_pose, marker_id, x, y, fixed_angles=fixed_angles)
+        seed_constraint: PoseConstraint
+        if driver_info is not None:
+            driver_body_id, driver_angle, guess_pose = driver_info
+            driver_body = assembled.bodies.get(driver_body_id)
+            driver_marker_id = self._equivalent_marker_on_body(assembled, marker_id, driver_body_id)
+            marker_on_driver = driver_body is not None and driver_marker_id is not None
+            if marker_on_driver and has_ground_revolute(assembled, driver_body_id):
+                self.app_service.set_current_pose(guess_pose)
+                seeded_x, seeded_y = marker_world_position(project, marker_id, guess_pose)
+                if projected_axis is not None and projected_value is not None:
+                    seeded_projected = seeded_x if projected_axis == "x" else seeded_y
+                    if abs(seeded_projected - projected_value) <= 1e-3:
+                        return True
+                if math.hypot(seeded_x - x, seeded_y - y) <= 1e-3:
+                    return True
+                seed_constraint = PoseConstraint(
+                    id=f"pose_seed_{marker_id}",
+                    kind="body_angle",
+                    target_id=driver_body_id,
+                    metadata={"angle": driver_angle},
+                )
+            else:
+                seed_constraint = PoseConstraint(
+                    id=f"pose_seed_{marker_id}",
+                    kind="marker_position",
+                    target_id=marker_id,
+                    metadata={"x": x, "y": y},
+                )
+        else:
+            seed_constraint = PoseConstraint(
+                id=f"pose_seed_{marker_id}",
+                kind="marker_position",
+                target_id=marker_id,
+                metadata={"x": x, "y": y},
+            )
+
+        try:
+            result = self.app_service.solve_current_pose(
+                temporary_constraints=[*base_constraints, seed_constraint],
+                settings=PoseSolveSettings(tolerance=1e-6, max_iterations=30, verbose=False),
+            )
+        except Exception:
+            self.app_service.set_current_pose(saved_pose)
+            return False
+        if result.success:
+            return True
+        self.app_service.set_current_pose(saved_pose)
+        return False
+
+    def _equivalent_marker_on_body(self, assembled, marker_id: str, body_id: str) -> str | None:
+        body = assembled.bodies.get(body_id)
+        if body is not None and marker_id in body.markers:
+            return marker_id
+        visited = {marker_id}
+        queue = [marker_id]
+        while queue:
+            current_marker_id = queue.pop(0)
+            for joint in assembled.joints:
+                endpoint_a = joint.endpoint_a
+                endpoint_b = joint.endpoint_b
+                if endpoint_a.kind is not JointEndpointKind.MARKER or endpoint_b.kind is not JointEndpointKind.MARKER:
+                    continue
+                neighbor_marker_id: str | None = None
+                neighbor_body_id: str | None = None
+                if endpoint_a.marker_id == current_marker_id:
+                    neighbor_marker_id = endpoint_b.marker_id
+                    neighbor_body_id = endpoint_b.body_id
+                elif endpoint_b.marker_id == current_marker_id:
+                    neighbor_marker_id = endpoint_a.marker_id
+                    neighbor_body_id = endpoint_a.body_id
+                if neighbor_marker_id is None:
+                    continue
+                if neighbor_body_id == body_id:
+                    return neighbor_marker_id
+                if neighbor_marker_id not in visited:
+                    visited.add(neighbor_marker_id)
+                    queue.append(neighbor_marker_id)
+        return None
+
+    def _resolve_pose_link_markers(
+        self,
+        assembled,
+        marker_id_1: str,
+        marker_id_2: str,
+        label: str,
+    ) -> tuple[Body, str, str] | None:
+        body_1 = self._body_for_marker_id(marker_id_1)
+        body_2 = self._body_for_marker_id(marker_id_2)
+        if body_1 is None or body_2 is None:
+            self._append_message("Could not resolve marker bodies")
+            return None
+        if body_1.id == body_2.id:
+            return body_1, marker_id_1, marker_id_2
+
+        marker_1_on_body_2 = self._equivalent_marker_on_body(assembled, marker_id_1, body_2.id)
+        if marker_1_on_body_2 is not None and marker_1_on_body_2 != marker_id_2:
+            return body_2, marker_1_on_body_2, marker_id_2
+
+        marker_2_on_body_1 = self._equivalent_marker_on_body(assembled, marker_id_2, body_1.id)
+        if marker_2_on_body_1 is not None and marker_2_on_body_1 != marker_id_1:
+            return body_1, marker_id_1, marker_2_on_body_1
+
+        self._append_message(f"Markers must define one link for {label} angle prescription")
+        return None
+
+    def _projected_seed_free_offsets(self) -> list[float]:
+        project = self.app_service.project
+        if project is None:
+            return [0.0]
+        try:
+            assembled = self.app_service.simulation_runner.adapter.assembler.assemble(project)
+        except Exception:
+            return [0.0, 10.0, -10.0, 25.0, -25.0, 50.0, -50.0, 100.0, -100.0]
+        points: list[tuple[float, float]] = []
+        pose = self.app_service.get_current_pose()
+        for body_id, body in assembled.bodies.items():
+            body_pose = pose.body_poses.get(body_id) if pose is not None else None
+            angle = body_pose.angle if body_pose is not None else body.angle
+            origin_x = body_pose.x if body_pose is not None else body.origin_x
+            origin_y = body_pose.y if body_pose is not None else body.origin_y
+            cos_a = math.cos(angle)
+            sin_a = math.sin(angle)
+            for marker in body.markers.values():
+                points.append((
+                    origin_x + cos_a * marker.local_x - sin_a * marker.local_y,
+                    origin_y + sin_a * marker.local_x + cos_a * marker.local_y,
+                ))
+        if not points:
+            return [0.0]
+        min_x = min(point[0] for point in points)
+        max_x = max(point[0] for point in points)
+        min_y = min(point[1] for point in points)
+        max_y = max(point[1] for point in points)
+        reach = max(50.0, math.hypot(max_x - min_x, max_y - min_y) * 1.25)
+        offsets = [0.0]
+        step = max(10.0, reach / 8.0)
+        value = step
+        while value <= reach + 1e-9:
+            offsets.extend([value, -value])
+            value += step
+        return offsets
+
+    def _seed_pose_toward_projected_coordinate(
+        self,
+        marker_id: str,
+        axis: str,
+        axis_value: float,
+        other_value: float,
+        base_constraints: list[PoseConstraint],
+    ) -> bool:
+        saved_pose = copy.deepcopy(self.app_service.get_current_pose())
+        for offset in self._projected_seed_free_offsets():
+            if saved_pose is not None:
+                self.app_service.set_current_pose(saved_pose)
+            candidate_other = other_value + offset
+            target_x = axis_value if axis == "x" else candidate_other
+            target_y = axis_value if axis == "y" else candidate_other
+            if not self._seed_pose_toward_marker_target(
+                marker_id,
+                target_x,
+                target_y,
+                base_constraints,
+                projected_axis=axis,
+                projected_value=axis_value,
+            ):
+                continue
+            seeded_value = self._pose_marker_axis_value(marker_id, axis)
+            if seeded_value is not None and abs(seeded_value - axis_value) <= 1e-3:
+                return True
+        if saved_pose is not None:
+            self.app_service.set_current_pose(saved_pose)
+        return False
+
+    def _pose_marker_axis_value(self, marker_id: str, axis: str) -> float | None:
+        project = self.app_service.project
+        pose = self.app_service.get_current_pose()
+        if project is None or pose is None:
+            return None
+        world_x, world_y = marker_world_position(project, marker_id, pose)
+        return world_x if axis == "x" else world_y
+
+    def _accept_kinematic_coordinate_pose(
+        self,
+        constraint_key: str,
+        constraint: PoseConstraint,
+        marker_id: str,
+        axis: str,
+        target_value: float,
+        tolerance_mm: float,
+        steps_completed: int,
+    ) -> tuple[bool, PoseSolveResult, int]:
+        current_value = self._pose_marker_axis_value(marker_id, axis)
+        if current_value is None or abs(current_value - target_value) > max(tolerance_mm, 1e-3):
+            return (
+                False,
+                PoseSolveResult(success=False, error="Kinematic pose did not reach prescribed coordinate"),
+                steps_completed,
+            )
+        violation = self._pose_joint_constraint_violation(tolerance_mm=1e-3)
+        if violation is not None:
+            return (
+                False,
+                PoseSolveResult(success=False, error=violation),
+                steps_completed,
+            )
+        final_constraint = copy.deepcopy(constraint)
+        final_constraint.metadata["value"] = target_value
+        self._pose_constraints[constraint_key] = final_constraint
+        self._apply_current_frame()
+        self._populate_inspector()
+        return (
+            True,
+            PoseSolveResult(
+                success=True,
+                pose=copy.deepcopy(self.app_service.get_current_pose()),
+                warnings=["Pose coordinate solved kinematically because the static solve was singular"],
+                messages=["Kinematic pose coordinate fallback completed"],
+                backend="kinematic_pose",
+            ),
+            steps_completed,
+        )
+
+    def _seed_pose_toward_body_angle(
+        self,
+        body_id: str,
+        target_angle: float,
+        base_constraints: list[PoseConstraint],
+    ) -> bool:
+        project = self.app_service.project
+        pose = self.app_service.get_current_pose()
+        if project is None or pose is None:
+            return False
+        try:
+            assembled = self.app_service.simulation_runner.adapter.assembler.assemble(project)
+        except Exception:
+            return False
+        fixed_angles = {
+            constraint.target_id: float(constraint.metadata["angle"])
+            for constraint in base_constraints
+            if constraint.kind == "body_angle" and "angle" in constraint.metadata
+        }
+        fixed_angles[body_id] = target_angle
+        seeded_pose = _pose_at_angle(assembled, pose, body_id, target_angle, fixed_angles)
+        self.app_service.set_current_pose(seeded_pose)
+        body_pose = seeded_pose.body_poses.get(body_id)
+        if body_pose is None:
+            return False
+        remaining = (target_angle - body_pose.angle + math.pi) % (2.0 * math.pi) - math.pi
+        if abs(remaining) > 1e-5:
+            return False
+        violation = self._pose_joint_constraint_violation(tolerance_mm=1e-3)
+        return violation is None
+
+    def _accept_kinematic_body_angle_pose(
+        self,
+        constraint_key: str,
+        body_id: str,
+        target_angle: float,
+        tolerance_rad: float,
+        steps_completed: int,
+    ) -> tuple[bool, PoseSolveResult, int]:
+        pose = self.app_service.get_current_pose()
+        body_pose = pose.body_poses.get(body_id) if pose is not None else None
+        if body_pose is None:
+            return (
+                False,
+                PoseSolveResult(success=False, error="Kinematic pose did not resolve the prescribed body"),
+                steps_completed,
+            )
+        remaining = (target_angle - body_pose.angle + math.pi) % (2.0 * math.pi) - math.pi
+        if abs(remaining) > tolerance_rad:
+            return (
+                False,
+                PoseSolveResult(success=False, error="Kinematic pose did not reach prescribed angle"),
+                steps_completed,
+            )
+        violation = self._pose_joint_constraint_violation(tolerance_mm=1e-3)
+        if violation is not None:
+            return (
+                False,
+                PoseSolveResult(success=False, error=violation),
+                steps_completed,
+            )
+        final_constraint = PoseConstraint(
+            id=f"pose_body_angle_{body_id}",
+            kind="body_angle",
+            target_id=body_id,
+            metadata={"angle": target_angle},
+        )
+        self._pose_constraints[constraint_key] = final_constraint
+        self._apply_current_frame()
+        self._populate_inspector()
+        return (
+            True,
+            PoseSolveResult(
+                success=True,
+                pose=copy.deepcopy(self.app_service.get_current_pose()),
+                warnings=["Pose angle solved kinematically because the static solve was singular"],
+                messages=["Kinematic pose angle fallback completed"],
+                backend="kinematic_pose",
+            ),
+            steps_completed,
+        )
+
+    def _pose_marker_world_position_from_assembled(
+        self,
+        assembled,
+        body_id: str | None,
+        marker_id: str | None,
+    ) -> tuple[float, float] | None:
+        if body_id is None or marker_id is None:
+            return None
+        body = assembled.bodies.get(body_id)
+        marker = body.markers.get(marker_id) if body is not None else None
+        pose = self.app_service.get_current_pose()
+        if body is None or marker is None or pose is None:
+            return None
+        body_pose = pose.body_poses.get(body_id)
+        if body_pose is None:
+            return marker.global_x, marker.global_y
+        cos_a = math.cos(body_pose.angle)
+        sin_a = math.sin(body_pose.angle)
+        return (
+            body_pose.x + cos_a * marker.local_x - sin_a * marker.local_y,
+            body_pose.y + sin_a * marker.local_x + cos_a * marker.local_y,
+        )
+
+    def _pose_joint_constraint_violation(self, *, tolerance_mm: float) -> str | None:
+        project = self.app_service.project
+        if project is None:
+            return None
+        try:
+            assembled = self.app_service.simulation_runner.adapter.assembler.assemble(project)
+        except Exception as exc:
+            return f"Could not validate pose joints: {exc}"
+        for joint in assembled.joints:
+            endpoint_a = joint.endpoint_a
+            endpoint_b = joint.endpoint_b
+            endpoints = (endpoint_a, endpoint_b)
+            marker_endpoints = [endpoint for endpoint in endpoints if endpoint.kind is JointEndpointKind.MARKER]
+            slider_endpoints = [endpoint for endpoint in endpoints if endpoint.kind is JointEndpointKind.SLIDER]
+
+            if len(marker_endpoints) == 2:
+                pos_a = self._pose_marker_world_position_from_assembled(
+                    assembled, marker_endpoints[0].body_id, marker_endpoints[0].marker_id
+                )
+                pos_b = self._pose_marker_world_position_from_assembled(
+                    assembled, marker_endpoints[1].body_id, marker_endpoints[1].marker_id
+                )
+                if pos_a is None or pos_b is None:
+                    continue
+                gap = math.hypot(pos_a[0] - pos_b[0], pos_a[1] - pos_b[1])
+                if gap > tolerance_mm:
+                    return f"Kinematic pose would violate joint {joint.name}: marker gap {gap:.6g} mm"
+                continue
+
+            if len(marker_endpoints) == 1 and any(endpoint.kind is JointEndpointKind.GROUND for endpoint in endpoints):
+                marker_endpoint = marker_endpoints[0]
+                body = assembled.bodies.get(marker_endpoint.body_id)
+                marker = body.markers.get(marker_endpoint.marker_id) if body is not None else None
+                pos = self._pose_marker_world_position_from_assembled(
+                    assembled, marker_endpoint.body_id, marker_endpoint.marker_id
+                )
+                if marker is None or pos is None:
+                    continue
+                gap = math.hypot(pos[0] - marker.global_x, pos[1] - marker.global_y)
+                if gap > tolerance_mm:
+                    return f"Kinematic pose would violate ground joint {joint.name}: gap {gap:.6g} mm"
+                continue
+
+            if len(marker_endpoints) == 1 and slider_endpoints:
+                marker_endpoint = marker_endpoints[0]
+                slider = assembled.sliders.get(slider_endpoints[0].slider_id)
+                pos = self._pose_marker_world_position_from_assembled(
+                    assembled, marker_endpoint.body_id, marker_endpoint.marker_id
+                )
+                if slider is None or pos is None:
+                    continue
+                dx = pos[0] - slider.origin_x
+                dy = pos[1] - slider.origin_y
+                normal_gap = abs(dx * slider.normal_x + dy * slider.normal_y)
+                slider_coordinate = dx * slider.axis_x + dy * slider.axis_y
+                if normal_gap > tolerance_mm:
+                    return f"Kinematic pose would violate slider joint {joint.name}: normal gap {normal_gap:.6g} mm"
+                if slider.travel_min is not None and slider_coordinate < slider.travel_min - tolerance_mm:
+                    return (
+                        f"Kinematic pose would violate slider joint {joint.name}: "
+                        f"coordinate {slider_coordinate:.6g} mm below travel_min {slider.travel_min:.6g} mm"
+                    )
+                if slider.travel_max is not None and slider_coordinate > slider.travel_max + tolerance_mm:
+                    return (
+                        f"Kinematic pose would violate slider joint {joint.name}: "
+                        f"coordinate {slider_coordinate:.6g} mm above travel_max {slider.travel_max:.6g} mm"
+                    )
+        return None
 
     def _solve_pose_constraint_progressively(
         self,
@@ -2474,14 +2928,73 @@ class MainWindow(QtWidgets.QMainWindow):
                     self._apply_current_frame()
                     self._populate_inspector()
                     return True, last_result, steps_completed
+                accepted, fallback_result, fallback_steps = self._accept_kinematic_coordinate_pose(
+                    constraint_key,
+                    final_constraint,
+                    marker_id,
+                    axis,
+                    target_value,
+                    tolerance_mm,
+                    steps_completed,
+                )
+                if accepted:
+                    return True, fallback_result, fallback_steps
                 if step_limit <= min_step_mm:
                     break
                 step_limit *= 0.5
                 continue
 
+            other_value = world_y if axis == "x" else world_x
+            direct_seed_success = self._seed_pose_toward_projected_coordinate(
+                marker_id,
+                axis,
+                target_value,
+                other_value,
+                base_constraints,
+            )
+            if direct_seed_success:
+                accepted, fallback_result, fallback_steps = self._accept_kinematic_coordinate_pose(
+                    constraint_key,
+                    template,
+                    marker_id,
+                    axis,
+                    target_value,
+                    tolerance_mm,
+                    steps_completed + 1,
+                )
+                if accepted:
+                    return True, fallback_result, fallback_steps
+
             step_value = target_value if abs(remaining) <= step_limit else current_value + math.copysign(step_limit, remaining)
             working_constraint = copy.deepcopy(template)
             working_constraint.metadata["value"] = step_value
+            seed_success = self._seed_pose_toward_projected_coordinate(
+                marker_id,
+                axis,
+                step_value,
+                other_value,
+                base_constraints,
+            )
+            if seed_success:
+                seeded_value = self._pose_marker_axis_value(marker_id, axis)
+                if seeded_value is not None and abs(seeded_value - step_value) <= max(tolerance_mm, 1e-3):
+                    steps_completed += 1
+                    if abs(target_value - seeded_value) <= tolerance_mm:
+                        accepted, fallback_result, fallback_steps = self._accept_kinematic_coordinate_pose(
+                            constraint_key,
+                            template,
+                            marker_id,
+                            axis,
+                            target_value,
+                            tolerance_mm,
+                            steps_completed,
+                        )
+                        if accepted:
+                            return True, fallback_result, fallback_steps
+                    self._apply_current_frame()
+                    self._populate_inspector()
+                    QtWidgets.QApplication.processEvents()
+                    continue
             last_result = self.app_service.solve_current_pose(
                 temporary_constraints=[*base_constraints, working_constraint],
                 settings=PoseSolveSettings(
@@ -2569,43 +3082,593 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._app_mode != "pose":
             return
         self._ensure_pose_session()
-        marker = self._selected_structural_marker_for_pose()
-        if marker is None:
-            self._append_message("Select a structural marker to prescribe a pose coordinate")
-            return
-        pose = self.app_service.get_current_pose()
-        world_x, world_y = marker_world_position(self.app_service.project, marker.id, pose)
-        current_value = world_x if axis == "x" else world_y
+        self._active_prescribe_action = self.action_pose_prescribe_x if axis == "x" else self.action_pose_prescribe_y
         label = "X" if axis == "x" else "Y"
+        self._pose_pick_state = {"kind": f"{axis}_coord", "picks": []}
+        self.canvas.set_mode(CanvasMode.POSE_PICK)
+        self._sync_pose_pick_preview()
+        self._append_message(f"Click a structural marker to prescribe {label} coordinate (Esc to cancel)")
+
+    def _body_for_marker_id(self, marker_id: str):
+        project = self.app_service.project
+        if project is None:
+            return None
+        return next(
+            (body for body in project.model.bodies if any(m.id == marker_id for m in body.markers)),
+            None,
+        )
+
+    def _parse_pose_dialog_value(self, raw_text: str, *, target_unit: str, default_unit: str) -> float:
+        normalized = raw_text.strip().replace(",", ".")
+        try:
+            return float(normalized)
+        except ValueError:
+            pass
+        quantity = self.app_service.expression_service.evaluate_expression(
+            normalized if any(ch.isalpha() for ch in normalized) else f"{normalized} {default_unit}",
+            self.app_service.project.parameters,
+        )
+        return float(self.app_service.unit_service.convert(quantity, target_unit))
+
+    def _prescribe_horizontal_angle(self) -> None:
+        if self._app_mode != "pose":
+            return
+        self._ensure_pose_session()
+        self._active_prescribe_action = self.action_pose_prescribe_horizontal
+        self._pose_pick_state = {"kind": "horiz_angle", "picks": []}
+        self.canvas.set_mode(CanvasMode.POSE_PICK)
+        self._sync_pose_pick_preview()
+        self._append_message("Click first marker of the link to prescribe its angle from horizontal (Esc to cancel)")
+
+    def _prescribe_vertical_angle(self) -> None:
+        if self._app_mode != "pose":
+            return
+        self._ensure_pose_session()
+        self._active_prescribe_action = self.action_pose_prescribe_vertical
+        self._pose_pick_state = {"kind": "vert_angle", "picks": []}
+        self.canvas.set_mode(CanvasMode.POSE_PICK)
+        self._sync_pose_pick_preview()
+        self._append_message("Click first marker of the link to prescribe its angle from vertical (Esc to cancel)")
+
+    def _prescribe_relative_angle(self) -> None:
+        if self._app_mode != "pose":
+            return
+        self._ensure_pose_session()
+        self._active_prescribe_action = self.action_pose_prescribe_angle
+        self._pose_pick_state = {"kind": "relative_angle", "picks": []}
+        self.canvas.set_mode(CanvasMode.POSE_PICK)
+        self._sync_pose_pick_preview()
+        self._append_message("Click first marker of Link A (Esc to cancel)")
+
+    def _sync_pose_pick_preview(self) -> None:
+        state = self._pose_pick_state
+        if state is None:
+            self.canvas.set_pose_pick_preview(None, [])
+            return
+        self.canvas.set_pose_pick_preview(state.get("kind"), state.get("picks", []))
+
+    def _cancel_pose_pick(self) -> None:
+        active = self._active_prescribe_action
+        self._active_prescribe_action = None
+        self._pose_pick_state = None
+        self.canvas.set_pose_pick_preview(None, [])
+        if active is not None:
+            active.setChecked(False)
+        if self.canvas._mode == CanvasMode.POSE_PICK:
+            self.canvas.set_mode(CanvasMode.SELECT)
+        self._append_message("Cancelled")
+
+    def _finish_pose_pick(self) -> None:
+        active = self._active_prescribe_action
+        self._active_prescribe_action = None
+        self.canvas.set_pose_pick_preview(None, [])
+        if active is not None:
+            active.setChecked(False)
+        if self.canvas._mode == CanvasMode.POSE_PICK:
+            self.canvas.set_mode(CanvasMode.SELECT)
+
+    def _advance_pose_pick(self, entity_id: str) -> None:
+        state = self._pose_pick_state
+        if state is None:
+            return
+        entity = self.app_service.get_entity(entity_id)
+        if not isinstance(entity, Marker) or entity.type is not MarkerType.STRUCTURAL:
+            return
+
+        kind: str = state["kind"]
+        picks: list = state["picks"]
+
+        if entity_id in picks:
+            self._append_message("Pick a different marker")
+            return
+        picks.append(entity_id)
+        self._sync_pose_pick_preview()
+
+        if kind in ("x_coord", "y_coord"):
+            self._pose_pick_state = None
+            self._finish_pose_pick()
+            axis = "x" if kind == "x_coord" else "y"
+            label = "X" if axis == "x" else "Y"
+            pose = self.app_service.get_current_pose()
+            world_x, world_y = marker_world_position(self.app_service.project, entity_id, pose)
+            current_value = world_x if axis == "x" else world_y
+            text, accepted = QtWidgets.QInputDialog.getText(
+                self,
+                f"Prescribe {label}",
+                f"Target {label} for {entity.name} [mm]:",
+                text=f"{current_value:.6g}",
+            )
+            if not accepted or not text.strip():
+                return
+            try:
+                value_mm = self._parse_pose_dialog_value(text, target_unit="mm", default_unit="mm")
+            except Exception as exc:
+                self._append_message(f"{label} must be a valid length: {exc}")
+                return
+            success, result, steps_completed = self._solve_pose_constraint_progressively(
+                f"{axis}:{entity_id}", axis, entity_id, value_mm
+            )
+            if success:
+                if steps_completed > 1:
+                    self._append_message(f"Pose solved in {steps_completed} intermediate steps")
+                else:
+                    self._append_message("Pose solved")
+                for warning in result.warnings:
+                    self._append_message(f"Pose warning: {warning}")
+            else:
+                detail = f": {result.error}" if result.error else ""
+                self._append_message(f"Pose solve failed{detail}")
+
+        elif kind in ("horiz_angle", "vert_angle"):
+            if len(picks) == 1:
+                self._append_message(f"{entity.name} — click second marker of the same link")
+            elif len(picks) == 2:
+                reference_world_angle = 0.0 if kind == "horiz_angle" else math.pi / 2.0
+                label = "Horizontal" if kind == "horiz_angle" else "Vertical"
+                QtWidgets.QApplication.processEvents()
+                self._execute_body_angle_from_picks(picks[0], picks[1], reference_world_angle, label)
+                self._pose_pick_state = None
+                self._finish_pose_pick()
+
+        elif kind == "relative_angle":
+            if len(picks) == 1:
+                self._append_message(f"Link A: {entity.name} — click second marker of Link A")
+            elif len(picks) == 2:
+                self._append_message("Click first marker of Link B")
+            elif len(picks) == 3:
+                self._append_message(f"Link B: {entity.name} — click second marker of Link B")
+            elif len(picks) == 4:
+                QtWidgets.QApplication.processEvents()
+                self._execute_relative_angle_from_picks(picks)
+                self._pose_pick_state = None
+                self._finish_pose_pick()
+
+    def _execute_body_angle_from_picks(
+        self, marker_id_1: str, marker_id_2: str, reference_world_angle: float, label: str
+    ) -> None:
+        assembled = assembled_reference_mechanism(self.app_service.project)
+        resolved = self._resolve_pose_link_markers(assembled, marker_id_1, marker_id_2, label)
+        if resolved is None:
+            return
+        body_1, marker_id_1, marker_id_2 = resolved
+        body_asm = assembled.bodies.get(body_1.id)
+        if body_asm is None:
+            self._append_message("Could not resolve body in assembled mechanism")
+            return
+        m1 = body_asm.markers.get(marker_id_1)
+        m2 = body_asm.markers.get(marker_id_2)
+        if m1 is None or m2 is None:
+            self._append_message("Could not resolve markers in assembled mechanism")
+            return
+        local_phi = math.atan2(m2.local_y - m1.local_y, m2.local_x - m1.local_x)
+        pose = self.app_service.get_current_pose()
+        world_1 = marker_world_position(self.app_service.project, marker_id_1, pose)
+        world_2 = marker_world_position(self.app_service.project, marker_id_2, pose)
+        current_world_angle = math.atan2(world_2[1] - world_1[1], world_2[0] - world_1[0])
+        current_reference_angle = math.atan2(
+            math.sin(current_world_angle - reference_world_angle),
+            math.cos(current_world_angle - reference_world_angle),
+        )
         text, accepted = QtWidgets.QInputDialog.getText(
             self,
-            f"Prescribe {label}",
-            f"Target {label} for {marker.name} [mm]:",
-            text=f"{current_value:.6g}",
+            f"Prescribe {label} Angle",
+            f"Target angle from {label.lower()} for {body_1.name} [deg]:",
+            text=f"{math.degrees(current_reference_angle):.6g}",
         )
         if not accepted or not text.strip():
             return
         try:
-            value_mm = float(text.strip().replace(",", "."))
-        except ValueError:
-            self._append_message(f"{label} must be a number in mm")
+            target_reference_angle = math.radians(
+                self._parse_pose_dialog_value(text, target_unit="deg", default_unit="deg")
+            )
+        except Exception as exc:
+            self._append_message(f"Angle must be a valid angle: {exc}")
             return
-        success, result, steps_completed = self._solve_pose_constraint_progressively(
-            f"{axis}:{marker.id}",
-            axis,
-            marker.id,
-            value_mm,
+        target_world_angle = reference_world_angle + target_reference_angle
+        target_body_angle = target_world_angle - local_phi
+        constraint_key = f"body_angle:{body_1.id}"
+        success, result, steps_completed = self._prescribe_body_angle_progressively(
+            constraint_key, body_1.id, target_body_angle
         )
         if success:
             if steps_completed > 1:
-                self._append_message(f"Pose solved in {steps_completed} intermediate steps")
+                self._append_message(f"{label} angle prescribed in {steps_completed} intermediate steps")
             else:
-                self._append_message("Pose solved")
+                self._append_message(f"{label} angle prescribed")
             for warning in result.warnings:
                 self._append_message(f"Pose warning: {warning}")
+        else:
+            detail = f": {result.error}" if result.error else ""
+            self._append_message(f"{label} angle prescription failed{detail}")
+
+    def _execute_relative_angle_from_picks(self, picks: list) -> None:
+        marker_a1_id, marker_a2_id, marker_b1_id, marker_b2_id = picks
+        project = self.app_service.project
+
+        assembled = assembled_reference_mechanism(project)
+        resolved_a = self._resolve_pose_link_markers(assembled, marker_a1_id, marker_a2_id, "Link A")
+        resolved_b = self._resolve_pose_link_markers(assembled, marker_b1_id, marker_b2_id, "Link B")
+        if resolved_a is None or resolved_b is None:
             return
-        detail = f": {result.error}" if result.error else ""
-        self._append_message(f"Pose solve failed{detail}")
+        body_a1, marker_a1_id, marker_a2_id = resolved_a
+        body_b1, marker_b1_id, marker_b2_id = resolved_b
+
+        body_a1 = self._body_for_marker_id(marker_a1_id)
+        body_a2 = self._body_for_marker_id(marker_a2_id)
+        body_b1 = self._body_for_marker_id(marker_b1_id)
+        body_b2 = self._body_for_marker_id(marker_b2_id)
+
+        if body_a1 is None or body_a2 is None or body_b1 is None or body_b2 is None:
+            self._append_message("Could not resolve marker bodies")
+            return
+        if body_a1.id != body_a2.id:
+            self._append_message("Link A markers must be on the same body — prescription cancelled")
+            return
+        if body_b1.id != body_b2.id:
+            self._append_message("Link B markers must be on the same body — prescription cancelled")
+            return
+        if body_a1.id == body_b1.id:
+            self._append_message("Link A and Link B must be on different bodies — prescription cancelled")
+            return
+
+        assembled = assembled_reference_mechanism(project)
+        body_a_asm = assembled.bodies.get(body_a1.id)
+        body_b_asm = assembled.bodies.get(body_b1.id)
+        if body_a_asm is None or body_b_asm is None:
+            self._append_message("Could not resolve bodies in assembled mechanism")
+            return
+
+        ma1 = body_a_asm.markers.get(marker_a1_id)
+        ma2 = body_a_asm.markers.get(marker_a2_id)
+        mb1 = body_b_asm.markers.get(marker_b1_id)
+        mb2 = body_b_asm.markers.get(marker_b2_id)
+        if None in (ma1, ma2, mb1, mb2):
+            self._append_message("Could not resolve markers in assembled mechanism")
+            return
+
+        local_phi_a = math.atan2(ma2.local_y - ma1.local_y, ma2.local_x - ma1.local_x)
+        local_phi_b = math.atan2(mb2.local_y - mb1.local_y, mb2.local_x - mb1.local_x)
+
+        pose = self.app_service.get_current_pose()
+        current_relative_deg = math.degrees(
+            self._current_relative_body_angle(
+                pose,
+                body_a1.id,
+                body_b1.id,
+                body_a_asm.angle,
+                body_b_asm.angle,
+                local_phi_a,
+                local_phi_b,
+            )
+        )
+
+        text, accepted = QtWidgets.QInputDialog.getText(
+            self,
+            "Prescribe Relative Angle",
+            f"Angle between {body_a1.name}→Link A and {body_b1.name}→Link B [deg]:",
+            text=f"{current_relative_deg:.4g}",
+        )
+        if not accepted or not text.strip():
+            return
+        try:
+            target_angle_rad = math.radians(
+                self._parse_pose_dialog_value(text, target_unit="deg", default_unit="deg")
+            )
+        except Exception as exc:
+            self._append_message(f"Angle must be a valid angle: {exc}")
+            return
+
+        success, result, steps_completed = self._prescribe_relative_body_angle_progressively(
+            constraint_key=f"relative_body_angle:{body_a1.id}:{body_b1.id}",
+            body_a_id=body_a1.id,
+            body_b_id=body_b1.id,
+            local_phi_a=local_phi_a,
+            local_phi_b=local_phi_b,
+            target_angle=target_angle_rad,
+        )
+        if success:
+            if steps_completed > 1:
+                self._append_message(f"Relative angle prescribed in {steps_completed} intermediate steps")
+            else:
+                self._append_message("Relative angle prescribed")
+            for warning in result.warnings:
+                self._append_message(f"Pose warning: {warning}")
+        else:
+            detail = f": {result.error}" if result.error else ""
+            self._append_message(f"Relative angle prescription failed{detail}")
+
+    def _current_relative_body_angle(
+        self,
+        pose,
+        body_a_id: str,
+        body_b_id: str,
+        fallback_a_angle: float,
+        fallback_b_angle: float,
+        local_phi_a: float,
+        local_phi_b: float,
+    ) -> float:
+        body_a_angle = pose.body_poses[body_a_id].angle if pose and body_a_id in pose.body_poses else fallback_a_angle
+        body_b_angle = pose.body_poses[body_b_id].angle if pose and body_b_id in pose.body_poses else fallback_b_angle
+        relative = (body_a_angle + local_phi_a) - (body_b_angle + local_phi_b)
+        return (relative + math.pi) % (2.0 * math.pi) - math.pi
+
+    def _prescribe_relative_body_angle_progressively(
+        self,
+        constraint_key: str,
+        body_a_id: str,
+        body_b_id: str,
+        local_phi_a: float,
+        local_phi_b: float,
+        target_angle: float,
+    ) -> tuple[bool, PoseSolveResult, int]:
+        self._ensure_pose_session()
+        starting_pose = copy.deepcopy(self.app_service.get_current_pose())
+        base_constraints = [
+            constraint
+            for key, constraint in self._pose_constraints.items()
+            if key != constraint_key
+        ]
+        template = PoseConstraint(
+            id=f"pose_rel_angle_{body_a_id}_{body_b_id}",
+            kind="relative_body_angle",
+            target_id=body_a_id,
+            metadata={
+                "body_a_id": body_a_id,
+                "body_b_id": body_b_id,
+                "local_phi_a": local_phi_a,
+                "local_phi_b": local_phi_b,
+                "angle": target_angle,
+            },
+        )
+        assembled = assembled_reference_mechanism(self.app_service.project)
+        body_a_asm = assembled.bodies.get(body_a_id)
+        body_b_asm = assembled.bodies.get(body_b_id)
+        if body_a_asm is None or body_b_asm is None:
+            return (
+                False,
+                PoseSolveResult(
+                    success=False,
+                    error="Could not resolve bodies in assembled mechanism",
+                    messages=["Progressive relative body angle solve did not start"],
+                ),
+                0,
+            )
+
+        max_step_rad = math.pi / 4.0
+        min_step_rad = math.pi / 180.0
+        tolerance_rad = 1e-5
+        step_limit = max_step_rad
+        steps_completed = 0
+        last_result = PoseSolveResult(
+            success=False,
+            error="Pose solve did not start",
+            messages=["Progressive relative body angle solve did not start"],
+        )
+
+        for _ in range(120):
+            pose = self.app_service.get_current_pose()
+            current_angle = self._current_relative_body_angle(
+                pose,
+                body_a_id,
+                body_b_id,
+                body_a_asm.angle,
+                body_b_asm.angle,
+                local_phi_a,
+                local_phi_b,
+            )
+            remaining = (target_angle - current_angle + math.pi) % (2.0 * math.pi) - math.pi
+
+            if abs(remaining) <= tolerance_rad:
+                final_constraint = copy.deepcopy(template)
+                last_result = self.app_service.solve_current_pose(
+                    temporary_constraints=[*base_constraints, final_constraint],
+                    settings=PoseSolveSettings(),
+                )
+                if last_result.success:
+                    self._pose_constraints[constraint_key] = final_constraint
+                    self._apply_current_frame()
+                    self._populate_inspector()
+                    return True, last_result, steps_completed
+                if step_limit <= min_step_rad:
+                    break
+                step_limit *= 0.5
+                continue
+
+            step_angle = (
+                target_angle
+                if abs(remaining) <= step_limit
+                else current_angle + math.copysign(step_limit, remaining)
+            )
+            working_constraint = copy.deepcopy(template)
+            working_constraint.metadata["angle"] = step_angle
+            last_result = self.app_service.solve_current_pose(
+                temporary_constraints=[*base_constraints, working_constraint],
+                settings=PoseSolveSettings(tolerance=1e-7, max_iterations=40),
+            )
+            if last_result.success:
+                new_pose = self.app_service.get_current_pose()
+                new_angle = self._current_relative_body_angle(
+                    new_pose,
+                    body_a_id,
+                    body_b_id,
+                    body_a_asm.angle,
+                    body_b_asm.angle,
+                    local_phi_a,
+                    local_phi_b,
+                )
+                advanced = (new_angle - current_angle + math.pi) % (2.0 * math.pi) - math.pi
+                if abs(advanced) <= tolerance_rad and abs(remaining) > tolerance_rad:
+                    if step_limit <= min_step_rad:
+                        last_result = PoseSolveResult(
+                            success=False,
+                            error="Pose solve stalled before reaching the prescribed relative angle",
+                            messages=["Progressive relative body angle solve stalled"],
+                        )
+                        break
+                    step_limit *= 0.5
+                    continue
+                steps_completed += 1
+                self._apply_current_frame()
+                self._populate_inspector()
+                QtWidgets.QApplication.processEvents()
+                continue
+
+            if step_limit <= min_step_rad:
+                break
+            step_limit *= 0.5
+
+        if starting_pose is not None:
+            self.app_service.set_current_pose(starting_pose)
+            self._apply_current_frame()
+            self._populate_inspector()
+        return False, last_result, steps_completed
+
+    def _prescribe_body_angle_progressively(
+        self,
+        constraint_key: str,
+        body_id: str,
+        target_angle: float,
+    ) -> tuple[bool, "PoseSolveResult", int]:
+        self._ensure_pose_session()
+        starting_pose = copy.deepcopy(self.app_service.get_current_pose())
+        base_constraints = [
+            c for key, c in self._pose_constraints.items() if key != constraint_key
+        ]
+        max_step_rad = math.pi / 4.0
+        min_step_rad = math.pi / 180.0
+        tolerance_rad = 1e-5
+        step_limit = max_step_rad
+        steps_completed = 0
+        last_result = PoseSolveResult(
+            success=False,
+            error="Pose solve did not start",
+            messages=["Progressive body angle solve did not start"],
+        )
+
+        for _ in range(120):
+            pose = self.app_service.get_current_pose()
+            body_pose_state = pose.body_poses.get(body_id) if pose is not None else None
+            if body_pose_state is None:
+                break
+            current_angle = body_pose_state.angle
+            remaining = target_angle - current_angle
+            remaining = (remaining + math.pi) % (2 * math.pi) - math.pi
+
+            if abs(remaining) <= tolerance_rad:
+                final_constraint = PoseConstraint(
+                    id=f"pose_body_angle_{body_id}",
+                    kind="body_angle",
+                    target_id=body_id,
+                    metadata={"angle": target_angle},
+                )
+                last_result = self.app_service.solve_current_pose(
+                    temporary_constraints=[*base_constraints, final_constraint],
+                    settings=PoseSolveSettings(),
+                )
+                if last_result.success:
+                    self._pose_constraints[constraint_key] = final_constraint
+                    self._apply_current_frame()
+                    self._populate_inspector()
+                    return True, last_result, steps_completed
+                accepted, fallback_result, fallback_steps = self._accept_kinematic_body_angle_pose(
+                    constraint_key,
+                    body_id,
+                    target_angle,
+                    tolerance_rad,
+                    steps_completed,
+                )
+                if accepted:
+                    return True, fallback_result, fallback_steps
+                if step_limit <= min_step_rad:
+                    break
+                step_limit *= 0.5
+                continue
+
+            step_angle = (
+                target_angle
+                if abs(remaining) <= step_limit
+                else current_angle + math.copysign(step_limit, remaining)
+            )
+            working_constraint = PoseConstraint(
+                id=f"pose_body_angle_{body_id}",
+                kind="body_angle",
+                target_id=body_id,
+                metadata={"angle": step_angle},
+            )
+            saved_step_pose = copy.deepcopy(self.app_service.get_current_pose())
+            if self._seed_pose_toward_body_angle(body_id, step_angle, base_constraints):
+                steps_completed += 1
+                if abs(target_angle - step_angle) <= tolerance_rad:
+                    accepted, fallback_result, fallback_steps = self._accept_kinematic_body_angle_pose(
+                        constraint_key,
+                        body_id,
+                        target_angle,
+                        tolerance_rad,
+                        steps_completed,
+                    )
+                    if accepted:
+                        return True, fallback_result, fallback_steps
+                self._apply_current_frame()
+                self._populate_inspector()
+                QtWidgets.QApplication.processEvents()
+                continue
+            if saved_step_pose is not None:
+                self.app_service.set_current_pose(saved_step_pose)
+            last_result = self.app_service.solve_current_pose(
+                temporary_constraints=[*base_constraints, working_constraint],
+                settings=PoseSolveSettings(tolerance=1e-7, max_iterations=40),
+            )
+            if last_result.success:
+                new_pose = self.app_service.get_current_pose()
+                new_angle = new_pose.body_poses[body_id].angle
+                if abs(new_angle - current_angle) <= tolerance_rad and abs(remaining) > tolerance_rad:
+                    if step_limit <= min_step_rad:
+                        last_result = PoseSolveResult(
+                            success=False,
+                            error="Pose solve stalled before reaching the prescribed angle",
+                            messages=["Progressive body angle solve stalled"],
+                        )
+                        break
+                    step_limit *= 0.5
+                    continue
+                steps_completed += 1
+                self._apply_current_frame()
+                QtWidgets.QApplication.processEvents()
+            else:
+                if step_limit <= min_step_rad:
+                    break
+                step_limit *= 0.5
+                self.app_service.set_current_pose(pose)
+                self._apply_current_frame()
+                self._populate_inspector()
+                QtWidgets.QApplication.processEvents()
+                continue
+
+        if starting_pose is not None:
+            self.app_service.set_current_pose(starting_pose)
+            self._apply_current_frame()
+            self._populate_inspector()
+        return False, last_result, steps_completed
 
     def _solve_pose_with_drag(self, marker_id: str, x: float, y: float, *, final: bool) -> None:
         self._ensure_pose_session()
@@ -2747,6 +3810,13 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 # Para botones que no están en tool_group (como drivers)
                 action_for_mode.setChecked(True)
+        if mode != CanvasMode.POSE_PICK and self._active_prescribe_action is not None:
+            self._active_prescribe_action.setChecked(False)
+            self._active_prescribe_action = None
+            if self._pose_pick_state is not None:
+                self._pose_pick_state = None
+                self.canvas.set_pose_pick_preview(None, [])
+                self._append_message("Cancelled")
         self._update_status_message()
 
     def _on_dof_info_changed(self, text: str) -> None:
@@ -3676,6 +4746,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_pose_clear_initial,
             self.action_pose_prescribe_x,
             self.action_pose_prescribe_y,
+            self.action_pose_prescribe_horizontal,
+            self.action_pose_prescribe_vertical,
+            self.action_pose_prescribe_angle,
         ):
             action.setEnabled(pose_editing_allowed)
         in_sketch_mode = self._app_mode == "sketch"

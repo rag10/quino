@@ -210,6 +210,19 @@ class ExudynPoseAdapter(ExudynAdapter):
                 float(constraint.metadata["angle"]),
             )
             return
+        if constraint.kind == "relative_body_angle":
+            self._apply_relative_body_angle_constraint(
+                mbs,
+                item_interface,
+                assembled,
+                node_numbers,
+                str(constraint.metadata["body_a_id"]),
+                str(constraint.metadata["body_b_id"]),
+                float(constraint.metadata["local_phi_a"]),
+                float(constraint.metadata["local_phi_b"]),
+                float(constraint.metadata["angle"]),
+            )
+            return
         warnings.append(f"Constraint unsupported in pose mode: {constraint.kind}")
 
     def _apply_marker_projected_coordinate_constraint(
@@ -318,6 +331,39 @@ class ExudynPoseAdapter(ExudynAdapter):
             item_interface.CoordinateConstraint(
                 markerNumbers=[ground_marker, body_marker],
                 offset=target_angle - ref_angle,
+            )
+        )
+
+    def _apply_relative_body_angle_constraint(
+        self,
+        mbs,
+        item_interface,
+        assembled,
+        node_numbers: dict[str, int],
+        body_a_id: str,
+        body_b_id: str,
+        local_phi_a: float,
+        local_phi_b: float,
+        target_relative_angle: float,
+    ) -> None:
+        # Constraint: world_angle_A - world_angle_B = target_relative_angle
+        # where world_angle_X = body_X.actual_angle + local_phi_X
+        # In Exudyn coords: q_X = body_X.actual_angle - ref_X
+        # (q_A + ref_A + phi_A) - (q_B + ref_B + phi_B) = target
+        # q_A - q_B + offset = 0  →  offset = phi_A - phi_B + ref_A - ref_B - target
+        ref_a = assembled.bodies[body_a_id].angle if body_a_id in assembled.bodies else 0.0
+        ref_b = assembled.bodies[body_b_id].angle if body_b_id in assembled.bodies else 0.0
+        offset = local_phi_a - local_phi_b + ref_a - ref_b - target_relative_angle
+        body_a_angle_marker = mbs.AddMarker(
+            item_interface.MarkerNodeCoordinate(nodeNumber=node_numbers[body_a_id], coordinate=2)
+        )
+        body_b_angle_marker = mbs.AddMarker(
+            item_interface.MarkerNodeCoordinate(nodeNumber=node_numbers[body_b_id], coordinate=2)
+        )
+        mbs.AddObject(
+            item_interface.CoordinateConstraint(
+                markerNumbers=[body_a_angle_marker, body_b_angle_marker],
+                offset=offset,
             )
         )
 

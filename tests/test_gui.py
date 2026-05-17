@@ -6,8 +6,11 @@ import math
 import pytest
 from PySide6 import QtCore, QtGui, QtTest, QtWidgets
 
+from quino.application.examples import build_double_pendulum_example
 from quino.application.service import ApplicationService
-from quino.domain.inputs import MarkerInput, PropertyValueInput, SliderInput
+from quino.domain.inputs import JointEndpointInput, MarkerInput, PropertyValueInput, SliderInput
+from quino.domain.types import JointEndpointKind
+from quino.gui.canvas import CanvasMode
 from quino.gui.main_window import MainWindow
 from quino.pose.geometry import marker_world_position
 from quino.pose.model import PoseConstraint, PoseSolveResult
@@ -177,9 +180,9 @@ def test_pose_mode_creates_current_pose_and_prescribe_x(monkeypatch) -> None:
 
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args, **kwargs: ("80", True))
     window._set_app_mode("pose")
-    window._select_entity_by_id(marker_p)
+    window.action_pose_prescribe_x.trigger()   # enters pick mode
     qt_app.processEvents()
-    window.action_pose_prescribe_x.trigger()
+    window._select_entity_by_id(marker_p)      # simulates picking the marker
     qt_app.processEvents()
 
     current_pose = window.app_service.get_current_pose()
@@ -189,6 +192,510 @@ def test_pose_mode_creates_current_pose_and_prescribe_x(monkeypatch) -> None:
     marker = next(item for item in body.markers if item.id == marker_p)
     assert marker.x.expression == "100 mm"
     assert marker.y.expression == "0 mm"
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_pose_prescribe_x_via_pose_pick_signal(monkeypatch) -> None:
+    """Test that emitting poseMarkerPicked (the real UI path) triggers _advance_pose_pick."""
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "P"))
+    marker_a = next(m.id for m in window.app_service._find_body(body_id).markers if m.name == "A")
+    marker_p = next(m.id for m in window.app_service._find_body(body_id).markers if m.name == "P")
+    window.app_service.connect_marker_to_ground(marker_a)
+    pose = window.app_service.reset_current_pose_to_reference()
+    pose.body_poses[body_id].angle = 0.7
+    window.app_service.set_current_pose(pose)
+    window.refresh_all()
+
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args, **kwargs: ("80", True))
+    window._set_app_mode("pose")
+    window.action_pose_prescribe_x.trigger()   # button becomes checked, canvas → POSE_PICK
+    qt_app.processEvents()
+    # Simulate canvas emitting poseMarkerPicked (what mousePressEvent does in POSE_PICK mode)
+    window.canvas.poseMarkerPicked.emit(marker_p)
+    qt_app.processEvents()
+
+    current_pose = window.app_service.get_current_pose()
+    assert current_pose is not None
+    assert current_pose.body_poses[body_id].angle != pytest.approx(0.7)
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_pose_prescribe_x_accepts_length_expression_and_updates_canvas(monkeypatch) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "P"))
+    marker_a = next(m.id for m in window.app_service._find_body(body_id).markers if m.name == "A")
+    marker_p = next(m.id for m in window.app_service._find_body(body_id).markers if m.name == "P")
+    window.app_service.connect_marker_to_ground(marker_a)
+    pose = window.app_service.reset_current_pose_to_reference()
+    pose.body_poses[body_id].angle = 0.7
+    window.app_service.set_current_pose(pose)
+    window.refresh_all()
+
+    before = window.canvas.screen_position_for_entity(marker_p)
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args, **kwargs: ("80 mm", True))
+    window._set_app_mode("pose")
+    window.action_pose_prescribe_x.trigger()
+    qt_app.processEvents()
+    window.canvas.poseMarkerPicked.emit(marker_p)
+    qt_app.processEvents()
+
+    current_pose = window.app_service.get_current_pose()
+    assert current_pose is not None
+    marker_x, _marker_y = marker_world_position(window.app_service.project, marker_p, current_pose)
+    assert marker_x == pytest.approx(80.0, abs=1e-4)
+    assert window.canvas.screen_position_for_entity(marker_p) != before
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_pose_prescribe_x_updates_canvas_on_closed_loop_mechanism(monkeypatch) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    window.load_four_bar_example()
+    window._set_app_mode("pose")
+    window.refresh_all()
+    qt_app.processEvents()
+
+    marker_c = next(
+        marker.id
+        for body in window.app_service.project.model.bodies
+        if body.name == "Coupler"
+        for marker in body.markers
+        if marker.name == "C"
+    )
+
+    before = window.canvas.screen_position_for_entity(marker_c)
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args, **kwargs: ("80 mm", True))
+    window.action_pose_prescribe_x.trigger()
+    qt_app.processEvents()
+    window.canvas.poseMarkerPicked.emit(marker_c)
+    qt_app.processEvents()
+
+    current_pose = window.app_service.get_current_pose()
+    assert current_pose is not None
+    marker_x, _marker_y = marker_world_position(window.app_service.project, marker_c, current_pose)
+    assert marker_x == pytest.approx(80.0, abs=1e-4)
+    assert window.canvas.screen_position_for_entity(marker_c) != before
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_pose_prescribe_x_updates_canvas_on_double_pendulum(monkeypatch) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    build_double_pendulum_example(window.app_service)
+    window.refresh_all()
+    window._set_app_mode("pose")
+    qt_app.processEvents()
+
+    marker_c = next(
+        marker.id
+        for body in window.app_service.project.model.bodies
+        if body.name == "Arm2"
+        for marker in body.markers
+        if marker.name == "C"
+    )
+
+    before = window.canvas.screen_position_for_entity(marker_c)
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args, **kwargs: ("0", True))
+    window.action_pose_prescribe_x.trigger()
+    qt_app.processEvents()
+    window.canvas.poseMarkerPicked.emit(marker_c)
+    qt_app.processEvents()
+
+    current_pose = window.app_service.get_current_pose()
+    assert current_pose is not None
+    marker_x, _marker_y = marker_world_position(window.app_service.project, marker_c, current_pose)
+    assert marker_x == pytest.approx(0.0, abs=1e-3)
+    assert window.canvas.screen_position_for_entity(marker_c) != before
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_pose_prescribe_x_updates_double_pendulum_joint_marker(monkeypatch) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    build_double_pendulum_example(window.app_service)
+    window.refresh_all()
+    window._set_app_mode("pose")
+    qt_app.processEvents()
+
+    marker_b = next(
+        marker.id
+        for body in window.app_service.project.model.bodies
+        if body.name == "Arm2"
+        for marker in body.markers
+        if marker.name == "B"
+    )
+
+    before = window.canvas.screen_position_for_entity(marker_b)
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args, **kwargs: ("0", True))
+    window.action_pose_prescribe_x.trigger()
+    qt_app.processEvents()
+    window.canvas.poseMarkerPicked.emit(marker_b)
+    qt_app.processEvents()
+
+    current_pose = window.app_service.get_current_pose()
+    assert current_pose is not None
+    marker_x, _marker_y = marker_world_position(window.app_service.project, marker_b, current_pose)
+    assert marker_x == pytest.approx(0.0, abs=1e-3)
+    assert window.canvas.screen_position_for_entity(marker_b) != before
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_pose_prescribe_x_large_step_updates_double_pendulum(monkeypatch) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    build_double_pendulum_example(window.app_service)
+    window.refresh_all()
+    window._set_app_mode("pose")
+    qt_app.processEvents()
+
+    marker_c = next(
+        marker.id
+        for body in window.app_service.project.model.bodies
+        if body.name == "Arm2"
+        for marker in body.markers
+        if marker.name == "C"
+    )
+
+    before = window.canvas.screen_position_for_entity(marker_c)
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args, **kwargs: ("-100", True))
+    window.action_pose_prescribe_x.trigger()
+    qt_app.processEvents()
+    window.canvas.poseMarkerPicked.emit(marker_c)
+    qt_app.processEvents()
+
+    current_pose = window.app_service.get_current_pose()
+    assert current_pose is not None
+    marker_x, _marker_y = marker_world_position(window.app_service.project, marker_c, current_pose)
+    assert marker_x == pytest.approx(-100.0, abs=1e-3)
+    assert window.canvas.screen_position_for_entity(marker_c) != before
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_pose_kinematic_fallback_rejects_ground_joint_violation() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "P"))
+    marker_a = next(m.id for m in window.app_service._find_body(body_id).markers if m.name == "A")
+    window.app_service.connect_marker_to_ground(marker_a)
+    pose = window.app_service.reset_current_pose_to_reference()
+    pose.body_poses[body_id].x += 10.0
+    window.app_service.set_current_pose(pose)
+
+    constraint = PoseConstraint(
+        id=f"pose_x_{marker_a}",
+        kind="marker_projected_coordinate",
+        target_id=marker_a,
+        metadata={"axis_x": 1.0, "axis_y": 0.0, "value": 10.0},
+    )
+    accepted, result, _steps = window._accept_kinematic_coordinate_pose(
+        f"marker_projected_coordinate:x:{marker_a}",
+        constraint,
+        marker_a,
+        "x",
+        10.0,
+        1e-3,
+        1,
+    )
+
+    assert not accepted
+    assert result.error is not None
+    assert "ground joint" in result.error
+    assert f"marker_projected_coordinate:x:{marker_a}" not in window._pose_constraints
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_pose_kinematic_fallback_rejects_slider_joint_violation() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_body("Block", [MarkerInput("0 mm", "0 mm", "P")])
+    marker_p = next(m.id for m in window.app_service._find_body(body_id).markers if m.name == "P")
+    slider_id = window.app_service.create_slider("Guide", SliderInput("0 mm", "0 mm", "0 deg"))
+    window.app_service.connect_marker_to_slider(marker_p, slider_id, name="Slider_P")
+    pose = window.app_service.reset_current_pose_to_reference()
+    pose.body_poses[body_id].y += 50.0
+    window.app_service.set_current_pose(pose)
+
+    constraint = PoseConstraint(
+        id=f"pose_y_{marker_p}",
+        kind="marker_projected_coordinate",
+        target_id=marker_p,
+        metadata={"axis_x": 0.0, "axis_y": 1.0, "value": 50.0},
+    )
+    accepted, result, _steps = window._accept_kinematic_coordinate_pose(
+        f"marker_projected_coordinate:y:{marker_p}",
+        constraint,
+        marker_p,
+        "y",
+        50.0,
+        1e-3,
+        1,
+    )
+
+    assert not accepted
+    assert result.error is not None
+    assert "slider joint" in result.error
+    assert f"marker_projected_coordinate:y:{marker_p}" not in window._pose_constraints
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_pose_pick_mode_mouseclick_detects_marker(monkeypatch) -> None:
+    """QTest.mouseClick on canvas in POSE_PICK mode must detect the structural marker."""
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "P"))
+    marker_a = next(m.id for m in window.app_service._find_body(body_id).markers if m.name == "A")
+    marker_p = next(m.id for m in window.app_service._find_body(body_id).markers if m.name == "P")
+    window.app_service.connect_marker_to_ground(marker_a)
+    pose = window.app_service.reset_current_pose_to_reference()
+    pose.body_poses[body_id].angle = 0.7
+    window.app_service.set_current_pose(pose)
+
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args, **kwargs: ("80", True))
+    window._set_app_mode("pose")
+    qt_app.processEvents()
+
+    window.action_pose_prescribe_x.trigger()
+    qt_app.processEvents()
+
+    pos = window.canvas.screen_position_for_entity(marker_p)
+    assert pos is not None, "screen_position_for_entity returned None"
+    assert window.canvas._mode == CanvasMode.POSE_PICK, f"Canvas should be in POSE_PICK, got {window.canvas._mode}"
+
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=pos)
+    qt_app.processEvents()
+
+    current_pose = window.app_service.get_current_pose()
+    assert current_pose is not None
+    assert current_pose.body_poses[body_id].angle != pytest.approx(0.7), "Pose angle should have changed after constraint"
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_pose_mode_prescribe_horizontal_angle_updates_canvas(monkeypatch) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "P"))
+    marker_a = next(m.id for m in window.app_service._find_body(body_id).markers if m.name == "A")
+    marker_p = next(m.id for m in window.app_service._find_body(body_id).markers if m.name == "P")
+    window.app_service.connect_marker_to_ground(marker_a)
+    pose = window.app_service.reset_current_pose_to_reference()
+    pose.body_poses[body_id].angle = 0.7
+    window.app_service.set_current_pose(pose)
+    window._set_app_mode("pose")
+    window.refresh_all()
+    qt_app.processEvents()
+
+    before = window.canvas.screen_position_for_entity(marker_p)
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args, **kwargs: ("0 deg", True))
+    window.action_pose_prescribe_horizontal.trigger()
+    qt_app.processEvents()
+    window.canvas.poseMarkerPicked.emit(marker_a)
+    assert window.canvas._pose_pick_marker_ids == [marker_a]
+    window.canvas.poseMarkerPicked.emit(marker_p)
+    qt_app.processEvents()
+
+    current_pose = window.app_service.get_current_pose()
+    assert current_pose is not None
+    assert current_pose.body_poses[body_id].angle == pytest.approx(0.0, abs=1e-4)
+    marker_ax, marker_ay = marker_world_position(window.app_service.project, marker_a, current_pose)
+    marker_px, marker_py = marker_world_position(window.app_service.project, marker_p, current_pose)
+    assert marker_px == pytest.approx(marker_ax + 100.0, abs=1e-4)
+    assert marker_py == pytest.approx(marker_ay, abs=1e-4)
+    assert window.canvas.screen_position_for_entity(marker_p) != before
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_pose_mode_prescribe_vertical_angle_uses_popup_and_updates_canvas(monkeypatch) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "P"))
+    marker_a = next(m.id for m in window.app_service._find_body(body_id).markers if m.name == "A")
+    marker_p = next(m.id for m in window.app_service._find_body(body_id).markers if m.name == "P")
+    window.app_service.connect_marker_to_ground(marker_a)
+    pose = window.app_service.reset_current_pose_to_reference()
+    pose.body_poses[body_id].angle = 0.2
+    window.app_service.set_current_pose(pose)
+    window._set_app_mode("pose")
+    window.refresh_all()
+    qt_app.processEvents()
+
+    before = window.canvas.screen_position_for_entity(marker_p)
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args, **kwargs: ("0 deg", True))
+    window.action_pose_prescribe_vertical.trigger()
+    qt_app.processEvents()
+    window.canvas.poseMarkerPicked.emit(marker_a)
+    assert window.canvas._pose_pick_marker_ids == [marker_a]
+    window.canvas.poseMarkerPicked.emit(marker_p)
+    qt_app.processEvents()
+
+    current_pose = window.app_service.get_current_pose()
+    assert current_pose is not None
+    assert current_pose.body_poses[body_id].angle == pytest.approx(math.pi / 2.0, abs=1e-4)
+    marker_ax, marker_ay = marker_world_position(window.app_service.project, marker_a, current_pose)
+    marker_px, marker_py = marker_world_position(window.app_service.project, marker_p, current_pose)
+    assert marker_px == pytest.approx(marker_ax, abs=1e-4)
+    assert marker_py == pytest.approx(marker_ay + 100.0, abs=1e-4)
+    assert window.canvas.screen_position_for_entity(marker_p) != before
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_pose_mode_prescribe_horizontal_angle_accepts_joint_equivalent_marker(monkeypatch) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    build_double_pendulum_example(window.app_service)
+    window.refresh_all()
+    window._set_app_mode("pose")
+    qt_app.processEvents()
+
+    arm1_b = next(
+        marker.id
+        for body in window.app_service.project.model.bodies
+        if body.name == "Arm1"
+        for marker in body.markers
+        if marker.name == "B"
+    )
+    arm2_c = next(
+        marker.id
+        for body in window.app_service.project.model.bodies
+        if body.name == "Arm2"
+        for marker in body.markers
+        if marker.name == "C"
+    )
+    arm2_id = next(body.id for body in window.app_service.project.model.bodies if body.name == "Arm2")
+
+    dialog_calls: list[str] = []
+
+    def fake_get_text(*args, **kwargs):
+        dialog_calls.append(args[1])
+        return "0 deg", True
+
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", fake_get_text)
+    window.action_pose_prescribe_horizontal.trigger()
+    qt_app.processEvents()
+    window.canvas.poseMarkerPicked.emit(arm1_b)
+    window.canvas.poseMarkerPicked.emit(arm2_c)
+    qt_app.processEvents()
+
+    current_pose = window.app_service.get_current_pose()
+    assert dialog_calls == ["Prescribe Horizontal Angle"]
+    assert current_pose is not None
+    assert current_pose.body_poses[arm2_id].angle == pytest.approx(0.0, abs=1e-4)
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_pose_mode_prescribe_relative_angle_updates_canvas(monkeypatch) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    crank_id = window.app_service.create_bar("Crank", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("50 mm", "0 mm", "B"))
+    crank_a = next(m.id for m in window.app_service._find_body(crank_id).markers if m.name == "A")
+    crank_b = next(m.id for m in window.app_service._find_body(crank_id).markers if m.name == "B")
+    coupler_id = window.app_service.create_bar("Coupler", MarkerInput("0 mm", "0 mm", "C"), MarkerInput("100 mm", "0 mm", "D"))
+    coupler_c = next(m.id for m in window.app_service._find_body(coupler_id).markers if m.name == "C")
+    coupler_d = next(m.id for m in window.app_service._find_body(coupler_id).markers if m.name == "D")
+    window.app_service.connect_marker_to_ground(crank_a)
+    window.app_service.create_joint(
+        "CrankCoupler",
+        "revolute",
+        JointEndpointInput(kind=JointEndpointKind.MARKER, body_id=crank_id, marker_id=crank_b),
+        JointEndpointInput(kind=JointEndpointKind.MARKER, body_id=coupler_id, marker_id=coupler_c),
+    )
+    window.app_service.reset_current_pose_to_reference()
+    window._set_app_mode("pose")
+    window._pose_constraints[f"body_angle:{crank_id}"] = PoseConstraint(
+        id=f"pose_body_angle_{crank_id}",
+        kind="body_angle",
+        target_id=crank_id,
+        metadata={"angle": math.pi / 6.0},
+    )
+    window._solve_pose()
+    window.refresh_all()
+    qt_app.processEvents()
+
+    before = window.canvas.screen_position_for_entity(coupler_d)
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args, **kwargs: ("45 deg", True))
+    window.action_pose_prescribe_angle.trigger()
+    qt_app.processEvents()
+    window.canvas.poseMarkerPicked.emit(crank_a)
+    assert window.canvas._pose_pick_marker_ids == [crank_a]
+    window.canvas.poseMarkerPicked.emit(crank_b)
+    assert window.canvas._pose_pick_marker_ids == [crank_a, crank_b]
+    window.canvas.poseMarkerPicked.emit(coupler_c)
+    assert window.canvas._pose_pick_marker_ids == [crank_a, crank_b, coupler_c]
+    window.canvas.poseMarkerPicked.emit(coupler_d)
+    qt_app.processEvents()
+
+    current_pose = window.app_service.get_current_pose()
+    assert current_pose is not None
+    assert current_pose.body_poses[crank_id].angle == pytest.approx(math.pi / 6.0, abs=1e-4)
+    assert current_pose.body_poses[coupler_id].angle == pytest.approx(-math.pi / 12.0, abs=1e-4)
+    assert window.canvas.screen_position_for_entity(coupler_d) != before
 
     window.close()
     qt_app.processEvents()
@@ -325,7 +832,6 @@ def test_pose_mode_prescribe_coordinate_uses_intermediate_steps(monkeypatch) -> 
     pose.body_poses[body_id].angle = 0.2
     window.app_service.set_current_pose(pose)
     window._set_app_mode("pose")
-    window._select_entity_by_id(marker_p)
     qt_app.processEvents()
 
     attempted_targets: list[float] = []
@@ -349,8 +855,11 @@ def test_pose_mode_prescribe_coordinate_uses_intermediate_steps(monkeypatch) -> 
 
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args, **kwargs: ("0", True))
     monkeypatch.setattr(window.app_service, "solve_current_pose", fake_solve)
+    monkeypatch.setattr(window, "_seed_pose_toward_projected_coordinate", lambda *args, **kwargs: False)
 
-    window.action_pose_prescribe_x.trigger()
+    window.action_pose_prescribe_x.trigger()  # enters pick mode
+    qt_app.processEvents()
+    window._select_entity_by_id(marker_p)     # simulates picking the marker → triggers dialog → triggers solve
     qt_app.processEvents()
 
     assert len(attempted_targets) >= 3

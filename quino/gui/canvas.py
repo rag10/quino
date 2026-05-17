@@ -128,6 +128,7 @@ class CanvasMode:
     CREATE_SKETCH_TANGENT = "create_sketch_tangent"
     CREATE_SKETCH_CONCENTRIC = "create_sketch_concentric"
     CREATE_SKETCH_ARC_CENTER = "create_sketch_arc_center"
+    POSE_PICK = "pose_pick"
 
 
 # Map CanvasMode constraint creation strings to SketchConstraintType
@@ -209,6 +210,7 @@ class MechanismCanvas(QtWidgets.QWidget):
     dofInfoChanged = QtCore.Signal(str)
     displaySettingsChanged = QtCore.Signal()
     poseMarkerDragged = QtCore.Signal(str, float, float, bool)
+    poseMarkerPicked = QtCore.Signal(str)
 
     def __init__(self, app_service: ApplicationService, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -239,6 +241,8 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._slider_joint_start: CanvasMarker | CanvasSlider | None = None
         self._driver_start_joint_id: str | None = None
         self._sensor_marker_ids: list[str] = []
+        self._pose_pick_preview_kind: str | None = None
+        self._pose_pick_marker_ids: list[str] = []
         self._creation_entity_ids: list[str] = []
         self._pending_distance_constraint_refs: list[str] = []
         self._hover_world: tuple[float, float] | None = None
@@ -383,6 +387,8 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._slider_joint_start = None
         self._driver_start_joint_id = None
         self._sensor_marker_ids = []
+        self._pose_pick_preview_kind = None
+        self._pose_pick_marker_ids = []
         self._creation_entity_ids = []
         self._pending_distance_constraint_refs = []
         self._hover_world = None
@@ -447,6 +453,11 @@ class MechanismCanvas(QtWidgets.QWidget):
         self.modeChanged.emit(mode)
         self.update()
 
+    def set_pose_pick_preview(self, kind: str | None, marker_ids: list[str] | tuple[str, ...] | None = None) -> None:
+        self._pose_pick_preview_kind = kind
+        self._pose_pick_marker_ids = list(marker_ids or [])
+        self.update()
+
     def _set_cursor_for_mode(self, mode: str) -> None:
         cursor_map = {
             CanvasMode.CREATE_SKETCH_POINT: QtCore.Qt.CursorShape.CrossCursor,
@@ -493,6 +504,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             CanvasMode.CREATE_ROTATIONAL_SPRING: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_LINEAR_ACTUATOR: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_ROTATIONAL_ACTUATOR: QtCore.Qt.CursorShape.CrossCursor,
+            CanvasMode.POSE_PICK: QtCore.Qt.CursorShape.CrossCursor,
         }
         self.setCursor(QtGui.QCursor(cursor_map.get(mode, QtCore.Qt.CursorShape.ArrowCursor)))
 
@@ -1003,6 +1015,11 @@ class MechanismCanvas(QtWidgets.QWidget):
         clicked_constraint = self._sketch_constraint_at(clicked)
         world = self._to_world(clicked, self._current_transform())
         additive_selection = bool(event.modifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier)
+
+        if self._mode == CanvasMode.POSE_PICK:
+            if clicked_marker is not None and clicked_marker.marker_type is MarkerType.STRUCTURAL:
+                self.poseMarkerPicked.emit(clicked_marker.entity_id)
+            return
 
         if self._mode == CanvasMode.SELECT:
             if clicked_sketch_point is not None and self._interaction_mode in ("sketch", "all"):
@@ -1747,10 +1764,12 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _marker_at(self, screen_pos: QtCore.QPointF) -> CanvasMarker | None:
         screen_markers = self._screen_markers
         if not screen_markers and self.app_service.project is not None:
+            project = self.app_service.project
+            assembled = self._assembled_mechanism(project)
             transform = self._current_transform()
             screen_markers = [
                 (marker, self._to_screen(marker.x, marker.y, transform))
-                for marker in self._collect_markers(self.app_service.project)
+                for marker in self._collect_markers(project, assembled)
                 if marker.visible
             ]
         for marker, marker_pos in reversed(screen_markers):
@@ -4583,6 +4602,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             painter.setBrush(QtGui.QBrush(QtGui.QColor("#2a9d8f")))
             for point in polyline_points[: len(self._creation_points)]:
                 painter.drawEllipse(point, 4.5, 4.5)
+        self._draw_pose_pick_preview(painter, transform)
         if self._joint_start_marker is not None and self._hover_world is not None:
             painter.setPen(QtGui.QPen(QtGui.QColor("#f4a261"), 2.0, QtCore.Qt.PenStyle.DashLine))
             start = self._to_screen(self._joint_start_marker.x, self._joint_start_marker.y, transform)
@@ -4680,6 +4700,53 @@ class MechanismCanvas(QtWidgets.QWidget):
             fill.setAlpha(35)
             painter.setBrush(QtGui.QBrush(fill))
             painter.drawRect(rect)
+
+    def _draw_pose_pick_preview(self, painter: QtGui.QPainter, transform) -> None:
+        if self._mode != CanvasMode.POSE_PICK or not self._pose_pick_marker_ids or self.app_service.project is None:
+            return
+        markers = {
+            marker.entity_id: marker
+            for marker in self._collect_markers(
+                self.app_service.project,
+                self._assembled_mechanism(self.app_service.project),
+            )
+        }
+        points = [
+            self._to_screen(markers[marker_id].x, markers[marker_id].y, transform)
+            for marker_id in self._pose_pick_marker_ids
+            if marker_id in markers
+        ]
+        if not points:
+            return
+
+        color = QtGui.QColor("#2f80ed")
+        painter.setPen(QtGui.QPen(color, 2.0, QtCore.Qt.PenStyle.DashLine))
+        painter.setBrush(QtGui.QBrush(color))
+
+        def draw_segment(start: QtCore.QPointF, end: QtCore.QPointF) -> None:
+            painter.drawLine(start, end)
+            painter.drawEllipse(start, 4.5, 4.5)
+            painter.drawEllipse(end, 4.5, 4.5)
+
+        if self._pose_pick_preview_kind in {"horiz_angle", "vert_angle"}:
+            if len(points) == 1 and self._hover_world is not None:
+                hover = self._to_screen(self._hover_world[0], self._hover_world[1], transform)
+                draw_segment(points[0], hover)
+            elif len(points) >= 2:
+                draw_segment(points[0], points[1])
+            return
+
+        if self._pose_pick_preview_kind == "relative_angle":
+            if len(points) >= 2:
+                draw_segment(points[0], points[1])
+            elif len(points) == 1 and self._hover_world is not None:
+                hover = self._to_screen(self._hover_world[0], self._hover_world[1], transform)
+                draw_segment(points[0], hover)
+            if len(points) == 3 and self._hover_world is not None:
+                hover = self._to_screen(self._hover_world[0], self._hover_world[1], transform)
+                draw_segment(points[2], hover)
+            elif len(points) >= 4:
+                draw_segment(points[2], points[3])
 
     def _draw_sketch_creation_preview(
         self,
