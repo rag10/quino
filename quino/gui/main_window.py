@@ -21,6 +21,7 @@ from quino.domain.model import (
     Load,
     Marker,
     Parameter,
+    Pose,
     Project,
     ReactionOutput,
     Sensor,
@@ -330,6 +331,8 @@ class PosesPanel(QtWidgets.QWidget):
     current_pose_changed = QtCore.Signal(str)        # pose_id selected for editing
     simulation_pose_changed = QtCore.Signal(object)  # pose_id or None
     poses_mutated = QtCore.Signal()                  # any add/remove/rename
+    pose_constraint_selected = QtCore.Signal(str)
+    pose_constraint_delete_requested = QtCore.Signal(str)
 
     _STAR_FILLED = "★"
     _STAR_EMPTY = "☆"
@@ -370,7 +373,8 @@ class PosesPanel(QtWidgets.QWidget):
         toolbar.addStretch(1)
         outer.addLayout(toolbar)
 
-        self._list = QtWidgets.QListWidget()
+        self._list = QtWidgets.QTreeWidget()
+        self._list.setHeaderHidden(True)
         self._list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         self._list.currentItemChanged.connect(self._on_current_changed)
         self._list.itemClicked.connect(self._on_item_clicked)
@@ -394,47 +398,82 @@ class PosesPanel(QtWidgets.QWidget):
                 return
             sim_id = self.app_service.get_simulation_initial_pose_id()
             current_id = self.app_service.get_current_pose_id()
-            current_row = -1
-            for idx, pose in enumerate(self.app_service.list_poses()):
+            current_item = None
+            for pose in self.app_service.list_poses():
                 star = self._STAR_FILLED if pose.id == sim_id else self._STAR_EMPTY
-                item = QtWidgets.QListWidgetItem(f"{star}  {pose.name}")
-                item.setData(QtCore.Qt.ItemDataRole.UserRole, pose.id)
-                item.setToolTip(
+                item = QtWidgets.QTreeWidgetItem([f"{star}  {pose.name}"])
+                item.setData(0, QtCore.Qt.ItemDataRole.UserRole, pose.id)
+                item.setData(0, QtCore.Qt.ItemDataRole.UserRole + 1, "pose")
+                item.setToolTip(0,
                     "Active simulation initial pose" if pose.id == sim_id else "Click star to mark as simulation initial"
                 )
-                self._list.addItem(item)
+                self._list.addTopLevelItem(item)
+                for constraint_key, constraint_data in self._pose_constraint_items(pose):
+                    child = QtWidgets.QTreeWidgetItem([self._pose_constraint_label(constraint_data)])
+                    child.setData(0, QtCore.Qt.ItemDataRole.UserRole, constraint_key)
+                    child.setData(0, QtCore.Qt.ItemDataRole.UserRole + 1, "constraint")
+                    child.setToolTip(0, "Pose prescribe constraint. Select and Delete to remove.")
+                    item.addChild(child)
+                item.setExpanded(True)
                 if pose.id == current_id:
-                    current_row = idx
-            if current_row >= 0:
-                self._list.setCurrentRow(current_row)
+                    current_item = item
+            if current_item is not None:
+                self._list.setCurrentItem(current_item)
             self._update_button_state()
         finally:
             self._suspend = False
 
     def _update_button_state(self) -> None:
         has_project = self.app_service.project is not None
-        has_selection = self._list.currentItem() is not None
+        current = self._list.currentItem()
+        selected_kind = current.data(0, QtCore.Qt.ItemDataRole.UserRole + 1) if current is not None else None
+        has_pose_selection = selected_kind == "pose"
+        has_constraint_selection = selected_kind == "constraint"
         self._new_btn.setEnabled(has_project)
-        self._duplicate_btn.setEnabled(has_project and has_selection)
-        self._rename_btn.setEnabled(has_project and has_selection)
-        self._delete_btn.setEnabled(has_project and has_selection)
+        self._duplicate_btn.setEnabled(has_project and has_pose_selection)
+        self._rename_btn.setEnabled(has_project and has_pose_selection)
+        self._delete_btn.setEnabled(has_project and (has_pose_selection or has_constraint_selection))
 
     def _selected_pose_id(self) -> str | None:
         item = self._list.currentItem()
-        return item.data(QtCore.Qt.ItemDataRole.UserRole) if item else None
+        if item is None:
+            return None
+        if item.data(0, QtCore.Qt.ItemDataRole.UserRole + 1) == "constraint":
+            item = item.parent()
+        return item.data(0, QtCore.Qt.ItemDataRole.UserRole) if item else None
+
+    def _selected_constraint_key(self) -> str | None:
+        item = self._list.currentItem()
+        if item is None or item.data(0, QtCore.Qt.ItemDataRole.UserRole + 1) != "constraint":
+            return None
+        return item.data(0, QtCore.Qt.ItemDataRole.UserRole)
 
     def _on_current_changed(self, current, previous) -> None:
         if self._suspend or current is None:
             self._update_button_state()
             return
-        pose_id = current.data(QtCore.Qt.ItemDataRole.UserRole)
+        kind = current.data(0, QtCore.Qt.ItemDataRole.UserRole + 1)
+        if kind == "constraint":
+            pose_item = current.parent()
+            pose_id = pose_item.data(0, QtCore.Qt.ItemDataRole.UserRole) if pose_item is not None else None
+            constraint_key = current.data(0, QtCore.Qt.ItemDataRole.UserRole)
+            if pose_id:
+                self.app_service.set_current_pose_id(pose_id)
+                self.current_pose_changed.emit(pose_id)
+            if constraint_key:
+                self.pose_constraint_selected.emit(constraint_key)
+            self._update_button_state()
+            return
+        pose_id = current.data(0, QtCore.Qt.ItemDataRole.UserRole)
         if pose_id:
             self.app_service.set_current_pose_id(pose_id)
             self.current_pose_changed.emit(pose_id)
         self._update_button_state()
 
-    def _on_item_clicked(self, item: QtWidgets.QListWidgetItem) -> None:
+    def _on_item_clicked(self, item: QtWidgets.QTreeWidgetItem) -> None:
         if self._suspend or item is None:
+            return
+        if item.data(0, QtCore.Qt.ItemDataRole.UserRole + 1) != "pose":
             return
         # If user clicked on the star glyph area (first ~3 characters),
         # treat it as toggling the simulation initial flag.
@@ -442,15 +481,16 @@ class PosesPanel(QtWidgets.QWidget):
         rect = self._list.visualItemRect(item)
         # Hit-test the first ~22px (star + spacing).
         if rect.contains(cursor_pos) and cursor_pos.x() - rect.left() <= 22:
-            pose_id = item.data(QtCore.Qt.ItemDataRole.UserRole)
+            pose_id = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
             current_sim = self.app_service.get_simulation_initial_pose_id()
             new_sim: str | None = None if current_sim == pose_id else pose_id
             self.app_service.set_simulation_initial_pose(new_sim)
             self.simulation_pose_changed.emit(new_sim)
             self.refresh()
 
-    def _on_item_double_clicked(self, item: QtWidgets.QListWidgetItem) -> None:
-        self._on_rename()
+    def _on_item_double_clicked(self, item: QtWidgets.QTreeWidgetItem) -> None:
+        if item is not None and item.data(0, QtCore.Qt.ItemDataRole.UserRole + 1) == "pose":
+            self._on_rename()
 
     def _on_new(self) -> None:
         if self.app_service.project is None:
@@ -490,6 +530,10 @@ class PosesPanel(QtWidgets.QWidget):
         self.refresh()
 
     def _on_delete(self) -> None:
+        constraint_key = self._selected_constraint_key()
+        if constraint_key is not None:
+            self.pose_constraint_delete_requested.emit(constraint_key)
+            return
         pose_id = self._selected_pose_id()
         if pose_id is None:
             return
@@ -511,6 +555,39 @@ class PosesPanel(QtWidgets.QWidget):
         new_current = self.app_service.get_current_pose_id()
         if new_current is not None:
             self.current_pose_changed.emit(new_current)
+
+    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa: N802 - Qt override
+        if event.key() == QtCore.Qt.Key.Key_Delete and self._selected_constraint_key() is not None:
+            self._on_delete()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def _pose_constraint_items(self, pose: Pose) -> list[tuple[str, dict]]:
+        raw_items = pose.metadata.values.get("pose_constraints", [])
+        if not isinstance(raw_items, list):
+            return []
+        items: list[tuple[str, dict]] = []
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("key")
+            constraint = item.get("constraint")
+            if isinstance(key, str) and isinstance(constraint, dict):
+                items.append((key, constraint))
+        return items
+
+    def _pose_constraint_label(self, constraint: dict) -> str:
+        kind = constraint.get("kind")
+        metadata = constraint.get("metadata", {})
+        if kind == "marker_projected_coordinate" and isinstance(metadata, dict):
+            axis = "X" if float(metadata.get("axis_x", 0.0)) else "Y"
+            return f"Prescribe {axis}: {float(metadata.get('value', 0.0)):.6g} mm"
+        if kind == "body_angle" and isinstance(metadata, dict):
+            return f"Prescribe angle: {math.degrees(float(metadata.get('angle', 0.0))):.6g} deg"
+        if kind == "relative_body_angle" and isinstance(metadata, dict):
+            return f"Prescribe relative angle: {math.degrees(float(metadata.get('angle', 0.0))):.6g} deg"
+        return "Pose prescribe"
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -622,8 +699,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         center_panel.addWidget(self._canvas_stack)
 
-        playback_widget = QtWidgets.QWidget()
-        playback_layout = QtWidgets.QVBoxLayout(playback_widget)
+        self._playback_widget = QtWidgets.QWidget()
+        playback_layout = QtWidgets.QVBoxLayout(self._playback_widget)
         playback_layout.setContentsMargins(6, 6, 6, 6)
         playback_layout.setSpacing(6)
 
@@ -698,7 +775,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_simulation_spin_steps()
 
         playback_layout.addWidget(playback_group)
-        center_panel.addWidget(playback_widget)
+        center_panel.addWidget(self._playback_widget)
 
         center_panel.setSizes([600, 80])
         splitter.addWidget(center_panel)
@@ -790,6 +867,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.poses_panel.current_pose_changed.connect(self._on_poses_panel_current_changed)
         self.poses_panel.simulation_pose_changed.connect(self._on_poses_panel_sim_initial_changed)
         self.poses_panel.poses_mutated.connect(self._on_poses_panel_mutated)
+        self.poses_panel.pose_constraint_selected.connect(self._on_pose_constraint_selected)
+        self.poses_panel.pose_constraint_delete_requested.connect(self._delete_pose_constraint)
         self._right_panel_tabs = right_panel
         self._poses_panel_index = right_panel.addTab(self.poses_panel, "Poses")
 
@@ -1346,8 +1425,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def _set_app_mode(self, mode: str) -> None:
         if mode == self._app_mode:
             return
+        previous_mode = self._app_mode
         self._app_mode = mode
         self.canvas.set_interaction_mode(mode)
+        if previous_mode == "pose" and mode != "pose":
+            self._reset_pose_ui_state()
 
         if mode == "sketch":
             self._mode_sketch_btn.setChecked(True)
@@ -1358,6 +1440,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._model_toolbar.setVisible(False)
             self._pose_toolbar.setVisible(False)
             self._sim_toolbar.setVisible(False)
+            self._playback_widget.setVisible(False)
             # Ensure sketch is visible when entering sketch mode
             if self.app_service.project and self.app_service.project.sketch is not None:
                 if not self.app_service.project.sketch.visible:
@@ -1376,7 +1459,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._model_toolbar.setVisible(False)
             self._pose_toolbar.setVisible(True)
             self._sim_toolbar.setVisible(False)
+            self._playback_widget.setVisible(False)
             self._ensure_pose_session()
+            self._load_pose_constraints_from_current_pose()
             self.poses_panel.refresh()
             if hasattr(self, "_right_panel_tabs"):
                 self._right_panel_tabs.setCurrentIndex(self._poses_panel_index)
@@ -1390,6 +1475,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._model_toolbar.setVisible(False)
             self._pose_toolbar.setVisible(False)
             self._sim_toolbar.setVisible(True)
+            self._playback_widget.setVisible(True)
             is_exudyn = self.app_service.simulation_runner.backend_name() == "exudyn"
             self.action_export_script.setEnabled(is_exudyn)
             self.refresh_all()
@@ -1402,6 +1488,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._model_toolbar.setVisible(True)
             self._pose_toolbar.setVisible(False)
             self._sim_toolbar.setVisible(False)
+            self._playback_widget.setVisible(False)
             self.refresh_all()
 
         # Force select mode when switching
@@ -1435,6 +1522,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if project is None:
             return
         if self.app_service.get_current_pose() is not None:
+            if not self._pose_constraints:
+                self._load_pose_constraints_from_current_pose()
             return
         # If the project already has poses, select the simulation initial
         # (or the first one) as the editing target. Otherwise create one.
@@ -1444,24 +1533,30 @@ class MainWindow(QtWidgets.QMainWindow):
             self.app_service.set_current_pose_id(target)
         else:
             self.app_service.create_pose(name="Reference")
+        self._load_pose_constraints_from_current_pose()
 
     def _reset_pose_ui_state(self) -> None:
         self._pose_drag_timer.stop()
         self._pending_pose_drag = None
         if self._active_prescribe_action is not None:
             self._active_prescribe_action.setChecked(False)
-            self._active_prescribe_action = None
+        self._active_prescribe_action = None
         self._pose_pick_state = None
         self._pose_constraints.clear()
+        self.canvas.set_pose_constraints([])
         if hasattr(self, "poses_panel"):
             self.poses_panel.refresh()
 
     def _on_poses_panel_current_changed(self, pose_id: str) -> None:
+        self._load_pose_constraints_from_current_pose()
         self._apply_current_frame()
         self._populate_inspector()
 
     def _on_poses_panel_sim_initial_changed(self, pose_id) -> None:
         self._mark_project_dirty()
+        if self._app_mode == "sim":
+            self._apply_current_frame()
+            self.canvas.update()
 
     def _on_poses_panel_mutated(self) -> None:
         self._mark_project_dirty()
@@ -1822,6 +1917,15 @@ class MainWindow(QtWidgets.QMainWindow):
         time_value = 0.0
         if self._app_mode == "pose":
             frame = pose_to_state_overlay(self.app_service.get_current_pose())
+        elif self._app_mode == "sim":
+            if self._last_simulation_result is not None and self._last_simulation_result.frames:
+                index = max(0, min(self._current_frame_index, len(self._last_simulation_result.frames) - 1))
+                frame = self._last_simulation_result.frames[index]
+                time_value = self._last_simulation_result.time[index] if index < len(self._last_simulation_result.time) else 0.0
+            else:
+                initial_pose = self.app_service.get_simulation_initial_pose()
+                if initial_pose is not None:
+                    frame = pose_to_state_overlay(initial_pose)
         elif self._last_simulation_result is not None and self._last_simulation_result.frames:
             index = max(0, min(self._current_frame_index, len(self._last_simulation_result.frames) - 1))
             frame = self._last_simulation_result.frames[index]
@@ -2447,11 +2551,74 @@ class MainWindow(QtWidgets.QMainWindow):
         return list(self._pose_constraints.values())
 
     def _pose_constraints_for_drag(self, marker_id: str) -> list[PoseConstraint]:
-        return [
-            constraint
-            for constraint in self._pose_constraints.values()
-            if constraint.target_id != marker_id
+        return list(self._pose_constraints.values())
+
+    def _pose_constraint_to_metadata(self, constraint: PoseConstraint) -> dict:
+        return {
+            "id": constraint.id,
+            "kind": constraint.kind,
+            "target_id": constraint.target_id,
+            "metadata": copy.deepcopy(constraint.metadata),
+        }
+
+    def _pose_constraint_from_metadata(self, data: dict) -> PoseConstraint | None:
+        if not isinstance(data, dict):
+            return None
+        constraint_id = data.get("id")
+        kind = data.get("kind")
+        target_id = data.get("target_id")
+        metadata = data.get("metadata", {})
+        if not isinstance(constraint_id, str) or not isinstance(kind, str) or not isinstance(target_id, str):
+            return None
+        return PoseConstraint(
+            id=constraint_id,
+            kind=kind,
+            target_id=target_id,
+            metadata=copy.deepcopy(metadata) if isinstance(metadata, dict) else {},
+        )
+
+    def _store_pose_constraints_for_current_pose(self) -> None:
+        pose = self.app_service.get_current_pose()
+        if pose is None:
+            return
+        pose.metadata.values["pose_constraints"] = [
+            {"key": key, "constraint": self._pose_constraint_to_metadata(constraint)}
+            for key, constraint in self._pose_constraints.items()
         ]
+        if hasattr(self, "poses_panel"):
+            self.poses_panel.refresh()
+        self.canvas.set_pose_constraints(self._pose_constraints.values())
+        self._mark_project_dirty()
+
+    def _load_pose_constraints_from_current_pose(self) -> None:
+        pose = self.app_service.get_current_pose()
+        self._pose_constraints.clear()
+        if pose is not None:
+            raw_items = pose.metadata.values.get("pose_constraints", [])
+            if isinstance(raw_items, list):
+                for item in raw_items:
+                    if not isinstance(item, dict):
+                        continue
+                    key = item.get("key")
+                    constraint = self._pose_constraint_from_metadata(item.get("constraint", {}))
+                    if isinstance(key, str) and constraint is not None:
+                        self._pose_constraints[key] = constraint
+        self.canvas.set_pose_constraints(self._pose_constraints.values())
+
+    def _on_pose_constraint_selected(self, constraint_key: str) -> None:
+        constraint = self._pose_constraints.get(constraint_key)
+        self._selected_entity_id = constraint.target_id if constraint is not None else None
+        self.canvas.set_selection(self._selected_entity_id)
+        self._populate_inspector()
+
+    def _delete_pose_constraint(self, constraint_key: str) -> None:
+        if constraint_key not in self._pose_constraints:
+            return
+        del self._pose_constraints[constraint_key]
+        self._store_pose_constraints_for_current_pose()
+        self._solve_pose()
+        self._append_message("Deleted pose prescribe")
+        self._mark_project_dirty()
 
     def _seed_pose_toward_marker_target(
         self,
@@ -2687,6 +2854,7 @@ class MainWindow(QtWidgets.QMainWindow):
         final_constraint = copy.deepcopy(constraint)
         final_constraint.metadata["value"] = target_value
         self._pose_constraints[constraint_key] = final_constraint
+        self._store_pose_constraints_for_current_pose()
         self._apply_current_frame()
         self._populate_inspector()
         return (
@@ -2769,6 +2937,7 @@ class MainWindow(QtWidgets.QMainWindow):
             metadata={"angle": target_angle},
         )
         self._pose_constraints[constraint_key] = final_constraint
+        self._store_pose_constraints_for_current_pose()
         self._apply_current_frame()
         self._populate_inspector()
         return (
@@ -2925,6 +3094,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
                 if last_result.success:
                     self._pose_constraints[constraint_key] = final_constraint
+                    self._store_pose_constraints_for_current_pose()
                     self._apply_current_frame()
                     self._populate_inspector()
                     return True, last_result, steps_completed
@@ -3048,9 +3218,31 @@ class MainWindow(QtWidgets.QMainWindow):
             temporary_constraints=self._active_pose_constraints(),
             settings=PoseSolveSettings(),
         )
+        if not result.success:
+            seeded = False
+            for constraint in self._active_pose_constraints():
+                if constraint.kind == "body_angle" and "angle" in constraint.metadata:
+                    base_constraints = [
+                        other for other in self._active_pose_constraints() if other is not constraint
+                    ]
+                    seeded = self._seed_pose_toward_body_angle(
+                        constraint.target_id,
+                        float(constraint.metadata["angle"]),
+                        base_constraints,
+                    )
+                    if not seeded:
+                        break
+            if seeded and self._pose_joint_constraint_violation(tolerance_mm=1e-3) is None:
+                result = PoseSolveResult(
+                    success=True,
+                    pose=copy.deepcopy(self.app_service.get_current_pose()),
+                    warnings=["Pose solved kinematically because the static solve was singular"],
+                    backend="kinematic_pose",
+                )
         self._apply_current_frame()
         self._populate_inspector()
         if result.success:
+            self._store_pose_constraints_for_current_pose()
             self._append_message("Pose solved")
             for warning in result.warnings:
                 self._append_message(f"Pose warning: {warning}")
@@ -3486,6 +3678,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
                 if last_result.success:
                     self._pose_constraints[constraint_key] = final_constraint
+                    self._store_pose_constraints_for_current_pose()
                     self._apply_current_frame()
                     self._populate_inspector()
                     return True, last_result, steps_completed
@@ -3587,6 +3780,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
                 if last_result.success:
                     self._pose_constraints[constraint_key] = final_constraint
+                    self._store_pose_constraints_for_current_pose()
                     self._apply_current_frame()
                     self._populate_inspector()
                     return True, last_result, steps_completed
@@ -3684,6 +3878,11 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         base_constraints = self._pose_constraints_for_drag(marker_id)
+        prescribed_axes = {
+            ("x" if float(constraint.metadata.get("axis_x", 0.0)) else "y")
+            for constraint in base_constraints
+            if constraint.kind == "marker_projected_coordinate" and constraint.target_id == marker_id
+        }
         fixed_angles = {
             c.target_id: float(c.metadata["angle"])
             for c in base_constraints
@@ -3691,10 +3890,26 @@ class MainWindow(QtWidgets.QMainWindow):
         }
 
         # Find the kinematic driver and build an initial-guess pose.
-        driver_info = get_drag_driver(assembled, saved_pose, marker_id, x, y, fixed_angles=fixed_angles)
+        driver_info = None if prescribed_axes else get_drag_driver(assembled, saved_pose, marker_id, x, y, fixed_angles=fixed_angles)
         drag_constraint: PoseConstraint
         use_body_angle = False
-        if driver_info is not None:
+        if prescribed_axes == {"x", "y"}:
+            return
+        if prescribed_axes:
+            free_axis = "y" if "x" in prescribed_axes else "x"
+            drag_constraint = PoseConstraint(
+                id=f"pose_drag_{marker_id}_{free_axis}",
+                kind="marker_projected_coordinate",
+                target_id=marker_id,
+                metadata={
+                    "reference_x": 0.0,
+                    "reference_y": 0.0,
+                    "axis_x": 1.0 if free_axis == "x" else 0.0,
+                    "axis_y": 0.0 if free_axis == "x" else 1.0,
+                    "value": x if free_axis == "x" else y,
+                },
+            )
+        elif driver_info is not None:
             driver_body_id, driver_angle, guess_pose = driver_info
             driver_body = assembled.bodies.get(driver_body_id)
             marker_on_driver = driver_body is not None and marker_id in driver_body.markers
@@ -3744,12 +3959,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._apply_current_frame()
         if final:
-            if result.success:
-                self._pose_constraints = {
-                    key: constraint
-                    for key, constraint in self._pose_constraints.items()
-                    if constraint.target_id != marker_id
-                }
             self._populate_inspector()
         if not result.success and final:
             detail = f": {result.error}" if result.error else ""
@@ -4676,6 +4885,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _editing_allowed(self) -> bool:
         if self._playback_timer.isActive():
+            return False
+        if self._app_mode == "sim":
             return False
         if self._last_simulation_result is None or not self._last_simulation_result.frames:
             return True

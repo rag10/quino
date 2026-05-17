@@ -1,13 +1,13 @@
 #Exudyn nonlinear static solver static solver solution file
-#simulation started=2026-05-17,23:58:29
+#simulation started=2026-05-18,00:55:12
 #columns contain: time, ODE2 displacements, ODE2 velocities, ODE2 accelerations, AE coordinates, Data coordinates
-#number of system coordinates [nODE2, nODE1, nAlgebraic, nData] = [6,0,6,3]
-#number of written coordinates [nODE2, nVel2, nAcc2, nODE1, nVel1, nAlgebraic, nData] = [6,0,0,0,0,6,3]
-#total columns exported  (excl. time) = 15
+#number of system coordinates [nODE2, nODE1, nAlgebraic, nData] = [6,0,5,3]
+#number of written coordinates [nODE2, nVel2, nAcc2, nODE1, nVel1, nAlgebraic, nData] = [6,0,0,0,0,5,3]
+#total columns exported  (excl. time) = 14
 #number of load steps (planned) = 1
 #Exudyn version = 1.10.0; Python3.11.11; Windows AVX2 FLOAT64
 #
-0,-0.03618033989,0.02236067977,2.034443936,-0.1670820393,0.02236067977,-2.677945045,0,0,0,0,0,0,0,0,0
-1,-0.03618033989,0.02236067977,2.034443936,-0.1670820393,0.02236067977,-2.677945045,-4836748.543,-4.871518216e-10,-4836748.543,-4.871518216e-10,550404.9566,-216305.9706,0,0,-0.2418033989
-#simulation finished=2026-05-17,23:58:29
-#Solver Info: cpuTime=8.67e-05,stepReductionFailed(or step failed)=0,discontinuousIterationSuccessful=1,newtonSolutionDiverged=0,massMatrixNotInvertible=0,total time steps=1,total Newton iterations=2,total Newton jacobians=2
+0,-0.002966959818,0.01181297068,0.4921461223,-0.007349409159,0.01181297068,-0.2385144252,0,0,0,0,0,0,0,0
+1,-0.002973496783,0.01182510702,0.4926975169,-0.007365445175,0.01182510702,-0.2387642768,-2420867.982,-1299662.205,-2420867.982,-1299662.205,-0.06415487332,0,0,0
+#simulation finished=2026-05-18,00:55:12
+#Solver Info: cpuTime=0.0002979,stepReductionFailed(or step failed)=0,discontinuousIterationSuccessful=1,newtonSolutionDiverged=0,massMatrixNotInvertible=0,total time steps=1,total Newton iterations=25,total Newton jacobians=25

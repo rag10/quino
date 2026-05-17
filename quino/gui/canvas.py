@@ -24,6 +24,7 @@ from quino.domain.model import (
 )
 from quino.domain.sketch_constraints import CONSTRAINT_SPECS, ConstraintSpec
 from quino.domain.types import BodyType, DriverType, JointEndpointKind, JointType, MarkerType, SketchConstraintType, SketchEntityType, SpringEndpointKind
+from quino.services.mechanism_dof import compute_mechanism_dof
 from quino.services.sketch_dof import SketchDofAnalyzer
 from quino.simulation.assembler import AssembledMechanism
 
@@ -243,6 +244,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._sensor_marker_ids: list[str] = []
         self._pose_pick_preview_kind: str | None = None
         self._pose_pick_marker_ids: list[str] = []
+        self._pose_constraints: list[dict] = []
         self._creation_entity_ids: list[str] = []
         self._pending_distance_constraint_refs: list[str] = []
         self._hover_world: tuple[float, float] | None = None
@@ -456,6 +458,17 @@ class MechanismCanvas(QtWidgets.QWidget):
     def set_pose_pick_preview(self, kind: str | None, marker_ids: list[str] | tuple[str, ...] | None = None) -> None:
         self._pose_pick_preview_kind = kind
         self._pose_pick_marker_ids = list(marker_ids or [])
+        self.update()
+
+    def set_pose_constraints(self, constraints) -> None:
+        self._pose_constraints = [
+            {
+                "kind": getattr(constraint, "kind", None),
+                "target_id": getattr(constraint, "target_id", None),
+                "metadata": dict(getattr(constraint, "metadata", {}) or {}),
+            }
+            for constraint in constraints
+        ]
         self.update()
 
     def _set_cursor_for_mode(self, mode: str) -> None:
@@ -941,6 +954,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._draw_drivers(painter, project, markers, sliders, transform)
                 self._draw_sensors(painter, project, markers, transform)
                 self._draw_markers(painter, markers, transform)
+                self._draw_pose_constraint_icons(painter, project, markers, transform)
                 self._draw_forces(painter, project, markers, transform)
                 self._draw_loads(painter, project, markers, transform)
                 self._draw_reactions(painter, project, transform)
@@ -963,6 +977,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._draw_drivers(painter, project, markers, sliders, transform)
                 self._draw_sensors(painter, project, markers, transform)
                 self._draw_markers(painter, markers, transform)
+                self._draw_pose_constraint_icons(painter, project, markers, transform)
                 self._draw_forces(painter, project, markers, transform)
                 self._draw_loads(painter, project, markers, transform)
                 self._draw_reactions(painter, project, transform)
@@ -974,6 +989,7 @@ class MechanismCanvas(QtWidgets.QWidget):
 
         self._draw_creation_overlay(painter, transform)
         self._draw_edge_rulers(painter, transform)
+        self._draw_pose_dof_info(painter, project)
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # pragma: no cover - UI behavior
         super().resizeEvent(event)
@@ -3055,6 +3071,103 @@ class MechanismCanvas(QtWidgets.QWidget):
             painter.drawEllipse(point, radius, radius)
             painter.setPen(QtGui.QPen(QtGui.QColor("#5b5247")))
             painter.drawText(point + QtCore.QPointF(6.0, -6.0), marker.name)
+
+    def _draw_pose_dof_info(self, painter: QtGui.QPainter, project: Project) -> None:
+        """Draw DOF count in the top-right corner when in pose mode."""
+        if self._interaction_mode != "pose":
+            return
+        pose_constraint_count = len(self._pose_constraints)
+        dof_result = compute_mechanism_dof(project, pose_constraint_count)
+        text = f"DOF: {dof_result.total_dof}"
+        if dof_result.pose_constraint_count:
+            text += f"  (constraints: {dof_result.pose_constraint_count})"
+        painter.save()
+        font = painter.font()
+        font.setPointSize(10)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QtGui.QPen(QtGui.QColor("#2f6f9f"), 1))
+        metrics = painter.fontMetrics()
+        text_rect = metrics.boundingRect(text)
+        padding = 6
+        x = self.width() - text_rect.width() - padding * 2
+        y = padding
+        rect = QtCore.QRectF(x, y, text_rect.width() + padding * 2, text_rect.height() + padding)
+        painter.fillRect(rect, QtGui.QColor(255, 255, 255, 200))
+        painter.drawText(rect, QtCore.Qt.AlignmentFlag.AlignCenter, text)
+        painter.restore()
+
+    def _draw_pose_constraint_icons(
+        self,
+        painter: QtGui.QPainter,
+        project: Project,
+        markers: list[CanvasMarker],
+        transform,
+    ) -> None:
+        if self._interaction_mode != "pose" or not self._pose_constraints:
+            return
+        marker_map = {marker.entity_id: marker for marker in markers}
+        body_markers: dict[str, list[CanvasMarker]] = {}
+        for marker in markers:
+            if marker.body_id is not None:
+                body_markers.setdefault(marker.body_id, []).append(marker)
+
+        def marker_point(marker_id: str | None) -> QtCore.QPointF | None:
+            marker = marker_map.get(marker_id or "")
+            if marker is None:
+                return None
+            return self._to_screen(marker.x, marker.y, transform)
+
+        def body_point(body_id: str | None) -> QtCore.QPointF | None:
+            body = body_markers.get(body_id or "")
+            structural = [marker for marker in body or [] if marker.marker_type is MarkerType.STRUCTURAL]
+            if not structural:
+                return None
+            x = sum(marker.x for marker in structural) / len(structural)
+            y = sum(marker.y for marker in structural) / len(structural)
+            return self._to_screen(x, y, transform)
+
+        def draw_fix_icon(center: QtCore.QPointF, angle_rad: float = 0.0) -> None:
+            painter.save()
+            painter.translate(center)
+            painter.rotate(math.degrees(angle_rad))
+            painter.setPen(QtGui.QPen(QtGui.QColor("#8b2500"), 1.2))
+            painter.setBrush(QtGui.QBrush(QtGui.QColor("#f4a261")))
+            left = QtGui.QPolygonF([
+                QtCore.QPointF(-12.0, 0.0),
+                QtCore.QPointF(-3.0, -5.0),
+                QtCore.QPointF(-3.0, 5.0),
+            ])
+            right = QtGui.QPolygonF([
+                QtCore.QPointF(12.0, 0.0),
+                QtCore.QPointF(3.0, -5.0),
+                QtCore.QPointF(3.0, 5.0),
+            ])
+            painter.drawPolygon(left)
+            painter.drawPolygon(right)
+            painter.drawLine(QtCore.QPointF(-2.0, -7.0), QtCore.QPointF(-2.0, 7.0))
+            painter.drawLine(QtCore.QPointF(2.0, -7.0), QtCore.QPointF(2.0, 7.0))
+            painter.restore()
+
+        for constraint in self._pose_constraints:
+            kind = constraint.get("kind")
+            target_id = constraint.get("target_id")
+            metadata = constraint.get("metadata", {})
+            if kind == "marker_projected_coordinate":
+                point = marker_point(target_id)
+                if point is None:
+                    continue
+                axis_x = float(metadata.get("axis_x", 0.0)) if isinstance(metadata, dict) else 0.0
+                draw_fix_icon(point + QtCore.QPointF(0.0, -18.0), 0.0 if axis_x else math.pi / 2.0)
+            elif kind == "body_angle":
+                point = body_point(target_id)
+                if point is not None:
+                    draw_fix_icon(point + QtCore.QPointF(0.0, -22.0), math.pi / 4.0)
+            elif kind == "relative_body_angle" and isinstance(metadata, dict):
+                for body_id in (metadata.get("body_a_id"), metadata.get("body_b_id")):
+                    point = body_point(body_id if isinstance(body_id, str) else None)
+                    if point is not None:
+                        draw_fix_icon(point + QtCore.QPointF(0.0, -22.0), math.pi / 4.0)
 
     def _draw_forces(
         self,
