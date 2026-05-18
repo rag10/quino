@@ -317,3 +317,48 @@ def test_radius_constraint_lets_on_circle_pull_to_new_radius():
     dist = (x * x + y * y) ** 0.5
     assert abs(dist - 8.0) < 1e-3, f"point at dist {dist} from center"
     assert abs(result.radius_updates[circle] - 8.0) < 1e-3
+
+
+def test_horizontal_distance_constrains_x_delta():
+    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc.new_project("T")
+    svc.create_sketch("S")
+    p1 = svc.create_sketch_point("0 mm", "0 mm", "P1")
+    p2 = svc.create_sketch_point("3 mm", "7 mm", "P2")  # initial dx=3
+    svc.create_sketch_constraint("fix", [p1])
+    svc.create_sketch_constraint("horizontal_distance", [p1, p2], value="10 mm")
+    result = _make_backend().solve(svc.project)
+    assert result.success, result.message
+    x2, _ = result.positions[p2]
+    # |x2 - x1| = 10. p1 is fixed at (0,0), so x2 should be ±10.
+    assert abs(abs(x2 - 0.0) - 10.0) < 1e-4
+
+
+def test_vertical_distance_constrains_y_delta():
+    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc.new_project("T")
+    svc.create_sketch("S")
+    p1 = svc.create_sketch_point("0 mm", "0 mm", "P1")
+    p2 = svc.create_sketch_point("3 mm", "2 mm", "P2")  # initial dy=2
+    svc.create_sketch_constraint("fix", [p1])
+    svc.create_sketch_constraint("vertical_distance", [p1, p2], value="8 mm")
+    result = _make_backend().solve(svc.project)
+    assert result.success, result.message
+    _, y2 = result.positions[p2]
+    assert abs(abs(y2 - 0.0) - 8.0) < 1e-4
+
+
+def test_no_aux_geometry_leaks_into_project():
+    """Critical invariant: aux geometry must NOT pollute the QUINO domain."""
+    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc.new_project("T")
+    svc.create_sketch("S")
+    p1 = svc.create_sketch_point("0 mm", "0 mm", "P1")
+    p2 = svc.create_sketch_point("3 mm", "0 mm", "P2")
+    svc.create_sketch_constraint("fix", [p1])
+    svc.create_sketch_constraint("horizontal_distance", [p1, p2], value="10 mm")
+    point_count_before = len(svc.project.sketch.points())
+    entity_count_before = len(svc.project.sketch.entities)
+    _make_backend().solve(svc.project)
+    assert len(svc.project.sketch.points()) == point_count_before
+    assert len(svc.project.sketch.entities) == entity_count_before

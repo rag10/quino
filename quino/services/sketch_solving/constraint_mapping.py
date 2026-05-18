@@ -21,6 +21,10 @@ from typing import Callable
 from quino.domain.model import Project, SketchConstraint
 from quino.domain.types import SketchConstraintType
 from quino.services.expressions import ExpressionService
+from quino.services.sketch_solving._auxiliary_geometry import (
+    add_horizontal_distance_aux_line,
+    add_vertical_distance_aux_line,
+)
 from quino.services.units import UnitService
 
 
@@ -305,6 +309,38 @@ def _emit_tangent(sys, wp, c, points, entities, project, expressions, units):
         )
 
 
+def _emit_horizontal_distance(sys, wp, c, points, entities, project, expressions, units):
+    """Constrain |p1.x - p2.x| = value (mm) via an auxiliary horizontal line."""
+    if len(c.references) != 2:
+        raise ValueError(f"horizontal_distance expects 2 points, got {c.references}")
+    p1 = points.get(c.references[0])
+    p2 = points.get(c.references[1])
+    if p1 is None or p2 is None:
+        raise ValueError(f"horizontal_distance: unknown point in {c.references}")
+    if c.value is None:
+        raise ValueError(f"horizontal_distance constraint {c.id} requires a value")
+    quantity = expressions.evaluate_expression(c.value.expression, project.parameters)
+    distance_mm = float(units.convert(quantity, "mm"))
+    aux_line = add_horizontal_distance_aux_line(sys, wp, p1)
+    sys.distance(p2, aux_line, distance_mm, wp)
+
+
+def _emit_vertical_distance(sys, wp, c, points, entities, project, expressions, units):
+    """Constrain |p1.y - p2.y| = value (mm) via an auxiliary horizontal line."""
+    if len(c.references) != 2:
+        raise ValueError(f"vertical_distance expects 2 points, got {c.references}")
+    p1 = points.get(c.references[0])
+    p2 = points.get(c.references[1])
+    if p1 is None or p2 is None:
+        raise ValueError(f"vertical_distance: unknown point in {c.references}")
+    if c.value is None:
+        raise ValueError(f"vertical_distance constraint {c.id} requires a value")
+    quantity = expressions.evaluate_expression(c.value.expression, project.parameters)
+    distance_mm = float(units.convert(quantity, "mm"))
+    aux_line = add_vertical_distance_aux_line(sys, wp, p1)
+    sys.distance(p2, aux_line, distance_mm, wp)
+
+
 def _emit_radius(sys, wp, c, points, entities, project, expressions, units):
     """Constrain a circle or arc radius to a target value (mm).
 
@@ -342,4 +378,6 @@ _HANDLERS: dict[SketchConstraintType, Callable] = {
     SketchConstraintType.ON_CIRCLE: _emit_on_circle,
     SketchConstraintType.TANGENT: _emit_tangent,
     SketchConstraintType.RADIUS: _emit_radius,
+    SketchConstraintType.HORIZONTAL_DISTANCE: _emit_horizontal_distance,
+    SketchConstraintType.VERTICAL_DISTANCE: _emit_vertical_distance,
 }
