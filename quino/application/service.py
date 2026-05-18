@@ -51,6 +51,8 @@ from quino.domain.types import (
     SketchEntityType,
     SpringType,
 )
+from quino.application._context import ServiceContext
+from quino.application.commands.parameter_commands import ParameterCommands
 from quino.serialization.json_io import JsonMapper
 from quino.pose.geometry import create_reference_pose as build_reference_pose
 from quino.pose.model import PoseConstraint, PoseSolveResult, PoseSolveSettings
@@ -99,6 +101,19 @@ class ApplicationService:
             self.expression_service,
             self.unit_service,
         )
+        self._service_context = ServiceContext(
+            project_provider=lambda: self.project,
+            operation=self._operation,
+            snapshot=self._snapshot,
+            invalidate_pose_state=self._invalidate_pose_state,
+            ids=self.id_service,
+            expressions=self.expression_service,
+            units=self.unit_service,
+            validation=self.validation_service,
+            find_entity=self._find_entity,
+            sync_all_special_com_markers=self._sync_all_special_com_markers,
+        )
+        self.parameters = ParameterCommands(self._service_context)
 
     def new_project(self, name: str) -> Project:
         self.id_service = IdService()
@@ -329,19 +344,7 @@ class ApplicationService:
         raise ValueError(f"Unknown driver id: {driver_id}")
 
     def create_parameter(self, name: str, expression: str, unit: str, description: str = "") -> str:
-        project = self._require_project()
-        self.validation_service.ensure_unique_name(project.parameters, name)
-        self._validate_parameter_definition(expression, unit)
-        self._snapshot()
-        parameter = Parameter(
-            id=self.id_service.new("param"),
-            name=name,
-            expression=expression,
-            unit=unit,
-            description=description,
-        )
-        project.parameters.append(parameter)
-        return parameter.id
+        return self.parameters.create(name, expression, unit, description)
 
     def update_parameter(
         self,
@@ -351,22 +354,15 @@ class ApplicationService:
         unit: str | None = None,
         description: str | None = None,
     ) -> None:
-        project = self._require_project()
-        parameter = self._find_parameter(parameter_id)
-        new_expression = expression if expression is not None else parameter.expression
-        new_unit = unit if unit is not None else parameter.unit
-        new_description = description if description is not None else parameter.description
-        self._validate_parameter_definition(new_expression, new_unit, parameter_id=parameter_id)
-        self._snapshot()
-        parameter.expression = new_expression
-        parameter.unit = new_unit
-        parameter.description = new_description
-        self._sync_all_special_com_markers()
+        return self.parameters.update(
+            parameter_id,
+            expression=expression,
+            unit=unit,
+            description=description,
+        )
 
     def delete_parameter(self, parameter_id: str) -> None:
-        project = self._require_project()
-        self._snapshot()
-        project.parameters = [parameter for parameter in project.parameters if parameter.id != parameter_id]
+        return self.parameters.delete(parameter_id)
 
     def create_sketch(self, name: str = "Main Sketch") -> str:
         project = self._require_project()
@@ -1295,29 +1291,7 @@ class ApplicationService:
         unit: str,
         description: str = "",
     ) -> None:
-        project = self._require_project()
-        parameter = self._find_entity(parameter_id)
-        if not isinstance(parameter, Parameter):
-            raise ValueError("update_parameter_definition requires a Parameter")
-        if parameter.name != name:
-            self.validation_service.ensure_unique_name(
-                [p for p in project.parameters if p.id != parameter_id], name
-            )
-        self._validate_parameter_definition(expression, unit)
-        changed = (
-            parameter.name != name
-            or parameter.expression != expression
-            or parameter.unit != unit
-            or parameter.description != description
-        )
-        if not changed:
-            return
-        self._snapshot()
-        parameter.name = name
-        parameter.expression = expression
-        parameter.unit = unit
-        parameter.description = description
-        self._sync_all_special_com_markers()
+        return self.parameters.update_definition(parameter_id, name, expression, unit, description)
 
     def move_marker(self, marker_id: str, x_expression: str, y_expression: str) -> None:
         marker = self._find_entity(marker_id)

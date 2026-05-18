@@ -7,6 +7,7 @@ from quino.domain.model import Project
 from quino.services.expressions import ExpressionService
 from quino.services.ids import IdService
 from quino.services.units import UnitService
+from quino.services.validation import ValidationService
 
 
 @dataclass
@@ -23,3 +24,6 @@ class ServiceContext:
     ids: IdService
     expressions: ExpressionService
     units: UnitService
+    validation: ValidationService
+    find_entity: Callable[[str], object]
+    sync_all_special_com_markers: Callable[[], None]
