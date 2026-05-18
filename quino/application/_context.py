@@ -31,3 +31,6 @@ class ServiceContext:
     build_validated_scalar_property: Callable[[object, str, str], object]
     assign_scalar_property: Callable[[object, str, object], None]
     apply_style_update: Callable[[object, str, object], None]
+    connect_marker_to_ground: Callable[..., str]
+    joints_for_marker: Callable[[str], list]
+    translate_direct_joint_counterparts: Callable[..., set]
