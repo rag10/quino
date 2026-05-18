@@ -135,9 +135,94 @@ def _emit_vertical(sys, wp, c, points, entities, project, expressions, units):
     )
 
 
+def _emit_parallel(sys, wp, c, points, entities, project, expressions, units):
+    # QUINO stores 4 point refs: [line1_start, line1_end, line2_start, line2_end]
+    if len(c.references) != 4:
+        raise ValueError(f"parallel expects 4 point refs (2 lines), got {c.references}")
+    pa, pb, pc, pd = c.references
+    p1a = points.get(pa)
+    p1b = points.get(pb)
+    p2a = points.get(pc)
+    p2b = points.get(pd)
+    if p1a is None or p1b is None or p2a is None or p2b is None:
+        raise ValueError(f"parallel: unknown point reference in {c.references}")
+    l1 = sys.add_line_2d(p1a, p1b, wp)
+    l2 = sys.add_line_2d(p2a, p2b, wp)
+    sys.parallel(l1, l2, wp)
+
+
+def _emit_perpendicular(sys, wp, c, points, entities, project, expressions, units):
+    # QUINO stores 4 point refs: [line1_start, line1_end, line2_start, line2_end]
+    if len(c.references) != 4:
+        raise ValueError(f"perpendicular expects 4 point refs (2 lines), got {c.references}")
+    pa, pb, pc, pd = c.references
+    p1a = points.get(pa)
+    p1b = points.get(pb)
+    p2a = points.get(pc)
+    p2b = points.get(pd)
+    if p1a is None or p1b is None or p2a is None or p2b is None:
+        raise ValueError(f"perpendicular: unknown point reference in {c.references}")
+    l1 = sys.add_line_2d(p1a, p1b, wp)
+    l2 = sys.add_line_2d(p2a, p2b, wp)
+    sys.perpendicular(l1, l2, wp, False)
+
+
+def _emit_equal_length(sys, wp, c, points, entities, project, expressions, units):
+    # QUINO stores 4 point refs: [line1_start, line1_end, line2_start, line2_end]
+    if len(c.references) != 4:
+        raise ValueError(f"equal_length expects 4 point refs (2 lines), got {c.references}")
+    pa, pb, pc, pd = c.references
+    p1a = points.get(pa)
+    p1b = points.get(pb)
+    p2a = points.get(pc)
+    p2b = points.get(pd)
+    if p1a is None or p1b is None or p2a is None or p2b is None:
+        raise ValueError(f"equal_length: unknown point reference in {c.references}")
+    l1 = sys.add_line_2d(p1a, p1b, wp)
+    l2 = sys.add_line_2d(p2a, p2b, wp)
+    sys.equal(l1, l2, wp)
+
+
+def _emit_angle(sys, wp, c, points, entities, project, expressions, units):
+    # QUINO stores 3 point refs: [vertex, arm1_point, arm2_point]
+    if len(c.references) != 3:
+        raise ValueError(f"angle expects 3 point refs (vertex + 2 arms), got {c.references}")
+    if c.value is None:
+        raise ValueError(f"angle constraint {c.id} requires a value")
+    p_vertex = points.get(c.references[0])
+    p_arm1 = points.get(c.references[1])
+    p_arm2 = points.get(c.references[2])
+    if p_vertex is None or p_arm1 is None or p_arm2 is None:
+        raise ValueError(f"angle: unknown point reference in {c.references}")
+    l1 = sys.add_line_2d(p_vertex, p_arm1, wp)
+    l2 = sys.add_line_2d(p_vertex, p_arm2, wp)
+    # evaluate_expression returns a Quantity; convert to degrees for Solvespace.
+    quantity = expressions.evaluate_expression(c.value.expression, project.parameters)
+    deg = float(units.convert(quantity, "deg"))
+    sys.angle(l1, l2, deg, wp, False)
+
+
+def _emit_midpoint(sys, wp, c, points, entities, project, expressions, units):
+    # QUINO stores 3 point refs: [midpoint, end1, end2]
+    if len(c.references) != 3:
+        raise ValueError(f"midpoint expects 3 point refs (mid, end1, end2), got {c.references}")
+    p_mid = points.get(c.references[0])
+    p_end1 = points.get(c.references[1])
+    p_end2 = points.get(c.references[2])
+    if p_mid is None or p_end1 is None or p_end2 is None:
+        raise ValueError(f"midpoint: unknown point reference in {c.references}")
+    line = sys.add_line_2d(p_end1, p_end2, wp)
+    sys.midpoint(p_mid, line, wp)
+
+
 _HANDLERS: dict[SketchConstraintType, Callable] = {
     SketchConstraintType.DISTANCE: _emit_distance,
     SketchConstraintType.COINCIDENT: _emit_coincident,
     SketchConstraintType.HORIZONTAL: _emit_horizontal,
     SketchConstraintType.VERTICAL: _emit_vertical,
+    SketchConstraintType.PARALLEL: _emit_parallel,
+    SketchConstraintType.PERPENDICULAR: _emit_perpendicular,
+    SketchConstraintType.EQUAL_LENGTH: _emit_equal_length,
+    SketchConstraintType.ANGLE: _emit_angle,
+    SketchConstraintType.MIDPOINT: _emit_midpoint,
 }
