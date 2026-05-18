@@ -362,3 +362,79 @@ def test_no_aux_geometry_leaks_into_project():
     _make_backend().solve(svc.project)
     assert len(svc.project.sketch.points()) == point_count_before
     assert len(svc.project.sketch.entities) == entity_count_before
+
+
+def test_locked_points_remain_fixed_during_solve():
+    """Locked points must not move while a free point satisfies the constraint.
+
+    Two points are locked; a third free point is constrained to one of the
+    locked points. The solver must keep the locked pair in place and move only
+    the free point.
+    """
+    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc.new_project("T")
+    svc.create_sketch("S")
+    # Place p1 away from the sketch origin so it is not coincident with it.
+    p1 = svc.create_sketch_point("1 mm", "0 mm", "P1")
+    p2 = svc.create_sketch_point("6 mm", "0 mm", "P2")
+    p3 = svc.create_sketch_point("3 mm", "0 mm", "P3")  # free point
+    # Constrain p3 to be 3 mm from p1; p3 must move, p1 and p2 must not.
+    svc.create_sketch_constraint("distance", [p1, p3], value="3 mm")
+    result = _make_backend().solve(svc.project, locked_point_ids={p1, p2})
+    assert result.success, result.message
+    # Locked points unchanged.
+    assert abs(result.positions[p1][0] - 1.0) < 1e-6
+    assert abs(result.positions[p1][1] - 0.0) < 1e-6
+    assert abs(result.positions[p2][0] - 6.0) < 1e-6
+    assert abs(result.positions[p2][1] - 0.0) < 1e-6
+
+
+def test_drag_pattern_moves_only_unlocked_point():
+    """Canonical drag: all points fixed except the one being dragged.
+
+    Only a constraint between a locked point and the free point is present —
+    a constraint *between two locked points* would over-constrain the dragged
+    group and cause solvespace to report INCONSISTENT.
+    """
+    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc.new_project("T")
+    svc.create_sketch("S")
+    # p1 is away from origin to avoid coincidence with the auto-created origin point.
+    p1 = svc.create_sketch_point("1 mm", "0 mm", "P1")
+    p2 = svc.create_sketch_point("6 mm", "0 mm", "P2")
+    p3 = svc.create_sketch_point("3 mm", "1 mm", "P3")  # off-target, to be dragged
+    # Only constrain the free point against a locked anchor; no constraint between
+    # the two locked points (that would create an over-constrained dragged group).
+    svc.create_sketch_constraint("distance", [p2, p3], value="5 mm")
+    # Drag scenario: only p3 is free.
+    result = _make_backend().solve(svc.project, locked_point_ids={p1, p2})
+    assert result.success, result.message
+    # Locked points unchanged.
+    assert abs(result.positions[p1][0] - 1.0) < 1e-6
+    assert abs(result.positions[p2][0] - 6.0) < 1e-6
+    # p3 moved to satisfy distance(p2, p3) = 5.
+    x3, y3 = result.positions[p3]
+    dist = ((x3 - 6.0) ** 2 + (y3 - 0.0) ** 2) ** 0.5
+    assert abs(dist - 5.0) < 1e-4
+
+
+def test_lock_overrides_fix_constraint_semantics():
+    """locked_point_ids and FIX constraints both result in immovable points.
+
+    A point with neither FIX nor locked status is solvable; once FIX or locked
+    is applied, the solver must not move it.
+    """
+    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc.new_project("T")
+    svc.create_sketch("S")
+    p1 = svc.create_sketch_point("0 mm", "0 mm", "P1")
+    p2 = svc.create_sketch_point("7 mm", "0 mm", "P2")
+    svc.create_sketch_constraint("distance", [p1, p2], value="10 mm")
+    # Lock p1 instead of FIX-ing it — same effect.
+    result = _make_backend().solve(svc.project, locked_point_ids={p1})
+    assert result.success, result.message
+    assert abs(result.positions[p1][0] - 0.0) < 1e-6
+    # p2 should be at distance 10 from p1.
+    x2, y2 = result.positions[p2]
+    dist = ((x2 - 0.0) ** 2 + (y2 - 0.0) ** 2) ** 0.5
+    assert abs(dist - 10.0) < 1e-4
