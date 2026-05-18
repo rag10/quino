@@ -650,6 +650,12 @@ class ApplicationService:
     def joint_friction_pin_radius(self, joint: Joint) -> float:
         return self.joints.joint_friction_pin_radius(joint)
 
+    def joint_supports_angular_limits(self, joint: Joint) -> bool:
+        return self.joints.joint_supports_angular_limits(joint)
+
+    def joint_angular_limit_values(self, joint: Joint) -> tuple[float | None, float | None]:
+        return self.joints.joint_angular_limit_values(joint)
+
     # --- Sketch helper back-compat shims --------------------------------------
     # The following methods used to live on ApplicationService and are referenced
     # by canvas, main_window, and tests. They delegate to SketchCommands so the
@@ -835,6 +841,9 @@ class ApplicationService:
 
     def rename_sensor(self, sensor_id: str, name: str) -> None:
         self.forces.rename_sensor(sensor_id, name)
+
+    def update_sensor_scope_position(self, sensor_id: str, canvas_x: float, canvas_y: float) -> None:
+        self.forces.update_sensor_scope_position(sensor_id, canvas_x, canvas_y)
 
     def create_load(self, name: str, marker_id: str, fx_expression: str, fy_expression: str) -> str:
         return self.forces.create_load(name, marker_id, fx_expression, fy_expression)

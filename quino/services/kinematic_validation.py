@@ -18,6 +18,9 @@ from quino.simulation.sensor_expressions import sensor_expression_variables
 
 
 class KinematicValidator:
+    _ANGLE_LIMIT_POSITIVE_KEY = "angle_limit_positive_deg"
+    _ANGLE_LIMIT_NEGATIVE_KEY = "angle_limit_negative_deg"
+
     def __init__(
         self,
         assembler: Any,
@@ -67,6 +70,12 @@ class KinematicValidator:
                             joint.id,
                         )
                     )
+                self._validate_joint_angle_limit(project, assembled, joint, report)
+            elif (
+                len(marker_endpoints) == 1
+                and any(endpoint.kind is JointEndpointKind.GROUND for endpoint in endpoints)
+            ):
+                self._validate_joint_angle_limit(project, assembled, joint, report)
             elif len(marker_endpoints) == 1 and slider_endpoints:
                 marker = self._assembled_marker(assembled, marker_endpoints[0])
                 slider = assembled.sliders.get(slider_endpoints[0].slider_id)
@@ -120,6 +129,92 @@ class KinematicValidator:
         if endpoint.body_id not in assembled.bodies:
             return None
         return assembled.bodies[endpoint.body_id].markers.get(endpoint.marker_id)
+
+    def _validate_joint_angle_limit(self, project: Project, assembled, joint: Joint, report: ValidationReport) -> None:
+        if joint.type.value != "revolute":
+            return
+        if joint.metadata.values.get("internal_ground_anchor"):
+            return
+        if any(endpoint.kind is JointEndpointKind.SLIDER for endpoint in (joint.endpoint_a, joint.endpoint_b)):
+            return
+        positive, negative = self._joint_angle_limit_values(joint)
+        if positive is None and negative is None:
+            return
+        current = self._assembled_joint_relative_angle_deg(project, assembled, joint)
+        if current is None:
+            return
+        lower = -(negative or 0.0)
+        upper = positive or 0.0
+        tolerance = 1e-6
+        if current < lower - tolerance or current > upper + tolerance:
+            report.messages.append(
+                ValidationMessage(
+                    "warning",
+                    "joint_angle_limit",
+                    (
+                        f"Joint {joint.name} relative angle {current:.6g} deg is outside "
+                        f"[{lower:.6g}, {upper:.6g}] deg from the model reference"
+                    ),
+                    joint.id,
+                )
+            )
+
+    def _joint_angle_limit_values(self, joint: Joint) -> tuple[float | None, float | None]:
+        def _coerce(key: str) -> float | None:
+            raw = joint.metadata.values.get(key)
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                return None
+            return value if value >= 0.0 else None
+
+        return _coerce(self._ANGLE_LIMIT_POSITIVE_KEY), _coerce(self._ANGLE_LIMIT_NEGATIVE_KEY)
+
+    def _assembled_joint_relative_angle_deg(self, project: Project, assembled, joint: Joint) -> float | None:
+        if joint.endpoint_a.kind is JointEndpointKind.GROUND and joint.endpoint_b.kind is JointEndpointKind.MARKER:
+            body = assembled.bodies.get(joint.endpoint_b.body_id or "")
+            if body is None:
+                return None
+            return math.degrees(body.angle - self._model_body_reference_angle(project, joint.endpoint_b.body_id or ""))
+        if joint.endpoint_b.kind is JointEndpointKind.GROUND and joint.endpoint_a.kind is JointEndpointKind.MARKER:
+            body = assembled.bodies.get(joint.endpoint_a.body_id or "")
+            if body is None:
+                return None
+            return math.degrees(body.angle - self._model_body_reference_angle(project, joint.endpoint_a.body_id or ""))
+        if joint.endpoint_a.kind is not JointEndpointKind.MARKER or joint.endpoint_b.kind is not JointEndpointKind.MARKER:
+            return None
+        body_a = assembled.bodies.get(joint.endpoint_a.body_id or "")
+        body_b = assembled.bodies.get(joint.endpoint_b.body_id or "")
+        if body_a is None or body_b is None:
+            return None
+        domain_body_a = next((body for body in project.model.bodies if body.id == body_a.body_id), None)
+        domain_body_b = next((body for body in project.model.bodies if body.id == body_b.body_id), None)
+        if domain_body_a is not None and domain_body_a.metadata.values.get("ground_anchor") and domain_body_b is not None:
+            return math.degrees(body_b.angle - self._model_body_reference_angle(project, body_b.body_id))
+        if domain_body_b is not None and domain_body_b.metadata.values.get("ground_anchor") and domain_body_a is not None:
+            return math.degrees(body_a.angle - self._model_body_reference_angle(project, body_a.body_id))
+        current_rel = body_b.angle - body_a.angle
+        model_rel = (
+            self._model_body_reference_angle(project, body_b.body_id)
+            - self._model_body_reference_angle(project, body_a.body_id)
+        )
+        return math.degrees(current_rel - model_rel)
+
+    def _model_body_reference_angle(self, project: Project, body_id: str) -> float:
+        for body in project.model.bodies:
+            if body.id == body_id:
+                markers = body.structural_markers()
+                if len(markers) >= 2:
+                    try:
+                        x1 = self._expression_service.evaluate_property(markers[0].x, project.parameters).value
+                        y1 = self._expression_service.evaluate_property(markers[0].y, project.parameters).value
+                        x2 = self._expression_service.evaluate_property(markers[1].x, project.parameters).value
+                        y2 = self._expression_service.evaluate_property(markers[1].y, project.parameters).value
+                    except Exception:
+                        return 0.0
+                    return math.atan2(y2 - y1, x2 - x1)
+                return 0.0
+        return 0.0
 
     def validate_kinematic_reach(
         self,

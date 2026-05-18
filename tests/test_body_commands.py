@@ -60,10 +60,13 @@ def test_create_ground_anchor_returns_body_and_marker(svc):
     body = svc.get_body(body_id)
     assert body is not None
     assert body.type is BodyType.POINT_MASS
+    assert body.metadata.values.get("ground_anchor") is True
+    assert body.metadata.values.get("ground_marker_id") == marker_id
     # A rigid ground joint should have been created
     assert len(svc.project.model.joints) == 1
     joint = svc.project.model.joints[0]
     assert joint.endpoint_a.marker_id == marker_id
+    assert joint.metadata.values.get("internal_ground_anchor") is True
     # Whole operation is one undo step
     svc.undo()
     assert svc.get_body(body_id) is None

@@ -367,6 +367,7 @@ class ViewState:
     pan_x: float = 0.0
     pan_y: float = 0.0
     show_grid: bool = True
+    show_sensors: bool = True
     show_markers: bool = True
     show_com: bool = False
     show_sliders: bool = True

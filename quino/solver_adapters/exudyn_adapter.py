@@ -528,13 +528,19 @@ class ExudynAdapter(SolverAdapter):
         a = joint.endpoint_a
         b = joint.endpoint_b
         if a.kind is JointEndpointKind.MARKER and b.kind is JointEndpointKind.MARKER:
-            return self._create_marker_to_marker_joint(mbs, item_interface, assembled, body_objects, node_numbers, a, b, joint.type)
+            joint_obj = self._create_marker_to_marker_joint(mbs, item_interface, assembled, body_objects, node_numbers, a, b, joint.type)
+            self._add_revolute_angle_limit_stops(mbs, item_interface, node_numbers, ground_object, joint)
+            return joint_obj
         if a.kind is JointEndpointKind.MARKER and b.kind is JointEndpointKind.GROUND:
-            return self._create_marker_to_ground_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, a, joint.type)
+            joint_obj = self._create_marker_to_ground_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, a, joint.type)
+            self._add_revolute_angle_limit_stops(mbs, item_interface, node_numbers, ground_object, joint)
+            return joint_obj
         if a.kind is JointEndpointKind.MARKER and b.kind is JointEndpointKind.SLIDER:
             return self._create_marker_to_slider_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, a, b, joint.type, joint.name)
         if b.kind is JointEndpointKind.MARKER and a.kind is JointEndpointKind.GROUND:
-            return self._create_marker_to_ground_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, b, joint.type)
+            joint_obj = self._create_marker_to_ground_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, b, joint.type)
+            self._add_revolute_angle_limit_stops(mbs, item_interface, node_numbers, ground_object, joint)
+            return joint_obj
         if b.kind is JointEndpointKind.MARKER and a.kind is JointEndpointKind.SLIDER:
             return self._create_marker_to_slider_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, b, a, joint.type, joint.name)
         raise ValueError(f"Unsupported joint topology for Exudyn adapter: {joint.name}")
@@ -925,6 +931,50 @@ class ExudynAdapter(SolverAdapter):
             )
         )
 
+    def _add_revolute_angle_limit_stops(self, mbs, item_interface, node_numbers: dict[str, int], ground_object: int, joint: Joint) -> None:
+        if joint.type is not JointType.REVOLUTE:
+            return
+        positive = self._joint_angle_limit_value(joint, "angle_limit_positive_deg")
+        negative = self._joint_angle_limit_value(joint, "angle_limit_negative_deg")
+        if positive is None and negative is None:
+            return
+        marker_numbers = self._rotation_coordinate_markers_for_limits(
+            mbs,
+            item_interface,
+            node_numbers,
+            ground_object,
+            joint,
+        )
+        limit_data_node = mbs.AddNode(
+            item_interface.NodeGenericData(
+                initialCoordinates=[0.0, 0.0, 0.0],
+                numberOfDataCoordinates=3,
+            )
+        )
+        mbs.AddObject(
+            item_interface.ObjectConnectorCoordinateSpringDamperExt(
+                markerNumbers=marker_numbers,
+                nodeNumber=limit_data_node,
+                factor0=-1.0,
+                factor1=1.0,
+                stiffness=0.0,
+                damping=0.0,
+                useLimitStops=True,
+                limitStopsLower=-(negative or 0.0) * math.pi / 180.0 if negative is not None else -1e30,
+                limitStopsUpper=(positive or 0.0) * math.pi / 180.0 if positive is not None else 1e30,
+                limitStopsStiffness=1e6,
+                limitStopsDamping=1e3,
+            )
+        )
+
+    def _joint_angle_limit_value(self, joint: Joint, key: str) -> float | None:
+        raw = joint.metadata.values.get(key)
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if value >= 0.0 else None
+
     def _create_driver(
         self,
         mbs,
@@ -1080,6 +1130,25 @@ class ExudynAdapter(SolverAdapter):
             )
             return [marker_a, marker_b]
         raise ValueError(f"Rotation driver requires a revolute joint between marker-ground or marker-marker: {joint.name}")
+
+    def _rotation_coordinate_markers_for_limits(self, mbs, item_interface, node_numbers: dict[str, int], ground_object: int, joint) -> list[int]:
+        reference_body_id = joint.metadata.values.get("angle_limit_reference_body_id")
+        moving_body_id = joint.metadata.values.get("angle_limit_moving_body_id")
+        if isinstance(reference_body_id, str) and isinstance(moving_body_id, str):
+            marker_reference = mbs.AddMarker(
+                item_interface.MarkerNodeCoordinate(
+                    nodeNumber=node_numbers[reference_body_id],
+                    coordinate=2,
+                )
+            )
+            marker_moving = mbs.AddMarker(
+                item_interface.MarkerNodeCoordinate(
+                    nodeNumber=node_numbers[moving_body_id],
+                    coordinate=2,
+                )
+            )
+            return [marker_reference, marker_moving]
+        return self._rotation_coordinate_markers(mbs, item_interface, node_numbers, ground_object, joint)
 
     def _make_servo_force_function(
         self,

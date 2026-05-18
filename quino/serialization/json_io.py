@@ -81,6 +81,7 @@ class JsonMapper:
                 "pan_x": project.view_state.pan_x,
                 "pan_y": project.view_state.pan_y,
                 "show_grid": project.view_state.show_grid,
+                "show_sensors": project.view_state.show_sensors,
                 "show_markers": project.view_state.show_markers,
                 "show_com": project.view_state.show_com,
                 "show_sliders": project.view_state.show_sliders,

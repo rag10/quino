@@ -190,6 +190,25 @@ def test_joint_friction_properties_can_be_edited() -> None:
     assert app.joint_friction_values(joint) == pytest.approx((2.5, 0.1))
 
 
+def test_revolute_joint_angular_limits_can_be_edited() -> None:
+    app = make_app()
+    body_id = app.create_bar("Crank", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    marker_a = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "A")
+    joint_id = app.connect_marker_to_ground(marker_a, name="Ground_A")
+    joint = app.get_joint(joint_id)
+
+    app.update_property(joint_id, "angle_limit_positive", PropertyValueInput("expression", "30 deg"))
+    app.update_property(joint_id, "angle_limit_negative", PropertyValueInput("expression", "15 deg"))
+
+    assert app.joint_supports_angular_limits(joint) is True
+    assert app.joint_angular_limit_values(joint) == pytest.approx((30.0, 15.0))
+
+    app.update_property(joint_id, "angle_limit_positive", PropertyValueInput("null", None))
+    app.update_property(joint_id, "angle_limit_negative", PropertyValueInput("expression", ""))
+
+    assert app.joint_angular_limit_values(joint) == (None, None)
+
+
 def test_slider_joint_friction_properties_can_be_edited() -> None:
     app = make_app()
     body = app.create_body("Block", [MarkerInput("0 mm", "0 mm", "P")])

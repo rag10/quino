@@ -241,7 +241,12 @@ class BodyCommands:
             body_id = self.create_body(name=name, markers=[MarkerInput(x, y, "P")], body_type=BodyType.POINT_MASS.value)
             body = next(b for b in project.model.bodies if b.id == body_id)
             structural = next(m for m in body.markers if m.type is MarkerType.STRUCTURAL)
-            self._ctx.connect_marker_to_ground(structural.id, joint_type="rigid", name=f"Ground_{name}")
+            body.metadata.values["ground_anchor"] = True
+            body.metadata.values["ground_marker_id"] = structural.id
+            joint_id = self._ctx.connect_marker_to_ground(structural.id, joint_type="rigid", name=f"Ground_{name}")
+            joint = next((item for item in project.model.joints if item.id == joint_id), None)
+            if joint is not None:
+                joint.metadata.values["internal_ground_anchor"] = True
         return body_id, structural.id
 
     def get_marker_deletion_consequence(self, marker_id: str) -> str:

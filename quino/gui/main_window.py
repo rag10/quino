@@ -448,6 +448,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_toggle_grid.triggered.connect(self._on_toggle_grid)
         self.action_toggle_grid.setToolTip("Show/hide grid")
 
+        self.action_toggle_sensors = QtGui.QAction(get_icon("sensor-point", color_base), "Sensors", self)
+        self.action_toggle_sensors.setCheckable(True)
+        self.action_toggle_sensors.setChecked(True)
+        self.action_toggle_sensors.triggered.connect(self._on_toggle_sensors)
+        self.action_toggle_sensors.setToolTip("Show/hide sensor overlays")
+
         self.action_add_gravity = QtGui.QAction(get_icon("gravity", color_dynamic), "Gravity", self)
         self.action_add_gravity.setToolTip("Add gravity — or select it if already present")
         self.action_add_gravity.triggered.connect(self._on_add_gravity)
@@ -466,10 +472,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_point_mass_tool = self._tool_action("Mass", CanvasMode.CREATE_POINT_MASS, get_icon("point-mass", color_kinematic), "Create a punctual mass (1 click)")
         self.action_body_tool = self._tool_action("Body", CanvasMode.CREATE_BODY, get_icon("body", color_kinematic), "Create a body")
         self.action_add_marker_tool = self._tool_action("Marker", CanvasMode.ADD_MARKER, get_icon("marker-plus", color_kinematic), "Add a marker to the selected body")
-        self.action_joint_tool = self._tool_action("Revolute", CanvasMode.CREATE_REVOLUTE, get_icon("revolute", color_kinematic), "Create a revolute joint")
-        self.action_rigid_joint_tool = self._tool_action("Rigid", CanvasMode.CREATE_RIGID, get_icon("rigid", color_kinematic), "Create a rigid joint")
-        self.action_slider_tool = self._tool_action("Slider", CanvasMode.CREATE_SLIDER, get_icon("slider", color_kinematic), "Create a slider")
-        self.action_ground_tool = self._tool_action("Ground", CanvasMode.CONNECT_GROUND, get_icon("ground", color_kinematic), "Connect a marker to ground")
+        self.action_joint_tool = self._tool_action("Revolute", CanvasMode.CREATE_REVOLUTE, get_icon("revolute", color_kinematic), "Create a revolute joint between marker-marker, marker-ground, or marker-slider")
+        self.action_rigid_joint_tool = self._tool_action("Rigid", CanvasMode.CREATE_RIGID, get_icon("rigid", color_kinematic), "Create a rigid joint between marker-marker, marker-ground, or marker-slider")
+        self.action_slider_tool = self._tool_action("Slider", CanvasMode.CREATE_SLIDER, get_icon("slider", color_kinematic), "Create a slider from 2 points, or from marker + point centered on the marker")
+        self.action_ground_tool = self._tool_action("Ground", CanvasMode.CONNECT_GROUND, get_icon("ground", color_kinematic), "Click a marker to connect it to ground, or empty canvas to create a free ground")
         self.action_slider_connect_tool = self._tool_action("ToSlide", CanvasMode.CONNECT_SLIDER, get_icon("slider-connect", color_kinematic), "Connect a marker to a slider")
         self.action_sketch_point_tool = self._tool_action("Point", CanvasMode.CREATE_SKETCH_POINT, get_icon("sketch-point", color_sketch), "Create a sketch point")
         self.action_sketch_line_tool = self._tool_action("Line", CanvasMode.CREATE_SKETCH_LINE_SEGMENT, get_icon("sketch-line", color_sketch), "Create a sketch line segment")
@@ -759,7 +765,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._add_toolbar_block(toolbar, [
             [self.action_select_tool, self.action_fit_view, self.action_delete],
-            [self.action_toggle_origin, self.action_toggle_grid, self.action_toggle_sketch_visible],
+            [self.action_toggle_origin, self.action_toggle_grid, self.action_toggle_sensors, self.action_toggle_sketch_visible],
         ], "View")
 
     def _build_sketch_toolbar(self) -> None:
@@ -796,13 +802,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._add_toolbar_block(t, [
             [self.action_point_mass_tool, self.action_bar_tool, self.action_body_tool],
-            [self.action_add_marker_tool, self.action_slider_tool],
+            [self.action_add_marker_tool, self.action_slider_tool, self.action_ground_tool],
         ], "Elements")
         self._add_toolbar_sep(t)
 
         self._add_toolbar_block(t, [
             [self.action_joint_tool, self.action_rigid_joint_tool],
-            [self.action_ground_tool, self.action_slider_connect_tool],
         ], "Joints")
         self._add_toolbar_sep(t)
 
@@ -948,6 +953,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._pose_toolbar.setVisible(False)
             self._sim_toolbar.setVisible(False)
             self._playback_widget.setVisible(False)
+            if self._has_simulation_frames():
+                self._rewind_simulation_to_start()
             self.refresh_all()
 
         # Force select mode when switching
@@ -972,6 +979,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if hasattr(self, "poses_panel"):
             self.poses_panel.refresh()
         self.action_toggle_sketch_visible.setChecked(project.sketch.visible if project.sketch is not None else False)
+        self.action_toggle_sensors.setChecked(project.view_state.show_sensors)
+        self.canvas.set_show_sensors(project.view_state.show_sensors)
         self.canvas.set_selection(self._selected_entity_id)
         self._update_interaction_state()
         self._update_status_message()
@@ -1371,6 +1380,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._has_simulation_frames():
             self._clear_simulation_state(message)
 
+    def _rewind_simulation_to_start(self) -> None:
+        self._playback_timer.stop()
+        self._sync_play_pause_icon()
+        self._current_frame_index = 0
+        self._apply_current_frame()
+        self._update_timeline_controls()
+
     def _apply_current_frame(self) -> None:
         frame = None
         time_value = 0.0
@@ -1386,7 +1402,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 if initial_pose is not None:
                     frame = pose_to_state_overlay(initial_pose)
         elif self._last_simulation_result is not None and self._last_simulation_result.frames:
-            index = max(0, min(self._current_frame_index, len(self._last_simulation_result.frames) - 1))
+            index = 0 if self._app_mode == "model" else max(0, min(self._current_frame_index, len(self._last_simulation_result.frames) - 1))
             frame = self._last_simulation_result.frames[index]
             time_value = self._last_simulation_result.time[index] if index < len(self._last_simulation_result.time) else 0.0
         self._last_simulation_state = frame
@@ -1444,6 +1460,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_toggle_grid(self) -> None:
         self.canvas.set_show_grid(self.action_toggle_grid.isChecked())
+
+    def _on_toggle_sensors(self) -> None:
+        show = self.action_toggle_sensors.isChecked()
+        self.canvas.set_show_sensors(show)
+        if self.app_service.project is not None:
+            self.app_service.project.view_state.show_sensors = show
 
     def _on_add_gravity(self) -> None:
         project = self.app_service.project
@@ -1678,6 +1700,7 @@ class MainWindow(QtWidgets.QMainWindow):
     # --- icon name per entity kind ---
     _KIND_ICON: dict[str, str] = {
         "bar": "bar", "body": "body",
+        "ground": "ground",
         "reaction": "sensor-point",
         "structural": "marker", "com": "marker",
         "slider": "slider",
@@ -1739,9 +1762,10 @@ class MainWindow(QtWidgets.QMainWindow):
             item.setFlags(item.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
             return item
 
+        visible_joints = [joint for joint in project.model.joints if not joint.metadata.values.get("internal_ground_anchor")]
         bodies_root = _root("Bodies", len(project.model.bodies))
         sliders_root = _root("Sliders", len(project.model.sliders))
-        joints_root = _root("Joints", len(project.model.joints))
+        joints_root = _root("Joints", len(visible_joints))
         drivers_root = _root("Drivers", len(project.model.drivers))
         sensors_root = _root("Sensors", len(project.model.sensors))
         loads_count = len(project.model.loads) + (1 if project.model.gravity is not None else 0)
@@ -1783,15 +1807,18 @@ class MainWindow(QtWidgets.QMainWindow):
                     group_item.addChild(self._entity_item(entity.name, kind, entity.id))
 
         for body in project.model.bodies:
-            body_item = self._entity_item(body.name, body.type.value, body.id)
+            body_kind = "ground" if body.metadata.values.get("ground_anchor") else body.type.value
+            body_item = self._entity_item(body.name, body_kind, body.id)
             bodies_root.addChild(body_item)
+            if body.metadata.values.get("ground_anchor"):
+                continue
             for marker in body.markers:
                 if not marker.visible and marker.type.value == "com":
                     continue
                 body_item.addChild(self._entity_item(marker.name, marker.type.value, marker.id))
         for slider in project.model.sliders:
             sliders_root.addChild(self._entity_item(slider.name, "slider", slider.id))
-        for joint in project.model.joints:
+        for joint in visible_joints:
             joints_root.addChild(self._entity_item(joint.name, joint.type.value, joint.id))
         for driver in project.model.drivers:
             drivers_root.addChild(self._entity_item(driver.name, driver.type.value, driver.id))
@@ -2461,6 +2488,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 gap = math.hypot(pos_a[0] - pos_b[0], pos_a[1] - pos_b[1])
                 if gap > tolerance_mm:
                     return f"Kinematic pose would violate joint {joint.name}: marker gap {gap:.6g} mm"
+                angular_violation = self._pose_joint_angle_limit_violation(joint, assembled)
+                if angular_violation is not None:
+                    return angular_violation
                 continue
 
             if len(marker_endpoints) == 1 and any(endpoint.kind is JointEndpointKind.GROUND for endpoint in endpoints):
@@ -2475,6 +2505,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 gap = math.hypot(pos[0] - marker.global_x, pos[1] - marker.global_y)
                 if gap > tolerance_mm:
                     return f"Kinematic pose would violate ground joint {joint.name}: gap {gap:.6g} mm"
+                angular_violation = self._pose_joint_angle_limit_violation(joint, assembled)
+                if angular_violation is not None:
+                    return angular_violation
                 continue
 
             if len(marker_endpoints) == 1 and slider_endpoints:
@@ -2502,6 +2535,71 @@ class MainWindow(QtWidgets.QMainWindow):
                         f"coordinate {slider_coordinate:.6g} mm above travel_max {slider.travel_max:.6g} mm"
                     )
         return None
+
+    def _pose_joint_angle_limit_violation(self, joint: Joint, assembled) -> str | None:
+        if not self.app_service.joint_supports_angular_limits(joint):
+            return None
+        positive, negative = self.app_service.joint_angular_limit_values(joint)
+        if positive is None and negative is None:
+            return None
+        current = self._pose_joint_relative_angle_delta_deg(joint, assembled)
+        if current is None:
+            return None
+        lower = -(negative or 0.0)
+        upper = positive or 0.0
+        tolerance = 1e-6
+        if current < lower - tolerance or current > upper + tolerance:
+            return (
+                f"Kinematic pose would violate angular limit on joint {joint.name}: "
+                f"relative angle {current:.6g} deg outside [{lower:.6g}, {upper:.6g}] deg"
+            )
+        return None
+
+    def _pose_joint_relative_angle_delta_deg(self, joint: Joint, assembled) -> float | None:
+        pose = self.app_service.get_current_pose()
+        if pose is None:
+            return None
+
+        def _pose_angle(body_id: str | None) -> float | None:
+            if body_id is None:
+                return None
+            body_pose = pose.body_poses.get(body_id)
+            return body_pose.angle if body_pose is not None else None
+
+        def _is_ground_anchor(body_id: str | None) -> bool:
+            if body_id is None:
+                return False
+            body = self.app_service.get_body(body_id)
+            return bool(body is not None and body.metadata.values.get("ground_anchor"))
+
+        if joint.endpoint_a.kind is JointEndpointKind.GROUND and joint.endpoint_b.kind is JointEndpointKind.MARKER:
+            body_id = joint.endpoint_b.body_id
+            pose_angle = _pose_angle(body_id)
+            reference = assembled.bodies.get(body_id or "")
+            if pose_angle is None or reference is None:
+                return None
+            return math.degrees(pose_angle - reference.angle)
+        if joint.endpoint_b.kind is JointEndpointKind.GROUND and joint.endpoint_a.kind is JointEndpointKind.MARKER:
+            body_id = joint.endpoint_a.body_id
+            pose_angle = _pose_angle(body_id)
+            reference = assembled.bodies.get(body_id or "")
+            if pose_angle is None or reference is None:
+                return None
+            return math.degrees(pose_angle - reference.angle)
+
+        body_a_id = joint.endpoint_a.body_id
+        body_b_id = joint.endpoint_b.body_id
+        pose_a = _pose_angle(body_a_id)
+        pose_b = _pose_angle(body_b_id)
+        ref_a = assembled.bodies.get(body_a_id or "")
+        ref_b = assembled.bodies.get(body_b_id or "")
+        if pose_a is None or pose_b is None or ref_a is None or ref_b is None:
+            return None
+        if _is_ground_anchor(body_a_id) and not _is_ground_anchor(body_b_id):
+            return math.degrees((pose_b - pose_a) - (ref_b.angle - ref_a.angle))
+        if _is_ground_anchor(body_b_id) and not _is_ground_anchor(body_a_id):
+            return math.degrees((pose_a - pose_b) - (ref_a.angle - ref_b.angle))
+        return math.degrees((pose_b - pose_a) - (ref_b.angle - ref_a.angle))
 
     def _solve_pose_constraint_progressively(
         self,
@@ -2697,6 +2795,17 @@ class MainWindow(QtWidgets.QMainWindow):
                     pose=copy.deepcopy(self.app_service.get_current_pose()),
                     warnings=["Pose solved kinematically because the static solve was singular"],
                     backend="kinematic_pose",
+                )
+        if result.success:
+            violation = self._pose_joint_constraint_violation(tolerance_mm=1e-3)
+            if violation is not None:
+                result = PoseSolveResult(
+                    success=False,
+                    pose=copy.deepcopy(self.app_service.get_current_pose()),
+                    warnings=list(result.warnings),
+                    messages=[*result.messages, violation],
+                    backend=result.backend,
+                    error=violation,
                 )
         self._apply_current_frame()
         self._populate_inspector()
@@ -3814,6 +3923,22 @@ class MainWindow(QtWidgets.QMainWindow):
 
         elif isinstance(entity, Joint):
             prop("type", "", entity.type.value, "readonly", entity.type.value)
+            if self.app_service.joint_supports_angular_limits(entity):
+                positive, negative = self.app_service.joint_angular_limit_values(entity)
+                prop(
+                    "angle_limit_positive",
+                    "angle_limit_positive",
+                    "" if positive is None else f"{positive:.6g} deg",
+                    "expression_or_null",
+                    "(unrestricted)" if positive is None else f"{positive:.6g} deg",
+                )
+                prop(
+                    "angle_limit_negative",
+                    "angle_limit_negative",
+                    "" if negative is None else f"{negative:.6g} deg",
+                    "expression_or_null",
+                    "(unrestricted)" if negative is None else f"{negative:.6g} deg",
+                )
             friction_mode = self.app_service.joint_friction_mode(entity)
             if friction_mode == "rotation":
                 coulomb, viscous = self.app_service.joint_friction_values(entity)

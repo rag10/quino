@@ -29,6 +29,11 @@ from quino.domain.types import (
 
 
 class JointCommands:
+    _ANGLE_LIMIT_POSITIVE_KEY = "angle_limit_positive_deg"
+    _ANGLE_LIMIT_NEGATIVE_KEY = "angle_limit_negative_deg"
+    _ANGULAR_LIMIT_REFERENCE_BODY_KEY = "angle_limit_reference_body_id"
+    _ANGULAR_LIMIT_MOVING_BODY_KEY = "angle_limit_moving_body_id"
+
     def __init__(self, ctx: ServiceContext) -> None:
         self._ctx = ctx
 
@@ -413,6 +418,43 @@ class JointCommands:
         except (TypeError, ValueError):
             return 0.0
 
+    def joint_supports_angular_limits(self, joint: Joint) -> bool:
+        if joint.type is not JointType.REVOLUTE:
+            return False
+        if joint.metadata.values.get("internal_ground_anchor"):
+            return False
+        endpoints = (joint.endpoint_a, joint.endpoint_b)
+        return all(endpoint.kind is not JointEndpointKind.SLIDER for endpoint in endpoints)
+
+    def joint_angular_limit_values(self, joint: Joint) -> tuple[float | None, float | None]:
+        positive = self._coerce_joint_limit(joint.metadata.values.get(self._ANGLE_LIMIT_POSITIVE_KEY))
+        negative = self._coerce_joint_limit(joint.metadata.values.get(self._ANGLE_LIMIT_NEGATIVE_KEY))
+        return positive, negative
+
+    def _coerce_joint_limit(self, value: object) -> float | None:
+        if value is None:
+            return None
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        return numeric if numeric >= 0.0 else None
+
+    def _parse_joint_angle_limit(self, path: str, value: PropertyValueInput) -> float | None:
+        if value.kind == "null":
+            return None
+        if value.kind != "expression" or not isinstance(value.value, str):
+            raise ValueError(f"{path} requires an angle expression or null")
+        text = value.value.strip()
+        if not text or text.lower() == "none":
+            return None
+        scalar = self._scalar(text, "deg", Dimension.ANGLE)
+        result = self._ctx.expressions.evaluate_property(scalar, self._project.parameters)
+        numeric = self._ctx.units.convert(self._ctx.units.quantity(result.value, result.unit), "deg")
+        if numeric < 0.0:
+            raise ValueError(f"{path} must be non-negative")
+        return float(numeric)
+
     def _update_joint_friction_property(self, joint: Joint, path: str, value: PropertyValueInput) -> None:
         if self.joint_friction_mode(joint) is None:
             raise ValueError("This joint topology does not support friction")
@@ -429,6 +471,22 @@ class JointCommands:
                 raise ValueError(f"{path} must be a number") from exc
         self._ctx.snapshot()
         joint.metadata.values[path] = numeric
+
+    def _update_joint_angular_limit_property(self, joint: Joint, path: str, value: PropertyValueInput) -> None:
+        if not self.joint_supports_angular_limits(joint):
+            raise ValueError("This joint topology does not support angular limits")
+        metadata_key = {
+            "angle_limit_positive": self._ANGLE_LIMIT_POSITIVE_KEY,
+            "angle_limit_negative": self._ANGLE_LIMIT_NEGATIVE_KEY,
+        }.get(path)
+        if metadata_key is None:
+            raise ValueError(f"Unknown angular limit property: {path}")
+        numeric = self._parse_joint_angle_limit(path, value)
+        self._ctx.snapshot()
+        if numeric is None:
+            joint.metadata.values.pop(metadata_key, None)
+        else:
+            joint.metadata.values[metadata_key] = numeric
 
     # ------------------------------------------------------------------
     # Public commands — sliders
@@ -515,6 +573,7 @@ class JointCommands:
             endpoint_a=self._make_endpoint(endpoint_a),
             endpoint_b=self._make_endpoint(endpoint_b),
         )
+        self._tag_joint_reference_topology(joint)
         self._ensure_joint_not_duplicate(joint)
         self._ctx.snapshot()
         project.model.joints.append(joint)
@@ -524,6 +583,24 @@ class JointCommands:
         # _entity_index = None in ApplicationService._snapshot(). This is correct.
         self._ctx.invalidate_pose_state()
         return joint.id
+
+    def _tag_joint_reference_topology(self, joint: Joint) -> None:
+        if joint.endpoint_a.kind is not JointEndpointKind.MARKER or joint.endpoint_b.kind is not JointEndpointKind.MARKER:
+            return
+        body_a = self._ctx.find_entity(joint.endpoint_a.body_id) if joint.endpoint_a.body_id else None
+        body_b = self._ctx.find_entity(joint.endpoint_b.body_id) if joint.endpoint_b.body_id else None
+        if not isinstance(body_a, Body) or not isinstance(body_b, Body):
+            return
+        is_ground_a = bool(body_a.metadata.values.get("ground_anchor"))
+        is_ground_b = bool(body_b.metadata.values.get("ground_anchor"))
+        if is_ground_a == is_ground_b:
+            return
+        if is_ground_a:
+            joint.metadata.values[self._ANGULAR_LIMIT_REFERENCE_BODY_KEY] = body_a.id
+            joint.metadata.values[self._ANGULAR_LIMIT_MOVING_BODY_KEY] = body_b.id
+        else:
+            joint.metadata.values[self._ANGULAR_LIMIT_REFERENCE_BODY_KEY] = body_b.id
+            joint.metadata.values[self._ANGULAR_LIMIT_MOVING_BODY_KEY] = body_a.id
 
     def create_rigid_joint(
         self,
