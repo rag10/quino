@@ -109,9 +109,15 @@ class SolvespaceBackend:
         # Emit geometric constraints (FIX is already handled above via dragged).
         from quino.services.sketch_solving.constraint_mapping import emit_constraint
         bad_constraints: list[str] = []
+        constrained_radii: set[str] = set()
         for c in sketch.constraints.values():
             if c.type is SketchConstraintType.FIX:
                 continue
+            if c.type is SketchConstraintType.RADIUS:
+                # Track which circle/arc entities have an explicit radius constraint
+                # so we don't double-constrain their radii below.
+                constrained_radii.update(c.entity_references or [])
+                constrained_radii.update(c.references or [])
             try:
                 emit_constraint(
                     sys, wp, c,
@@ -123,6 +129,21 @@ class SolvespaceBackend:
                 )
             except ValueError:
                 bad_constraints.append(c.id)
+
+        # Lock the radius of every circle/arc that is NOT covered by a user RADIUS
+        # constraint. Without this, the `add_distance` entity for the radius is a
+        # free parameter and Solvespace will happily move it together with the
+        # points to satisfy on_circle / tangent constraints.
+        for entity in sketch.entities.values():
+            if entity.id in constrained_radii:
+                continue
+            handle = entity_handles.get(entity.id)
+            if handle is None:
+                continue
+            if isinstance(entity, (SketchCircle, SketchArc)):
+                radius_mm = self._evaluate_radius(entity, project)
+                if radius_mm is not None:
+                    sys.diameter(handle, 2.0 * radius_mm)
 
         result_code = sys.solve()
         success = result_code == ps.ResultFlag.OKAY and not bad_constraints
@@ -185,6 +206,27 @@ class SolvespaceBackend:
             )
             entities[entity.id] = handle
         # otherwise: unsupported entity type (e.g. SketchSpline), ignored for now.
+
+    def _evaluate_radius(self, entity, project: Project) -> float | None:
+        """Evaluate the declared radius (mm) of a SketchCircle or SketchArc."""
+        if isinstance(entity, SketchCircle):
+            return self._evaluate_expression(entity.radius, project.parameters)
+        if isinstance(entity, SketchArc):
+            # Arc radius is the distance from center to start point at sketch time.
+            center = next(
+                (p for p in project.sketch.points() if p.id == entity.center_point_id),
+                None,
+            )
+            start = next(
+                (p for p in project.sketch.points() if p.id == entity.start_point_id),
+                None,
+            )
+            if center is None or start is None:
+                return None
+            cx, cy = self._evaluate_point(project, center)
+            sx, sy = self._evaluate_point(project, start)
+            return ((sx - cx) ** 2 + (sy - cy) ** 2) ** 0.5
+        return None
 
     @staticmethod
     def _read_point(sys, handle) -> tuple[float, float]:
