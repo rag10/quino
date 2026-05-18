@@ -106,10 +106,26 @@ class SolvespaceBackend:
                 sys, wp, nm_3d, entity, point_handles, entity_handles, radius_entities, project,
             )
 
-        # Constraints not emitted yet — Tasks T5-T9 add them.
+        # Emit geometric constraints (FIX is already handled above via dragged).
+        from quino.services.sketch_solving.constraint_mapping import emit_constraint
+        bad_constraints: list[str] = []
+        for c in sketch.constraints.values():
+            if c.type is SketchConstraintType.FIX:
+                continue
+            try:
+                emit_constraint(
+                    sys, wp, c,
+                    points=point_handles,
+                    entities=entity_handles,
+                    project=project,
+                    expressions=self._expressions,
+                    units=self._units,
+                )
+            except ValueError:
+                bad_constraints.append(c.id)
 
         result_code = sys.solve()
-        success = result_code == ps.ResultFlag.OKAY
+        success = result_code == ps.ResultFlag.OKAY and not bad_constraints
 
         positions = {
             pid: self._read_point(sys, handle) for pid, handle in point_handles.items()
@@ -119,7 +135,8 @@ class SolvespaceBackend:
             positions=positions,
             iterations=0,
             max_error=0.0 if success else math.inf,
-            message=None if success else f"Solvespace result: {result_code!r}",
+            message=None if success else f"Solvespace result: {result_code!r}; bad: {bad_constraints}",
+            bad_constraints=bad_constraints,
         )
 
     def _evaluate_point(self, project: Project, point: SketchPoint) -> tuple[float, float]:
