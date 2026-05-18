@@ -30,3 +30,4 @@ class ServiceContext:
     load_expression_variables: Callable[..., dict]
     build_validated_scalar_property: Callable[[object, str, str], object]
     assign_scalar_property: Callable[[object, str, object], None]
+    apply_style_update: Callable[[object, str, object], None]
