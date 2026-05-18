@@ -1,17 +1,13 @@
 ﻿from __future__ import annotations
 
 import copy
-import re
 
 from quino.domain.inputs import JointEndpointInput, MarkerInput, PropertyValueInput, SliderInput
-from quino.domain.sketch_constraints import CONSTRAINT_SPECS
 from quino.domain.model import (
     Body,
     Driver,
     Expression,
-    GravityLoad,
     Joint,
-    JointEndpoint,
     Load,
     Marker,
     Metadata,
@@ -20,31 +16,16 @@ from quino.domain.model import (
     Project,
     Pose,
     ScalarProperty,
-    Sensor,
     SimulationResult,
     Sketch,
     SketchConstraint,
-    SketchArc,
     SketchCircle,
-    SketchInfiniteLine,
-    SketchLineSegment,
     SketchPoint,
-    SketchSpline,
-    Slider,
     Spring,
     SpringEndpoint,
     ValidationMessage,
     ValidationReport,
     ViewState,
-)
-from quino.domain.types import (
-    BodyType,
-    Dimension,
-    MarkerType,
-    SensorType,
-    SketchConstraintType,
-    SketchEntityType,
-    SpringType,
 )
 from quino.application._context import ServiceContext
 from quino.application.commands.parameter_commands import ParameterCommands
@@ -64,21 +45,12 @@ from quino.services.units import UnitService
 from quino.services.validation import ValidationService
 from quino.services.sketch_solver import SketchSolver
 from quino.simulation.runner import SimulationRunner
-from quino.simulation.sensor_expressions import sensor_expression_variables
 from quino.solver_adapters.exudyn_adapter import ExudynAdapter
 from quino.solver_adapters.exudyn_pose_adapter import ExudynPoseAdapter
 
 
 class ApplicationService:
     schema_version = "0.1.0"
-    _PLAIN_NUMBER_RE = re.compile(r"^\s*[-+]?(?:\d+(?:[.,]\d*)?|[.,]\d+)\s*$")
-
-    _STYLE_FIELD_TYPES: dict[str, type] = {
-        "color": str,
-        "visible": bool,
-        "line_width": float,
-        "marker_size": float,
-    }
 
     def __init__(self) -> None:
         self.id_service = IdService()
@@ -98,6 +70,9 @@ class ApplicationService:
             self.expression_service,
             self.unit_service,
         )
+        # Build command-services. The ServiceContext callables that depend on command-services
+        # are wired after construction (see "Rewire" block below).
+        _unset: object = None  # type: ignore[assignment]
         self._service_context = ServiceContext(
             project_provider=lambda: self.project,
             operation=self._operation,
@@ -107,15 +82,15 @@ class ApplicationService:
             expressions=self.expression_service,
             units=self.unit_service,
             validation=self.validation_service,
-            find_entity=self._find_entity,
-            sync_all_special_com_markers=self._sync_all_special_com_markers,
+            find_entity=_unset,
+            sync_all_special_com_markers=_unset,
             load_expression_variables=self._kinematic_validator.load_expression_variables,
-            build_validated_scalar_property=self._build_validated_scalar_property,
-            assign_scalar_property=self._assign_scalar_property,
-            apply_style_update=self._apply_style_update,
+            build_validated_scalar_property=_unset,
+            assign_scalar_property=_unset,
+            apply_style_update=_unset,
             connect_marker_to_ground=self.connect_marker_to_ground,
-            joints_for_marker=self._joints_for_marker,
-            translate_direct_joint_counterparts=self._translate_direct_joint_counterparts,
+            joints_for_marker=_unset,
+            translate_direct_joint_counterparts=_unset,
         )
         self.parameters = ParameterCommands(self._service_context)
         self.forces = ForceCommands(self._service_context)
@@ -133,11 +108,11 @@ class ApplicationService:
             poses=self.poses,
         )
         # Rewire context callables to their canonical implementations
+        self._service_context.find_entity = self.entities._find_entity
         self._service_context.sync_all_special_com_markers = self.bodies.sync_all_special_com_markers
         self._service_context.connect_marker_to_ground = self.joints.connect_marker_to_ground
         self._service_context.joints_for_marker = self.joints._joints_for_marker
         self._service_context.translate_direct_joint_counterparts = self.joints._translate_direct_joint_counterparts
-        self._service_context.find_entity = self.entities._find_entity
         self._service_context.build_validated_scalar_property = self.entities._build_validated_scalar_property
         self._service_context.assign_scalar_property = self.entities._assign_scalar_property
         self._service_context.apply_style_update = self.entities._apply_style_update
@@ -579,9 +554,6 @@ class ApplicationService:
             self.project.poses = []
             self.project.simulation_initial_pose_id = None
 
-    def _cleanup_driver_velocities(self, removed_driver_ids: set[str]) -> None:
-        return self.entities._cleanup_driver_velocities(removed_driver_ids)
-
     def _operation(self):
         """Context manager that takes a single snapshot for the whole operation."""
         from contextlib import contextmanager
@@ -597,47 +569,8 @@ class ApplicationService:
 
         return _ctx()
 
-    def _scalar(self, expression: str, unit: str, dimension: Dimension) -> ScalarProperty:
-        return self.entities._scalar(expression, unit, dimension)
-
-    def _mm_expression(self, value: float) -> str:
-        return self.entities._mm_expression(value)
-
-    # --- Body helper back-compat shims ----------------------------------------
-    # Canonical implementations live in BodyCommands; these shims keep existing
-    # callers (delete_entity, update_property, connect_marker_to_ground, etc.)
-    # working without change.
-
-    def _make_marker(self, body_id: str, marker_input: MarkerInput, is_first: bool) -> Marker:
-        return self.bodies._make_marker(body_id, marker_input, is_first)
-
-    def _make_com_marker(self, body: Body) -> Marker:
-        return self.bodies._make_com_marker(body)
-
     def _sync_all_special_com_markers(self) -> None:
         return self.bodies.sync_all_special_com_markers()
-
-    def _sync_special_com_marker(self, body: Body) -> None:
-        return self.bodies._sync_special_com_marker(body)
-
-    def _update_bar_com_property(self, body: Body, property_path: str, value: PropertyValueInput) -> None:
-        return self.bodies._update_bar_com_property(body, property_path, value)
-
-    def _find_body(self, body_id: str) -> Body:
-        return self.bodies._find_body(body_id)
-
-    def _find_body_by_marker(self, marker_id: str) -> Body:
-        return self.bodies._find_body_by_marker(marker_id)
-
-    def _normalize_angle_expression(self, expression: str) -> str:
-        return self.entities._normalize_angle_expression(expression)
-
-    def _is_literal_expression(self, expression: str) -> bool:
-        """Return True if expression is a plain number with optional unit (no parameters)."""
-        return self.entities._is_literal_expression(expression)
-
-    def _make_endpoint(self, endpoint: JointEndpointInput) -> JointEndpoint:
-        return self.joints._make_endpoint(endpoint)
 
     def _find_body(self, body_id: str) -> Body:
         project = self._require_project()
@@ -653,18 +586,8 @@ class ApplicationService:
                 return body
         raise ValueError(f"Unknown marker: {marker_id}")
 
-    def _find_parameter(self, parameter_id: str) -> Parameter:
-        project = self._require_project()
-        for parameter in project.parameters:
-            if parameter.id == parameter_id:
-                return parameter
-        raise ValueError(f"Unknown parameter: {parameter_id}")
-
     def _find_joint(self, joint_id: str) -> Joint:
         return self.joints._find_joint(joint_id)
-
-    def _build_entity_index(self) -> dict[str, object]:
-        return self.entities._build_entity_index()
 
     def _find_entity(self, entity_id: str) -> object:
         return self.entities._find_entity(entity_id)
@@ -702,18 +625,6 @@ class ApplicationService:
         except ValueError:
             return None
 
-    def _build_validated_scalar_property(self, entity: object, property_path: str, expression: str) -> ScalarProperty:
-        return self.entities._build_validated_scalar_property(entity, property_path, expression)
-
-    def _assign_scalar_property(self, entity: object, property_path: str, scalar: ScalarProperty) -> None:
-        return self.entities._assign_scalar_property(entity, property_path, scalar)
-
-    def _rename_entity_no_snapshot(self, entity: object, new_name: str) -> None:
-        return self.entities._rename_entity_no_snapshot(entity, new_name)
-
-    def _update_gravity_property(self, path: str, value: PropertyValueInput) -> None:
-        return self.entities._update_gravity_property(path, value)
-
     def joint_friction_mode(self, joint: Joint) -> str | None:
         return self.joints.joint_friction_mode(joint)
 
@@ -723,22 +634,10 @@ class ApplicationService:
     def joint_friction_pin_radius(self, joint: Joint) -> float:
         return self.joints.joint_friction_pin_radius(joint)
 
-    def _update_joint_friction_property(self, joint: Joint, path: str, value: PropertyValueInput) -> None:
-        return self.joints._update_joint_friction_property(joint, path, value)
-
-    def _apply_style_update(self, entity: object, property_path: str, value: PropertyValueInput) -> None:
-        return self.entities._apply_style_update(entity, property_path, value)
-
-    def _validate_entity_name(self, entity: object, new_name: str) -> None:
-        return self.entities._validate_entity_name(entity, new_name)
-
     # --- Sketch helper back-compat shims --------------------------------------
     # The following methods used to live on ApplicationService and are referenced
     # by canvas, main_window, and tests. They delegate to SketchCommands so the
     # external API remains stable while the implementation lives in one place.
-
-    def _require_sketch(self, create_if_missing: bool = False) -> Sketch:
-        return self.sketch._require_sketch(create_if_missing=create_if_missing)
 
     def _evaluate_sketch_expression(self, expression: Expression, parameters: list[Parameter]) -> float:
         return self.sketch._evaluate_sketch_expression(expression, parameters)
@@ -752,30 +651,11 @@ class ApplicationService:
     def _find_sketch_constraint(self, constraint_id: str) -> SketchConstraint:
         return self.sketch._find_sketch_constraint(constraint_id)
 
-    def _apply_sketch_constraints(self, locked_point_ids: set[str], *, strict: bool = False):
-        return self.sketch._apply_sketch_constraints(locked_point_ids, strict=strict)
-
     def _current_sketch_angle_degrees(self, vertex_id: str, arm1_id: str, arm2_id: str) -> float:
         return self.sketch._current_sketch_angle_degrees(vertex_id, arm1_id, arm2_id)
 
     def _current_sketch_constraint_label_position(self, constraint: SketchConstraint) -> tuple[float, float]:
         return self.sketch._current_sketch_constraint_label_position(constraint)
-
-    def _validated_edge_order(self, body: Body, raw_value: str) -> list[str]:
-        return self.entities._validated_edge_order(body, raw_value)
-
-    def _validate_parameter_definition(self, expression: str, unit: str, parameter_id: str | None = None) -> None:
-        project = self._require_project()
-        parameter_map = [
-            parameter
-            for parameter in project.parameters
-            if parameter.id != parameter_id
-        ]
-        quantity = self.expression_service.evaluate_expression(expression, parameter_map)
-        self.unit_service.convert(quantity, unit)
-
-    def _validate_endpoint_input(self, endpoint: JointEndpointInput, project: Project) -> None:
-        return self.joints._validate_endpoint_input(endpoint, project)
 
     def _sync_id_service(self) -> None:
         project = self._require_project()
@@ -801,33 +681,6 @@ class ApplicationService:
         for sensor in project.model.sensors:
             self.id_service.observe(sensor.id)
 
-    def _ensure_joint_not_duplicate(self, candidate: Joint) -> None:
-        return self.joints._ensure_joint_not_duplicate(candidate)
-
-    def _joint_has_slider(self, joint: Joint) -> bool:
-        return self.joints._joint_has_slider(joint)
-
-    def _marker_slider_endpoints(self, joint: Joint) -> tuple[JointEndpoint | None, JointEndpoint | None]:
-        return self.joints._marker_slider_endpoints(joint)
-
-    def _joints_for_marker(self, marker_id: str) -> list[Joint]:
-        return self.joints._joints_for_marker(marker_id)
-
-    def _translate_direct_joint_counterparts(
-        self,
-        marker_id: str,
-        joints: list[Joint],
-        delta_x_mm: float,
-        delta_y_mm: float,
-    ) -> set[str]:
-        return self.joints._translate_direct_joint_counterparts(marker_id, joints, delta_x_mm, delta_y_mm)
-
-    def _move_slider_origin(self, slider_id: str, x_expression: str, y_expression: str) -> None:
-        return self.joints._move_slider_origin(slider_id, x_expression, y_expression)
-
-    def _rotate_slider(self, slider_id: str, angle_expression: str) -> None:
-        return self.joints._rotate_slider(slider_id, angle_expression)
-
     def update_slider_geometry(
         self,
         slider_id: str,
@@ -838,45 +691,6 @@ class ApplicationService:
         travel_max: str | None = None,
     ) -> None:
         return self.joints.update_slider_geometry(slider_id, origin_x, origin_y, angle, travel_min, travel_max)
-
-    def _translate_slider_expression(
-        self,
-        slider: Slider,
-        delta_x_mm: float,
-        delta_y_mm: float,
-        moved_marker_ids: set[str] | None = None,
-    ) -> None:
-        return self.joints._translate_slider_expression(slider, delta_x_mm, delta_y_mm, moved_marker_ids)
-
-    def _translate_markers_linked_to_slider(
-        self,
-        slider_id: str,
-        delta_x_mm: float,
-        delta_y_mm: float,
-        moved_marker_ids: set[str],
-    ) -> None:
-        return self.joints._translate_markers_linked_to_slider(slider_id, delta_x_mm, delta_y_mm, moved_marker_ids)
-
-    def _markers_linked_to_slider(self, slider_id: str) -> list[Marker]:
-        return self.joints._markers_linked_to_slider(slider_id)
-
-    def _translate_marker_expression(self, marker: Marker, delta_x_mm: float, delta_y_mm: float) -> None:
-        return self.joints._translate_marker_expression(marker, delta_x_mm, delta_y_mm)
-
-    def _set_marker_absolute_mm(self, marker: Marker, x_mm: float, y_mm: float) -> None:
-        return self.joints._set_marker_absolute_mm(marker, x_mm, y_mm)
-
-    def _slider_center_mm(self, slider: Slider) -> tuple[float, float]:
-        return self.joints._slider_center_mm(slider)
-
-    def _evaluate_scalar_as(self, scalar: ScalarProperty, unit: str) -> float:
-        return self.joints._evaluate_scalar_as(scalar, unit)
-
-    def _offset_expression(self, expression: str, delta: float, unit: str) -> str:
-        return self.joints._offset_expression(expression, delta, unit)
-
-    def _strip_offset(self, expression: str) -> str:
-        return self.joints._strip_offset(expression)
 
     def _evaluate_all(self, project: Project, report: ValidationReport) -> None:
         for parameter in project.parameters:
@@ -1047,5 +861,3 @@ class ApplicationService:
     def update_spring_property(self, spring_id: str, property_path: str, value: "PropertyValueInput") -> None:
         self.forces.update_spring_property(spring_id, property_path, value)
 
-    def _require_spring(self, spring_id: str) -> Spring:
-        return self.forces._require_spring(spring_id)
