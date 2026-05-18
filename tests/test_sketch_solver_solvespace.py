@@ -281,3 +281,39 @@ def test_on_circle_pulls_point_to_circumference():
     x, y = result.positions[pt]
     radius = (x * x + y * y) ** 0.5
     assert abs(radius - 10.0) < 1e-3
+
+
+def test_radius_constraint_updates_circle_radius():
+    """RADIUS constraint must change the circle's stored radius to the target."""
+    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc.new_project("T")
+    svc.create_sketch("S")
+    center = svc.create_sketch_point("0 mm", "0 mm", "C")
+    circle = svc.create_sketch_circle(center, "5 mm", "Circ")  # initial radius 5 mm
+    svc.create_sketch_constraint("fix", [center])
+    # RADIUS API: references=[center_point_id], entity_references=[circle_id], value=radius
+    svc.create_sketch_constraint("distance", [center], value="12 mm", entity_references=[circle])
+    result = _make_backend().solve(svc.project)
+    assert result.success, result.message
+    assert circle in result.radius_updates, f"radius_updates={result.radius_updates}"
+    assert abs(result.radius_updates[circle] - 12.0) < 1e-4
+
+
+def test_radius_constraint_lets_on_circle_pull_to_new_radius():
+    """A point with on_circle on a circle constrained to radius=8 must end on r=8."""
+    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc.new_project("T")
+    svc.create_sketch("S")
+    center = svc.create_sketch_point("0 mm", "0 mm", "C")
+    circle = svc.create_sketch_circle(center, "5 mm", "Circ")  # declared 5 mm
+    pt = svc.create_sketch_point("3 mm", "0 mm", "PT")
+    svc.create_sketch_constraint("fix", [center])
+    # RADIUS API: references=[center_point_id], entity_references=[circle_id], value=radius
+    svc.create_sketch_constraint("distance", [center], value="8 mm", entity_references=[circle])
+    svc.create_sketch_constraint("on_circle", [pt], entity_references=[circle])
+    result = _make_backend().solve(svc.project)
+    assert result.success, result.message
+    x, y = result.positions[pt]
+    dist = (x * x + y * y) ** 0.5
+    assert abs(dist - 8.0) < 1e-3, f"point at dist {dist} from center"
+    assert abs(result.radius_updates[circle] - 8.0) < 1e-3

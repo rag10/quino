@@ -305,6 +305,28 @@ def _emit_tangent(sys, wp, c, points, entities, project, expressions, units):
         )
 
 
+def _emit_radius(sys, wp, c, points, entities, project, expressions, units):
+    """Constrain a circle or arc radius to a target value (mm).
+
+    Solvespace uses diameter natively; we convert: diameter = 2 * radius.
+
+    QUINO stores: references=[], entity_references=[circle_or_arc_id].
+    """
+    ent_ids = list(c.entity_references) if c.entity_references else list(c.references)
+    if len(ent_ids) != 1:
+        raise ValueError(
+            f"radius expects exactly 1 entity ref, got refs={c.references} entity_refs={c.entity_references}"
+        )
+    curve = entities.get(ent_ids[0])
+    if curve is None:
+        raise ValueError(f"radius: unknown entity {ent_ids[0]!r}")
+    if c.value is None:
+        raise ValueError(f"radius constraint {c.id} requires a value")
+    quantity = expressions.evaluate_expression(c.value.expression, project.parameters)
+    radius_mm = float(units.convert(quantity, "mm"))
+    sys.diameter(curve, 2.0 * radius_mm)
+
+
 _HANDLERS: dict[SketchConstraintType, Callable] = {
     SketchConstraintType.DISTANCE: _emit_distance,
     SketchConstraintType.COINCIDENT: _emit_coincident,
@@ -319,4 +341,5 @@ _HANDLERS: dict[SketchConstraintType, Callable] = {
     SketchConstraintType.SYMMETRIC: _emit_symmetric,
     SketchConstraintType.ON_CIRCLE: _emit_on_circle,
     SketchConstraintType.TANGENT: _emit_tangent,
+    SketchConstraintType.RADIUS: _emit_radius,
 }

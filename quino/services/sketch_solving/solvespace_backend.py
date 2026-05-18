@@ -151,6 +151,17 @@ class SolvespaceBackend:
         positions = {
             pid: self._read_point(sys, handle) for pid, handle in point_handles.items()
         }
+
+        # Read back updated radii for circles. (Arcs don't have a tracked radius entity yet;
+        # their radius is implicit in start/end positions, which positions[] already covers.)
+        radius_updates: dict[str, float] = {}
+        for entity_id, rad_entity in radius_entities.items():
+            try:
+                new_radius = float(sys.params(rad_entity.params)[0])
+            except Exception:
+                continue
+            radius_updates[entity_id] = new_radius
+
         return SketchSolveResult(
             success=success,
             positions=positions,
@@ -158,6 +169,7 @@ class SolvespaceBackend:
             max_error=0.0 if success else math.inf,
             message=None if success else f"Solvespace result: {result_code!r}; bad: {bad_constraints}",
             bad_constraints=bad_constraints,
+            radius_updates=radius_updates,
         )
 
     def _evaluate_point(self, project: Project, point: SketchPoint) -> tuple[float, float]:
