@@ -215,6 +215,96 @@ def _emit_midpoint(sys, wp, c, points, entities, project, expressions, units):
     sys.midpoint(p_mid, line, wp)
 
 
+def _emit_collinear(sys, wp, c, points, entities, project, expressions, units):
+    """N+ points collinear: build a line from the first two, constrain the rest."""
+    # QUINO stores 4 point refs minimum; first two anchor the line, rest lie on it.
+    if len(c.references) < 3:
+        raise ValueError(f"collinear expects >=3 point references, got {c.references}")
+    anchor_a = points.get(c.references[0])
+    anchor_b = points.get(c.references[1])
+    if anchor_a is None or anchor_b is None:
+        raise ValueError(f"collinear: unknown anchor point in {c.references}")
+    aux_line = sys.add_line_2d(anchor_a, anchor_b, wp)
+    for pid in c.references[2:]:
+        p = points.get(pid)
+        if p is None:
+            raise ValueError(f"collinear: unknown point {pid}")
+        sys.coincident(p, aux_line, wp)
+
+
+def _emit_symmetric(sys, wp, c, points, entities, project, expressions, units):
+    """Two points symmetric about an axis line defined by two other points.
+
+    QUINO stores 4 point refs: [p1, p2, axis_point_a, axis_point_b].
+    """
+    if len(c.references) != 4:
+        raise ValueError(f"symmetric expects 4 point refs, got {c.references}")
+    p1 = points.get(c.references[0])
+    p2 = points.get(c.references[1])
+    line_a = points.get(c.references[2])
+    line_b = points.get(c.references[3])
+    if any(x is None for x in (p1, p2, line_a, line_b)):
+        raise ValueError(f"symmetric: unknown reference in {c.references}")
+    aux_line = sys.add_line_2d(line_a, line_b, wp)
+    sys.symmetric(p1, p2, aux_line, wp)
+
+
+def _emit_on_circle(sys, wp, c, points, entities, project, expressions, units):
+    """A point must lie on a circle or arc circumference.
+
+    QUINO stores: references=[point_id], entity_references=[circle_entity_id].
+    """
+    if len(c.references) != 1 or len(c.entity_references) != 1:
+        raise ValueError(
+            f"on_circle expects 1 point ref + 1 entity ref, "
+            f"got refs={c.references} entity_refs={c.entity_references}"
+        )
+    point = points.get(c.references[0])
+    curve = entities.get(c.entity_references[0])
+    if point is None:
+        raise ValueError(f"on_circle: unknown point {c.references[0]!r}")
+    if curve is None:
+        raise ValueError(f"on_circle: unknown curve entity {c.entity_references[0]!r}")
+    sys.coincident(point, curve, wp)
+
+
+def _emit_tangent(sys, wp, c, points, entities, project, expressions, units):
+    """Tangency between a line (2 point refs) and a circle/arc (entity ref),
+    or between two curves (0 point refs, 2 entity refs).
+
+    QUINO stores either:
+      - references=[line_p1, line_p2], entity_references=[curve_entity_id]
+      - references=[], entity_references=[curve1_id, curve2_id]
+    """
+    n_refs = len(c.references)
+    n_ents = len(c.entity_references)
+    if n_refs == 2 and n_ents == 1:
+        # Line tangent to circle/arc
+        line_p1 = points.get(c.references[0])
+        line_p2 = points.get(c.references[1])
+        if line_p1 is None or line_p2 is None:
+            raise ValueError(f"tangent: unknown line point in {c.references}")
+        line = sys.add_line_2d(line_p1, line_p2, wp)
+        curve = entities.get(c.entity_references[0])
+        if curve is None:
+            raise ValueError(f"tangent: unknown curve entity {c.entity_references[0]!r}")
+        sys.tangent(line, curve, wp)
+    elif n_refs == 0 and n_ents == 2:
+        # Curve-curve tangency
+        e1 = entities.get(c.entity_references[0])
+        e2 = entities.get(c.entity_references[1])
+        if e1 is None:
+            raise ValueError(f"tangent: unknown entity {c.entity_references[0]!r}")
+        if e2 is None:
+            raise ValueError(f"tangent: unknown entity {c.entity_references[1]!r}")
+        sys.tangent(e1, e2, wp)
+    else:
+        raise ValueError(
+            f"tangent expects (2 pt refs + 1 entity ref) or (0 pt refs + 2 entity refs), "
+            f"got refs={c.references} entity_refs={c.entity_references}"
+        )
+
+
 _HANDLERS: dict[SketchConstraintType, Callable] = {
     SketchConstraintType.DISTANCE: _emit_distance,
     SketchConstraintType.COINCIDENT: _emit_coincident,
@@ -225,4 +315,8 @@ _HANDLERS: dict[SketchConstraintType, Callable] = {
     SketchConstraintType.EQUAL_LENGTH: _emit_equal_length,
     SketchConstraintType.ANGLE: _emit_angle,
     SketchConstraintType.MIDPOINT: _emit_midpoint,
+    SketchConstraintType.COLLINEAR: _emit_collinear,
+    SketchConstraintType.SYMMETRIC: _emit_symmetric,
+    SketchConstraintType.ON_CIRCLE: _emit_on_circle,
+    SketchConstraintType.TANGENT: _emit_tangent,
 }

@@ -219,3 +219,65 @@ def test_midpoint_constraint():
     assert result.success, result.message
     assert abs(result.positions[p_mid][0] - 5.0) < 1e-3
     assert abs(result.positions[p_mid][1] - 0.0) < 1e-3
+
+
+def test_collinear_four_points():
+    # COLLINEAR uses 4 point refs: first two define the anchor line, next two lie on it.
+    # Anchor: p1=(0,0) fixed, p2=(10,0) fixed → line along y=0.
+    # p3=(5,3) and p4=(8,-2) start off the line; constraint pulls them to y=0.
+    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc.new_project("T")
+    svc.create_sketch("S")
+    p1 = svc.create_sketch_point("0 mm", "0 mm", "P1")
+    p2 = svc.create_sketch_point("10 mm", "0 mm", "P2")
+    p3 = svc.create_sketch_point("5 mm", "3 mm", "P3")   # off-line
+    p4 = svc.create_sketch_point("8 mm", "-2 mm", "P4")  # off-line
+    svc.create_sketch_constraint("fix", [p1])
+    svc.create_sketch_constraint("fix", [p2])
+    svc.create_sketch_constraint("collinear", [p1, p2, p3, p4])
+    result = _make_backend().solve(svc.project)
+    assert result.success, result.message
+    # p3 and p4 must have y ≈ 0 (on the anchor line y=0)
+    assert abs(result.positions[p3][1] - 0.0) < 1e-3
+    assert abs(result.positions[p4][1] - 0.0) < 1e-3
+
+
+def test_symmetric_about_axis_line():
+    # SYMMETRIC uses 4 point refs: [p1, p2, axis_point_a, axis_point_b]
+    # axis_a=(-10,0), axis_b=(10,0) → axis is y=0.
+    # p1=(0,5) is fixed. p2=(0,-3) starts asymmetric.
+    # Constraint → p2 must mirror p1 about y=0 → p2.y = -5.
+    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc.new_project("T")
+    svc.create_sketch("S")
+    p1 = svc.create_sketch_point("0 mm", "5 mm", "P1")
+    p2 = svc.create_sketch_point("0 mm", "-3 mm", "P2")   # asymmetric
+    axis_a = svc.create_sketch_point("-10 mm", "0 mm", "AA")
+    axis_b = svc.create_sketch_point("10 mm", "0 mm", "AB")
+    svc.create_sketch_constraint("fix", [p1])
+    svc.create_sketch_constraint("fix", [axis_a])
+    svc.create_sketch_constraint("fix", [axis_b])
+    svc.create_sketch_constraint("symmetric", [p1, p2, axis_a, axis_b])
+    result = _make_backend().solve(svc.project)
+    assert result.success, result.message
+    # p2 must mirror p1 about y=0 → p2.y ≈ -5
+    assert abs(result.positions[p2][1] - (-5.0)) < 1e-3
+
+
+def test_on_circle_pulls_point_to_circumference():
+    # ON_CIRCLE: references=[point_id], entity_references=[circle_entity_id].
+    # Center at (0,0) fixed, circle radius=10 mm.
+    # pt=(5,5) starts off the circle (dist ≈ 7.07 mm); constraint pulls it to radius.
+    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc.new_project("T")
+    svc.create_sketch("S")
+    center = svc.create_sketch_point("0 mm", "0 mm", "C")
+    circle = svc.create_sketch_circle(center, "10 mm", "Circ")
+    pt = svc.create_sketch_point("5 mm", "5 mm", "PT")  # dist ≈ 7.07 (off circle)
+    svc.create_sketch_constraint("fix", [center])
+    svc.create_sketch_constraint("on_circle", [pt], entity_references=[circle])
+    result = _make_backend().solve(svc.project)
+    assert result.success, result.message
+    x, y = result.positions[pt]
+    radius = (x * x + y * y) ** 0.5
+    assert abs(radius - 10.0) < 1e-3
