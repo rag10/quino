@@ -1758,3 +1758,27 @@ def test_delete_structural_marker_convert_to_bar() -> None:
     cy = app.expression_service.evaluate_property(com.y, app.project.parameters).value
     assert abs(cx - 50.0) < 1e-6
     assert abs(cy - 0.0) < 1e-6
+
+
+def test_application_service_default_solver_backend():
+    svc = ApplicationService()
+    assert svc.sketch_solver.backend_name == "legacy"  # will be "solvespace" after Task 12
+
+
+def test_application_service_explicit_legacy_backend():
+    svc = ApplicationService(sketch_solver_backend="legacy")
+    assert svc.sketch_solver.backend_name == "legacy"
+
+
+def test_set_sketch_solver_backend_swaps_instance():
+    svc = ApplicationService(sketch_solver_backend="legacy")
+    old = svc.sketch_solver
+    svc.set_sketch_solver_backend("legacy")  # re-set, still legacy
+    assert svc.sketch_solver is not old
+    assert svc.sketch_solver.backend_name == "legacy"
+
+
+def test_set_sketch_solver_backend_rejects_unknown():
+    svc = ApplicationService()
+    with pytest.raises(ValueError, match="Unknown sketch solver backend"):
+        svc.set_sketch_solver_backend("xyz")
