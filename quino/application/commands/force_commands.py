@@ -62,6 +62,15 @@ class ForceCommands:
             self._ctx.snapshot()
             sensor.name = name
 
+    def update_sensor_scope_position(self, sensor_id: str, x: float, y: float) -> None:
+        project = self._project
+        sensor = next((s for s in project.model.sensors if s.id == sensor_id), None)
+        if sensor is None:
+            raise ValueError(f"Sensor {sensor_id} not found")
+        self._ctx.snapshot()
+        sensor.metadata.values["scope_x"] = float(x)
+        sensor.metadata.values["scope_y"] = float(y)
+
     # ------------------------------------------------------------------ loads
 
     def create_load(self, name: str, marker_id: str, fx_expression: str, fy_expression: str) -> str:

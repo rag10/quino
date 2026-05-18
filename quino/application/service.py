@@ -368,6 +368,9 @@ class ApplicationService:
     def create_ground_anchor(self, name: str, x: str, y: str) -> tuple[str, str]:
         return self.bodies.create_ground_anchor(name, x, y)
 
+    def create_free_ground(self, name: str, x: str, y: str) -> tuple[str, str]:
+        return self.bodies.create_free_ground(name, x, y)
+
     def get_marker_deletion_consequence(self, marker_id: str) -> str:
         return self.bodies.get_marker_deletion_consequence(marker_id)
 
@@ -494,7 +497,7 @@ class ApplicationService:
         blocking_messages = [
             message
             for message in report.messages
-            if message.code in {"kinematic_reach", "kinematic_travel", "kinematic_loop_reach"}
+            if message.code in {"kinematic_reach", "kinematic_travel", "kinematic_loop_reach", "kinematic_angle_limit"}
         ]
         if blocking_messages:
             validation_messages.append(
@@ -633,6 +636,15 @@ class ApplicationService:
 
     def joint_friction_pin_radius(self, joint: Joint) -> float:
         return self.joints.joint_friction_pin_radius(joint)
+
+    def joint_supports_angular_limits(self, joint: Joint) -> bool:
+        return self.joints.joint_supports_angular_limits(joint)
+
+    def joint_angular_limit_expression(self, joint: Joint, path: str) -> str | None:
+        return self.joints.joint_angular_limit_expression(joint, path)
+
+    def joint_angular_limit_value(self, joint: Joint, path: str, *, unit: str = "deg") -> float | None:
+        return self.joints.joint_angular_limit_value(joint, path, unit=unit)
 
     # --- Sketch helper back-compat shims --------------------------------------
     # The following methods used to live on ApplicationService and are referenced
@@ -819,6 +831,9 @@ class ApplicationService:
 
     def rename_sensor(self, sensor_id: str, name: str) -> None:
         self.forces.rename_sensor(sensor_id, name)
+
+    def update_sensor_scope_position(self, sensor_id: str, x: float, y: float) -> None:
+        self.forces.update_sensor_scope_position(sensor_id, x, y)
 
     def create_load(self, name: str, marker_id: str, fx_expression: str, fy_expression: str) -> str:
         return self.forces.create_load(name, marker_id, fx_expression, fy_expression)

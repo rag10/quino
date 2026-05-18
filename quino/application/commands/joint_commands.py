@@ -413,6 +413,24 @@ class JointCommands:
         except (TypeError, ValueError):
             return 0.0
 
+    def joint_supports_angular_limits(self, joint: Joint) -> bool:
+        return joint.type is JointType.REVOLUTE and not self._joint_has_slider(joint)
+
+    def joint_angular_limit_expression(self, joint: Joint, path: str) -> str | None:
+        value = joint.metadata.values.get(path)
+        return value if isinstance(value, str) and value.strip() else None
+
+    def joint_angular_limit_value(self, joint: Joint, path: str, *, unit: str = "deg") -> float | None:
+        expression = self.joint_angular_limit_expression(joint, path)
+        if expression is None:
+            return None
+        scalar = self._scalar(expression, "deg", Dimension.ANGLE)
+        result = self._ctx.expressions.evaluate_property(scalar, self._project.parameters)
+        return self._ctx.units.convert(
+            self._ctx.units.quantity(result.value, result.unit),
+            unit,
+        )
+
     def _update_joint_friction_property(self, joint: Joint, path: str, value: PropertyValueInput) -> None:
         if self.joint_friction_mode(joint) is None:
             raise ValueError("This joint topology does not support friction")
@@ -429,6 +447,31 @@ class JointCommands:
                 raise ValueError(f"{path} must be a number") from exc
         self._ctx.snapshot()
         joint.metadata.values[path] = numeric
+
+    def _update_joint_angular_limit_property(self, joint: Joint, path: str, value: PropertyValueInput) -> None:
+        if not self.joint_supports_angular_limits(joint):
+            raise ValueError("This joint topology does not support angular limits")
+        if value.kind == "null":
+            self._ctx.snapshot()
+            joint.metadata.values.pop(path, None)
+            return
+        if value.kind != "expression" or not isinstance(value.value, str):
+            raise ValueError(f"{path} requires an angular expression")
+        expression = value.value.strip()
+        if not expression or expression.lower() == "none":
+            self._ctx.snapshot()
+            joint.metadata.values.pop(path, None)
+            return
+        scalar = self._scalar(expression, "deg", Dimension.ANGLE)
+        result = self._ctx.expressions.evaluate_property(scalar, self._project.parameters)
+        limit_deg = self._ctx.units.convert(
+            self._ctx.units.quantity(result.value, result.unit),
+            "deg",
+        )
+        if limit_deg < 0.0:
+            raise ValueError(f"{path} must be non-negative")
+        self._ctx.snapshot()
+        joint.metadata.values[path] = expression
 
     # ------------------------------------------------------------------
     # Public commands — sliders

@@ -84,6 +84,7 @@ class JsonMapper:
                 "show_markers": project.view_state.show_markers,
                 "show_com": project.view_state.show_com,
                 "show_sliders": project.view_state.show_sliders,
+                "show_sensors": project.view_state.show_sensors,
             },
         }
         if project.poses:

@@ -177,6 +177,8 @@ class EntityCommands:
             "origin_y": Dimension.LENGTH,
             "travel_min": Dimension.LENGTH,
             "travel_max": Dimension.LENGTH,
+            "angle_limit_positive": Dimension.ANGLE,
+            "angle_limit_negative": Dimension.ANGLE,
             "angle": Dimension.ANGLE,
             "mass": Dimension.MASS,
             "fx": Dimension.FORCE,
@@ -352,6 +354,9 @@ class EntityCommands:
                 return
         if isinstance(entity, Joint) and property_path in {"friction_coulomb", "friction_viscous", "friction_pin_radius"}:
             self._joints._update_joint_friction_property(entity, property_path, value)
+            return
+        if isinstance(entity, Joint) and property_path in {"angle_limit_positive", "angle_limit_negative"}:
+            self._joints._update_joint_angular_limit_property(entity, property_path, value)
             return
         if isinstance(entity, Spring) and property_path in {"stiffness", "damping", "rest_value", "law"}:
             self._forces.update_spring_property(entity.id, property_path, value)

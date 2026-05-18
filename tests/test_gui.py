@@ -1372,7 +1372,7 @@ def test_canvas_can_drag_marker_create_joints_and_add_marker(monkeypatch) -> Non
 
     assert len(app.project.model.joints) == 1
 
-    window.action_slider_connect_tool.trigger()
+    window.action_joint_tool.trigger()
     pos_marker2 = window.canvas.screen_position_for_entity(marker2)
     pos_slider = window.canvas.screen_position_for_entity(slider_id)
     assert pos_marker2 is not None and pos_slider is not None
@@ -1449,10 +1449,10 @@ def test_canvas_connect_slider_accepts_slider_first_order(monkeypatch) -> None:
     body_id = app.create_body("Mass", [MarkerInput("50 mm", "20 mm", "P")])
     slider_id = app.create_slider_from_points("Guide", "0 mm", "0 mm", "100 mm", "0 mm")
     marker_id = next(marker.id for marker in app.get_body(body_id).markers if marker.name == "P")
-    monkeypatch.setattr(window.canvas, "_request_ground_or_slider_joint", lambda prefix: (f"{prefix}1", "revolute"))
+    monkeypatch.setattr(window.canvas, "_request_joint_name", lambda: "Joint1")
     window.refresh_all()
 
-    window.action_slider_connect_tool.trigger()
+    window.action_joint_tool.trigger()
     pos_slider = window.canvas.screen_position_for_entity(slider_id)
     pos_marker = window.canvas.screen_position_for_entity(marker_id)
     assert pos_slider is not None and pos_marker is not None
@@ -1466,6 +1466,79 @@ def test_canvas_connect_slider_accepts_slider_first_order(monkeypatch) -> None:
     assert _expr_value(marker.y.expression) == pytest.approx(0.0, abs=0.5)
     assert _expr_value(slider.origin_y.expression) == pytest.approx(0.0, abs=0.5)
     assert not any(message.code == "slider_joint_gap" for message in app.validate_model().messages)
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_canvas_can_create_free_ground_and_connect_marker_to_it(monkeypatch) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+    app = window.app_service
+    app.new_project("GroundJoint")
+    body_id = app.create_body("Mass", [MarkerInput("40 mm", "10 mm", "P")])
+    marker_id = next(marker.id for marker in app.get_body(body_id).markers if marker.name == "P")
+    monkeypatch.setattr(window.canvas, "_request_joint_name", lambda: "Joint1")
+    window.refresh_all()
+
+    window.action_ground_tool.trigger()
+    ground_pos = window.canvas.screen_position_for_world(100.0, 0.0)
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=ground_pos)
+    qt_app.processEvents()
+
+    ground_body_id = next(
+        body.id for body in app.project.model.bodies if body.metadata.values.get("ground_anchor")
+    )
+    ground_screen = window.canvas.screen_position_for_entity(ground_body_id)
+    marker_screen = window.canvas.screen_position_for_entity(marker_id)
+    assert ground_screen is not None and marker_screen is not None
+
+    window.action_joint_tool.trigger()
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=marker_screen)
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=ground_screen)
+    qt_app.processEvents()
+
+    marker = app.get_entity(marker_id)
+    assert _expr_value(marker.x.expression) == pytest.approx(100.0, abs=0.5)
+    assert _expr_value(marker.y.expression) == pytest.approx(0.0, abs=0.5)
+    assert any(
+        joint.name == "Joint1" and not joint.metadata.values.get("internal_ground_anchor")
+        for joint in app.project.model.joints
+    )
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_canvas_can_create_slider_from_marker(monkeypatch) -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+    app = window.app_service
+    app.new_project("MarkerSlider")
+    body_id = app.create_body("Mass", [MarkerInput("30 mm", "0 mm", "P")])
+    marker_id = next(marker.id for marker in app.get_body(body_id).markers if marker.name == "P")
+    monkeypatch.setattr(window.canvas, "_request_ground_or_slider_joint", lambda prefix: (f"{prefix}1", "revolute"))
+    window.refresh_all()
+
+    window.action_slider_tool.trigger()
+    marker_screen = window.canvas.screen_position_for_entity(marker_id)
+    endpoint_screen = window.canvas.screen_position_for_world(80.0, 0.0)
+    assert marker_screen is not None
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=marker_screen)
+    QtTest.QTest.mouseClick(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=endpoint_screen)
+    qt_app.processEvents()
+
+    assert len(app.project.model.sliders) == 1
+    assert len([joint for joint in app.project.model.joints if not joint.metadata.values.get("internal_ground_anchor")]) == 1
+    slider = app.project.model.sliders[0]
+    marker = app.get_entity(marker_id)
+    assert _expr_value(slider.origin_x.expression) == pytest.approx(30.0, abs=0.5)
+    assert _expr_value(marker.x.expression) == pytest.approx(30.0, abs=0.5)
+    assert _expr_value(marker.y.expression) == pytest.approx(0.0, abs=0.5)
 
     window.close()
     qt_app.processEvents()
@@ -1693,6 +1766,27 @@ def test_canvas_helpers_can_rename_joint_toggle_type_and_edit_driver(monkeypatch
     monkeypatch.setattr(QtWidgets.QDialog, "exec", mock_exec)
     window.canvas._edit_driver_law_dialog(driver_id)
     assert window.app_service._find_entity(driver_id).law.expression == "45 deg * t / 1 s"
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_joint_inspector_shows_angular_limit_fields() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    body_id = window.app_service.create_bar("Crank", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    marker_id = next(marker.id for marker in window.app_service._find_body(body_id).markers if marker.name == "A")
+    joint_id = window.app_service.connect_marker_to_ground(marker_id, name="Ground_A")
+    window.app_service.update_property(joint_id, "angle_limit_positive", PropertyValueInput("expression", "30 deg"))
+    window.app_service.update_property(joint_id, "angle_limit_negative", PropertyValueInput("expression", "15 deg"))
+    window.refresh_all()
+
+    window._select_entity_by_id(joint_id)
+    qt_app.processEvents()
+
+    labels = [window.inspector.item(row, 0).text() for row in range(window.inspector.rowCount()) if window.inspector.item(row, 0) is not None]
+    assert "angle_limit_positive" in labels
+    assert "angle_limit_negative" in labels
 
     window.close()
     qt_app.processEvents()
@@ -2155,6 +2249,93 @@ def test_canvas_display_settings_and_preferences_dialog() -> None:
 
     # Preferences dialog exists and can be invoked
     assert window.action_preferences is not None
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_sensor_overlay_toggle_updates_canvas_and_project_state() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_body("Link", [MarkerInput("0 mm", "0 mm", "A")])
+    marker_id = next(marker.id for marker in window.app_service._find_body(body_id).markers if marker.name == "A")
+    sensor_id = window.app_service.create_sensor("Probe", "point", [marker_id])
+    window.app_service.update_sensor_scope_position(sensor_id, 30.0, 20.0)
+    window.refresh_all()
+    window.canvas.grab()
+    qt_app.processEvents()
+
+    sensor_pos = window.canvas.screen_position_for_entity(sensor_id)
+    assert sensor_pos is not None
+    sensor_posf = QtCore.QPointF(float(sensor_pos.x()), float(sensor_pos.y()))
+    assert window.canvas.show_sensors() is True
+    assert window.app_service.project.view_state.show_sensors is True
+    assert window.canvas._sensor_at(sensor_posf) == sensor_id
+
+    window.action_toggle_sensors.setChecked(False)
+    window._on_toggle_sensors()
+    window.canvas.grab()
+    qt_app.processEvents()
+
+    assert window.canvas.show_sensors() is False
+    assert window.app_service.project.view_state.show_sensors is False
+    assert window.canvas._sensor_at(sensor_posf) is None
+
+    window.action_toggle_sensors.setChecked(True)
+    window._on_toggle_sensors()
+    window.canvas.grab()
+    qt_app.processEvents()
+
+    assert window.canvas.show_sensors() is True
+    assert window.app_service.project.view_state.show_sensors is True
+    shown_pos = window.canvas.screen_position_for_entity(sensor_id)
+    assert shown_pos is not None
+    assert window.canvas._sensor_at(QtCore.QPointF(float(shown_pos.x()), float(shown_pos.y()))) == sensor_id
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_sensor_scope_can_be_dragged_and_persisted() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_body("Link", [MarkerInput("0 mm", "0 mm", "A")])
+    marker_id = next(marker.id for marker in window.app_service._find_body(body_id).markers if marker.name == "A")
+    sensor_id = window.app_service.create_sensor("Probe", "point", [marker_id])
+    window.app_service.update_sensor_scope_position(sensor_id, 20.0, 15.0)
+    window.refresh_all()
+    window.canvas.grab()
+    qt_app.processEvents()
+
+    scope = next(scope for scope in window.canvas._screen_sensors if scope.entity_id == sensor_id)
+    before = (
+        window.app_service.get_entity(sensor_id).metadata.values["scope_x"],
+        window.app_service.get_entity(sensor_id).metadata.values["scope_y"],
+    )
+    start = scope.title_rect.center().toPoint()
+    end = start + QtCore.QPoint(50, 35)
+
+    QtTest.QTest.mousePress(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=start)
+    QtTest.QTest.mouseMove(window.canvas, end)
+    QtTest.QTest.mouseRelease(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=end)
+    window.canvas.grab()
+    qt_app.processEvents()
+
+    after_sensor = window.app_service.get_entity(sensor_id)
+    after = (
+        after_sensor.metadata.values["scope_x"],
+        after_sensor.metadata.values["scope_y"],
+    )
+    assert after != before
+    moved_pos = window.canvas.screen_position_for_entity(sensor_id)
+    assert moved_pos is not None
+    assert window.canvas._sensor_at(QtCore.QPointF(float(moved_pos.x()), float(moved_pos.y()))) == sensor_id
 
     window.close()
     qt_app.processEvents()

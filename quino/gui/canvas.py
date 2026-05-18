@@ -12,6 +12,7 @@ from quino.domain.inputs import JointEndpointInput, MarkerInput, PropertyValueIn
 from quino.domain.model import (
     Body,
     Project,
+    Sensor,
     SketchConstraint,
     SketchArc,
     SketchCircle,
@@ -27,6 +28,7 @@ from quino.domain.types import BodyType, DriverType, JointEndpointKind, JointTyp
 from quino.services.mechanism_dof import compute_mechanism_dof
 from quino.services.sketch_dof import SketchDofAnalyzer
 from quino.simulation.assembler import AssembledMechanism
+from quino.simulation.sensor_expressions import sensor_channel_keys
 
 
 @dataclass(slots=True)
@@ -49,6 +51,27 @@ class CanvasSlider:
     angle: float
     travel_min: float
     travel_max: float
+
+
+@dataclass(slots=True)
+class CanvasGround:
+    entity_id: str
+    marker_id: str
+    name: str
+    x: float
+    y: float
+
+
+@dataclass(slots=True)
+class CanvasSensorScope:
+    entity_id: str
+    top_left_x: float
+    top_left_y: float
+    rect: QtCore.QRectF
+    toggle_rect: QtCore.QRectF
+    body_rect: QtCore.QRectF
+    title_rect: QtCore.QRectF
+    collapsed: bool
 
 
 @dataclass(slots=True)
@@ -221,6 +244,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._state_overlay: dict[str, float] | None = None
         self._simulation_time: float = 0.0
         self._screen_markers: list[tuple[CanvasMarker, QtCore.QPointF]] = []
+        self._screen_grounds: list[tuple[CanvasGround, QtCore.QPointF]] = []
         self._screen_bodies: list[tuple[str, str, object]] = []
         self._screen_sliders: list[tuple[CanvasSlider, QtCore.QLineF, QtCore.QPointF]] = []
         self._screen_sketch_points: list[tuple[CanvasSketchPoint, QtCore.QPointF]] = []
@@ -229,17 +253,17 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._screen_slider_handles: list[tuple[str, str, QtCore.QPointF]] = []
         self._screen_joints: list[tuple[str, QtCore.QPointF]] = []
         self._screen_drivers: list[tuple[str, QtCore.QPointF]] = []
-        self._screen_sensors: list[tuple[str, QtCore.QPointF]] = []
+        self._screen_sensors: list[CanvasSensorScope] = []
         self._screen_loads: list[tuple[str, QtCore.QPointF]] = []
         self._screen_springs: list[tuple[str, QtCore.QPointF]] = []
         self._mode = CanvasMode.SELECT
         self._interaction_mode = "all"
         self._editing_enabled = True
         self._creation_points: list[tuple[float, float]] = []
-        self._joint_start_marker: CanvasMarker | None = None
+        self._joint_start_entity: CanvasMarker | CanvasSlider | CanvasGround | None = None
+        self._slider_creation_marker: CanvasMarker | None = None
         self._spring_start: CanvasMarker | None = None  # first endpoint for spring/actuator creation
         self._spring_start_world: tuple[float, float] | None = None  # world coords of first click
-        self._slider_joint_start: CanvasMarker | CanvasSlider | None = None
         self._driver_start_joint_id: str | None = None
         self._sensor_marker_ids: list[str] = []
         self._pose_pick_preview_kind: str | None = None
@@ -260,6 +284,11 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._dragging_sketch_solution_preview: dict[str, tuple[float, float]] = {}
         self._dragging_sketch_circle_id: str | None = None
         self._dragging_sketch_circle_preview_radius: float | None = None
+        self._dragging_ground: CanvasGround | None = None
+        self._dragging_ground_preview: tuple[str, float, float] | None = None
+        self._dragging_sensor_scope: str | None = None
+        self._dragging_sensor_scope_offset: tuple[float, float] | None = None
+        self._dragging_sensor_scope_preview: tuple[str, float, float] | None = None
         self._dragging_slider: tuple[str, str] | None = None
         self._dragging_slider_preview: dict[str, float] | None = None
         self._box_selection_start: QtCore.QPointF | None = None
@@ -273,6 +302,8 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._edit_guard: Callable[[], bool] | None = None
         self._trajectories: list[list[tuple[float, float]]] = []
         self._show_trajectories: bool = True
+        self._show_sensors: bool = True
+        self._collapsed_sensor_scopes: set[str] = set()
         self._snap_preview_world: tuple[float, float] | None = None
         self._snap_kind: str | None = None
         self._snap_entity_id: str | None = None
@@ -305,6 +336,9 @@ class MechanismCanvas(QtWidgets.QWidget):
     def background_color(self) -> str:
         return self._background_color
 
+    def show_sensors(self) -> bool:
+        return self._show_sensors
+
     def set_show_origin(self, show: bool) -> None:
         self._show_origin = show
         self.displaySettingsChanged.emit()
@@ -325,6 +359,14 @@ class MechanismCanvas(QtWidgets.QWidget):
         self.displaySettingsChanged.emit()
         self.update()
 
+    def set_show_sensors(self, show: bool) -> None:
+        self._show_sensors = show
+        project = self.app_service.project
+        if project is not None:
+            project.view_state.show_sensors = show
+        self.displaySettingsChanged.emit()
+        self.update()
+
     def set_interaction_mode(self, mode: str) -> None:
         self._interaction_mode = mode
         # Clear any hover/selection that belongs to the now-disabled domain
@@ -340,6 +382,11 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._dragging_pose_marker_start = None
             self._dragging_pose_marker_active = False
             self._drag_preview = None
+            self._dragging_ground = None
+            self._dragging_ground_preview = None
+            self._dragging_sensor_scope = None
+            self._dragging_sensor_scope_offset = None
+            self._dragging_sensor_scope_preview = None
             self._dragging_slider = None
             self._dragging_slider_preview = None
         elif mode in {"model", "pose", "sim"}:
@@ -356,6 +403,11 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._dragging_sketch_point_preview = None
             self._dragging_sketch_circle_id = None
             self._dragging_sketch_circle_preview_radius = None
+            self._dragging_ground = None
+            self._dragging_ground_preview = None
+            self._dragging_sensor_scope = None
+            self._dragging_sensor_scope_offset = None
+            self._dragging_sensor_scope_preview = None
         self._hovered_sketch_point_id = None
         self._hovered_sketch_entity_id = None
         self.update()
@@ -383,10 +435,10 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def _reset_tool_state(self) -> None:
         self._creation_points.clear()
-        self._joint_start_marker = None
+        self._joint_start_entity = None
+        self._slider_creation_marker = None
         self._spring_start = None
         self._spring_start_world = None
-        self._slider_joint_start = None
         self._driver_start_joint_id = None
         self._sensor_marker_ids = []
         self._pose_pick_preview_kind = None
@@ -406,6 +458,11 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._dragging_sketch_solution_preview = {}
         self._dragging_sketch_circle_id = None
         self._dragging_sketch_circle_preview_radius = None
+        self._dragging_ground = None
+        self._dragging_ground_preview = None
+        self._dragging_sensor_scope = None
+        self._dragging_sensor_scope_offset = None
+        self._dragging_sensor_scope_preview = None
         self._dragging_slider = None
         self._dragging_slider_preview = None
         self._box_selection_start = None
@@ -581,6 +638,14 @@ class MechanismCanvas(QtWidgets.QWidget):
                 return
         for sensor in project.model.sensors:
             if sensor.id == entity_id:
+                scope_x = sensor.metadata.values.get("scope_x")
+                scope_y = sensor.metadata.values.get("scope_y")
+                if isinstance(scope_x, (int, float)) and isinstance(scope_y, (int, float)):
+                    self._view_center_x = float(scope_x)
+                    self._view_center_y = float(scope_y)
+                    self._sync_view_state()
+                    self.update()
+                    return
                 xs, ys = [], []
                 for mid in sensor.marker_ids:
                     pos = marker_pos.get(mid)
@@ -651,8 +716,8 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._editing_enabled = enabled
         if not enabled:
             self._creation_points.clear()
-            self._joint_start_marker = None
-            self._slider_joint_start = None
+            self._joint_start_entity = None
+            self._slider_creation_marker = None
             self._driver_start_joint_id = None
             self._sensor_marker_ids = []
             self._creation_entity_ids = []
@@ -662,6 +727,8 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._dragging_pose_marker_start = None
             self._dragging_pose_marker_active = False
             self._drag_preview = None
+            self._dragging_ground = None
+            self._dragging_ground_preview = None
             self._dragging_sketch_point = None
             self._dragging_sketch_point_preview = None
             self._dragging_sketch_solution_preview = {}
@@ -691,8 +758,10 @@ class MechanismCanvas(QtWidgets.QWidget):
         # Build lookup maps
         assembled = self._assembled_mechanism(project)
         markers = self._collect_markers(project, assembled)
+        grounds = self._collect_grounds(project, assembled)
         sliders = self._collect_sliders(project)
         marker_map = {m.entity_id: m for m in markers}
+        ground_map = {g.entity_id: g for g in grounds}
         slider_map = {s.entity_id: s for s in sliders}
 
         # Modes that accept a marker click
@@ -715,8 +784,10 @@ class MechanismCanvas(QtWidgets.QWidget):
             CanvasMode.CREATE_RIGID,
         }:
             marker = marker_map.get(entity_id)
-            if marker is not None:
-                self._handle_joint_click(marker)
+            slider = slider_map.get(entity_id)
+            ground = ground_map.get(entity_id)
+            if marker is not None or slider is not None or ground is not None:
+                self._handle_joint_click(marker, slider, ground)
             return
 
         if self._mode == CanvasMode.CONNECT_GROUND:
@@ -728,20 +799,20 @@ class MechanismCanvas(QtWidgets.QWidget):
         if self._mode == CanvasMode.CONNECT_SLIDER:
             marker = marker_map.get(entity_id)
             slider = slider_map.get(entity_id)
-            if self._slider_joint_start is None:
+            if self._joint_start_entity is None:
                 if marker is None and slider is None:
                     return
-                self._slider_joint_start = marker if marker is not None else slider
+                self._joint_start_entity = marker if marker is not None else slider
                 self.entitySelected.emit(entity_id)
                 self.update()
                 return
-            start = self._slider_joint_start
+            start = self._joint_start_entity
             if isinstance(start, CanvasMarker) and slider is not None:
                 self._create_slider_joint(start, slider, align="marker_to_slider")
-                self._slider_joint_start = None
+                self._joint_start_entity = None
             elif isinstance(start, CanvasSlider) and marker is not None:
                 self._create_slider_joint(marker, start, align="marker_to_slider")
-                self._slider_joint_start = None
+                self._joint_start_entity = None
             return
 
         if self._mode in {
@@ -890,9 +961,13 @@ class MechanismCanvas(QtWidgets.QWidget):
                     return QtCore.QPoint(int(round(anchor.x())), int(round(anchor.y())))
         assembled = self._assembled_mechanism(project)
         markers = self._collect_markers(project, assembled)
+        grounds = self._collect_grounds(project, assembled)
         for marker in markers:
             if marker.entity_id == entity_id:
                 return self.screen_position_for_world(marker.x, marker.y)
+        for ground in grounds:
+            if ground.entity_id == entity_id:
+                return self.screen_position_for_world(ground.x, ground.y)
         sliders = self._collect_sliders(project)
         for slider in sliders:
             if slider.entity_id == entity_id:
@@ -911,6 +986,16 @@ class MechanismCanvas(QtWidgets.QWidget):
                     position = self._joint_world_position(joint, marker_map, slider_map)
                     if position is not None:
                         return self.screen_position_for_world(position[0], position[1])
+        for sensor in project.model.sensors:
+            if sensor.id != entity_id:
+                continue
+            sensor_markers = [marker_map[mid] for mid in sensor.marker_ids if mid in marker_map]
+            anchor_world = self._sensor_anchor_world(sensor, sensor_markers)
+            if anchor_world is None:
+                return None
+            top_left_world = self._sensor_scope_world_position(sensor, anchor_world, self._current_transform())
+            top_left_screen = self._to_screen(top_left_world[0], top_left_world[1], self._current_transform())
+            return QtCore.QPoint(int(round(top_left_screen.x() + 28.0)), int(round(top_left_screen.y() + 12.0)))
         return None
 
     def paintEvent(self, event: QtGui.QPaintEvent) -> None:  # pragma: no cover - exercised indirectly in GUI tests
@@ -918,6 +1003,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
         painter.fillRect(self.rect(), QtGui.QColor(self._background_color))
+        self._screen_grounds = []
 
         project = self.app_service.project
         transform = self._current_transform()
@@ -932,6 +1018,7 @@ class MechanismCanvas(QtWidgets.QWidget):
 
         assembled = self._assembled_mechanism(project)
         markers = self._collect_markers(project, assembled)
+        grounds = self._collect_grounds(project, assembled)
         sliders = self._collect_sliders(project)
         sketch_points = self._collect_sketch_points(project)
         sketch_entities = self._collect_sketch_entities(project)
@@ -950,6 +1037,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._draw_sliders(painter, sliders, transform)
             if project.model.bodies:
                 self._draw_bodies(painter, project, markers, transform)
+                self._draw_grounds(painter, grounds, transform)
                 self._draw_joints(painter, project, markers, sliders, transform)
                 self._draw_drivers(painter, project, markers, sliders, transform)
                 self._draw_sensors(painter, project, markers, transform)
@@ -973,6 +1061,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._draw_sliders(painter, sliders, transform)
             if project.model.bodies:
                 self._draw_bodies(painter, project, markers, transform)
+                self._draw_grounds(painter, grounds, transform)
                 self._draw_joints(painter, project, markers, sliders, transform)
                 self._draw_drivers(painter, project, markers, sliders, transform)
                 self._draw_sensors(painter, project, markers, transform)
@@ -1020,12 +1109,14 @@ class MechanismCanvas(QtWidgets.QWidget):
         clicked_sketch_point = self._sketch_point_at(clicked)
         clicked_sketch_entity = self._sketch_entity_at(clicked)
         clicked_marker = self._marker_at(clicked)
+        clicked_ground = self._ground_at(clicked)
         clicked_body = self._body_at(clicked)
         clicked_slider = self._slider_at(clicked)
         clicked_slider_handle = self._slider_handle_at(clicked)
         clicked_joint = self._joint_at(clicked)
         clicked_driver = self._driver_at(clicked)
-        clicked_sensor = self._sensor_at(clicked)
+        clicked_sensor_hit = self._sensor_hit(clicked)
+        clicked_sensor = clicked_sensor_hit[0] if clicked_sensor_hit is not None else None
         clicked_load = self._load_at(clicked)
         clicked_spring = self._spring_at(clicked)
         clicked_constraint = self._sketch_constraint_at(clicked)
@@ -1084,6 +1175,13 @@ class MechanismCanvas(QtWidgets.QWidget):
                         self._drag_preview = (clicked_marker.entity_id, clicked_marker.x, clicked_marker.y)
                 self.update()
                 return
+            if clicked_ground is not None and self._interaction_mode in ("model", "pose", "sim", "all"):
+                self._select_canvas_entity(clicked_ground.entity_id, additive=additive_selection)
+                if self._editing_enabled and self._interaction_mode != "pose":
+                    self._dragging_ground = clicked_ground
+                    self._dragging_ground_preview = (clicked_ground.marker_id, clicked_ground.x, clicked_ground.y)
+                self.update()
+                return
             if clicked_slider is not None and self._interaction_mode in ("model", "pose", "sim", "all"):
                 self._select_canvas_entity(clicked_slider.entity_id, additive=additive_selection)
                 if self._editing_enabled and self._interaction_mode != "pose":
@@ -1099,7 +1197,30 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._select_canvas_entity(clicked_driver, additive=additive_selection)
                 return
             if clicked_sensor is not None and self._interaction_mode in ("model", "pose", "sim", "all"):
+                if clicked_sensor_hit is not None and clicked_sensor_hit[1] == "toggle":
+                    if clicked_sensor in self._collapsed_sensor_scopes:
+                        self._collapsed_sensor_scopes.remove(clicked_sensor)
+                    else:
+                        self._collapsed_sensor_scopes.add(clicked_sensor)
+                    self.update()
+                    return
                 self._select_canvas_entity(clicked_sensor, additive=additive_selection)
+                if (
+                    clicked_sensor_hit is not None
+                    and clicked_sensor_hit[1] in {"title", "body", "scope"}
+                    and not additive_selection
+                ):
+                    sensor = self.app_service.get_entity(clicked_sensor)
+                    if isinstance(sensor, Sensor):
+                        anchor = self._sensor_anchor_world(
+                            sensor,
+                            [clicked_marker for clicked_marker in self._collect_markers(project=self.app_service.project, assembled=self._assembled_mechanism(self.app_service.project)) if clicked_marker.entity_id in sensor.marker_ids],
+                        )
+                        if anchor is not None:
+                            scope_pos = self._sensor_scope_world_position(sensor, anchor, self._current_transform())
+                            self._dragging_sensor_scope = clicked_sensor
+                            self._dragging_sensor_scope_offset = (world[0] - scope_pos[0], world[1] - scope_pos[1])
+                            self._dragging_sensor_scope_preview = (clicked_sensor, scope_pos[0], scope_pos[1])
                 return
             if clicked_load is not None and self._interaction_mode in ("model", "pose", "sim", "all"):
                 self._select_canvas_entity(clicked_load, additive=additive_selection)
@@ -1249,44 +1370,54 @@ class MechanismCanvas(QtWidgets.QWidget):
             return
 
         if self._mode in {CanvasMode.CREATE_REVOLUTE, CanvasMode.CREATE_RIGID}:
-            if clicked_marker is None:
+            if clicked_marker is None and clicked_slider is None and clicked_ground is None:
                 return
-            self._handle_joint_click(clicked_marker)
+            self._handle_joint_click(clicked_marker, clicked_slider, clicked_ground)
             return
 
         if self._mode == CanvasMode.CREATE_SLIDER:
+            if not self._creation_points and clicked_marker is not None:
+                self._slider_creation_marker = clicked_marker
+                self._creation_points = [(clicked_marker.x, clicked_marker.y)]
+                self.entitySelected.emit(clicked_marker.entity_id)
+                self.update()
+                return
             self._creation_points.append(world)
             if len(self._creation_points) == 2:
-                self._create_slider_from_points()
+                if self._slider_creation_marker is not None:
+                    self._create_slider_from_marker()
+                else:
+                    self._create_slider_from_points()
             self.update()
             return
 
         if self._mode == CanvasMode.CONNECT_GROUND:
-            if clicked_marker is None:
+            if clicked_marker is not None:
+                self._create_ground_joint(clicked_marker)
                 return
-            self._create_ground_joint(clicked_marker)
+            self._create_free_ground_at(world)
             return
 
         if self._mode == CanvasMode.CONNECT_SLIDER:
-            if self._slider_joint_start is None:
+            if self._joint_start_entity is None:
                 if clicked_marker is None and clicked_slider is None:
                     return
-                self._slider_joint_start = clicked_marker if clicked_marker is not None else clicked_slider
-                self.entitySelected.emit(self._slider_joint_start.entity_id)
+                self._joint_start_entity = clicked_marker if clicked_marker is not None else clicked_slider
+                self.entitySelected.emit(self._joint_start_entity.entity_id)
                 self.update()
                 return
-            start = self._slider_joint_start
+            start = self._joint_start_entity
             if isinstance(start, CanvasMarker):
                 if clicked_slider is None:
                     return
                 self._create_slider_joint(start, clicked_slider, align="marker_to_slider")
-                self._slider_joint_start = None
+                self._joint_start_entity = None
                 return
             if isinstance(start, CanvasSlider):
                 if clicked_marker is None:
                     return
                 self._create_slider_joint(clicked_marker, start, align="marker_to_slider")
-                self._slider_joint_start = None
+                self._joint_start_entity = None
                 return
 
         if self._mode in {CanvasMode.CREATE_ROTATION_DRIVER, CanvasMode.CREATE_TRANSLATION_DRIVER}:
@@ -1387,6 +1518,18 @@ class MechanismCanvas(QtWidgets.QWidget):
             snapped = self._snap_world(self._hover_world, include_model=False)
             self._snap_preview_world = snapped
             self._drag_preview = (self._dragging_marker.entity_id, snapped[0], snapped[1])
+        elif self._editing_enabled and self._mode == CanvasMode.SELECT and self._dragging_ground is not None:
+            snapped = self._snap_world(self._hover_world, include_model=False)
+            self._snap_preview_world = snapped
+            self._dragging_ground_preview = (self._dragging_ground.marker_id, snapped[0], snapped[1])
+        elif self._mode == CanvasMode.SELECT and self._dragging_sensor_scope is not None:
+            self._snap_preview_world = None
+            offset = self._dragging_sensor_scope_offset or (0.0, 0.0)
+            self._dragging_sensor_scope_preview = (
+                self._dragging_sensor_scope,
+                self._hover_world[0] - offset[0],
+                self._hover_world[1] - offset[1],
+            )
         elif self._editing_enabled and self._mode == CanvasMode.SELECT and self._dragging_sketch_point is not None:
             snapped = self._snap_world(self._hover_world, include_model=False, exclude_point_id=self._dragging_sketch_point.entity_id)
             self._snap_preview_world = snapped
@@ -1501,6 +1644,38 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._dragging_marker = None
             self._drag_preview = None
             self.modelChanged.emit(f"Moved marker {marker_label} to ({x:.2f}, {y:.2f}) mm")
+            self.update()
+            return
+        if event.button() == QtCore.Qt.MouseButton.LeftButton and self._dragging_ground is not None:
+            if not self._require_editing():
+                self._dragging_ground = None
+                self._dragging_ground_preview = None
+                return
+            if self._dragging_ground_preview is None:
+                x, y = self._to_world(event.position(), self._current_transform())
+                self._dragging_ground_preview = (self._dragging_ground.marker_id, x, y)
+            marker_id, x, y = self._dragging_ground_preview
+            ground_name = self._dragging_ground.name
+            self.app_service.move_marker(marker_id, self._mm_expression(x), self._mm_expression(y))
+            self._dragging_ground = None
+            self._dragging_ground_preview = None
+            self.modelChanged.emit(f"Moved ground {ground_name} to ({x:.2f}, {y:.2f}) mm")
+            self.update()
+            return
+        if event.button() == QtCore.Qt.MouseButton.LeftButton and self._dragging_sensor_scope is not None:
+            preview = self._dragging_sensor_scope_preview
+            sensor_id = self._dragging_sensor_scope
+            self._dragging_sensor_scope = None
+            self._dragging_sensor_scope_offset = None
+            self._dragging_sensor_scope_preview = None
+            if preview is None:
+                self.update()
+                return
+            _, x, y = preview
+            self.app_service.update_sensor_scope_position(sensor_id, x, y)
+            sensor = self.app_service.get_entity(sensor_id)
+            sensor_name = sensor.name if isinstance(sensor, Sensor) else sensor_id
+            self.modelChanged.emit(f"Moved sensor scope {sensor_name} to ({x:.2f}, {y:.2f}) mm")
             self.update()
             return
         if event.button() == QtCore.Qt.MouseButton.LeftButton and self._dragging_sketch_point is not None:
@@ -1647,6 +1822,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             return
         world = self._to_world(event.pos(), self._current_transform())
         marker = self._marker_at(event.pos())
+        ground = self._ground_at(event.pos())
         slider = self._slider_at(event.pos())
         joint_id = self._joint_at(event.pos())
         driver_id = self._driver_at(event.pos())
@@ -1675,6 +1851,9 @@ class MechanismCanvas(QtWidgets.QWidget):
             if body is not None:
                 com_marker = body.com_marker()
                 toggle_com_action = menu.addAction("Hide CoM" if com_marker.visible else "Show CoM")
+        elif ground is not None:
+            rename_action = menu.addAction("Rename Ground")
+            delete_action = menu.addAction("Delete")
         elif slider is not None:
             rename_action = menu.addAction("Rename Slider")
             delete_action = menu.addAction("Delete")
@@ -1707,6 +1886,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         if chosen is rename_action:
             target_id = (
                 slider.entity_id if slider is not None
+                else ground.entity_id if ground is not None
                 else joint_id if joint_id is not None
                 else driver_id if driver_id is not None
                 else sensor_id if sensor_id is not None
@@ -1726,6 +1906,8 @@ class MechanismCanvas(QtWidgets.QWidget):
             target_id = (
                 marker.entity_id
                 if marker is not None
+                else ground.entity_id
+                if ground is not None
                 else slider.entity_id
                 if slider is not None
                 else joint_id
@@ -1791,6 +1973,21 @@ class MechanismCanvas(QtWidgets.QWidget):
         for marker, marker_pos in reversed(screen_markers):
             if QtCore.QLineF(screen_pos, marker_pos).length() <= 10.0:
                 return marker
+        return None
+
+    def _ground_at(self, screen_pos: QtCore.QPointF) -> CanvasGround | None:
+        screen_grounds = self._screen_grounds
+        if not screen_grounds and self.app_service.project is not None:
+            project = self.app_service.project
+            assembled = self._assembled_mechanism(project)
+            transform = self._current_transform()
+            screen_grounds = [
+                (ground, self._to_screen(ground.x, ground.y, transform))
+                for ground in self._collect_grounds(project, assembled)
+            ]
+        for ground, ground_pos in reversed(screen_grounds):
+            if QtCore.QLineF(screen_pos, ground_pos).length() <= 12.0:
+                return ground
         return None
 
     def _slider_at(self, screen_pos: QtCore.QPointF) -> CanvasSlider | None:
@@ -2142,6 +2339,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                     cx, cy = self._bar_com_preview(project, body, preview_map, assembled)
                     if cx is not None:
                         x, y = cx, cy
+                is_ground_marker = self._is_ground_body(body) and marker.id == self._ground_marker_id(body)
                 markers.append(
                     CanvasMarker(
                         entity_id=marker.id,
@@ -2150,7 +2348,11 @@ class MechanismCanvas(QtWidgets.QWidget):
                         x=x,
                         y=y,
                         marker_type=marker.type,
-                        visible=marker.visible or marker.type is MarkerType.STRUCTURAL,
+                        visible=(
+                            False
+                            if is_ground_marker
+                            else marker.visible or marker.type is MarkerType.STRUCTURAL
+                        ),
                     )
                 )
         return markers
@@ -2198,6 +2400,47 @@ class MechanismCanvas(QtWidgets.QWidget):
         t = ((x - x1) * dx + (y - y1) * dy) / length_sq
         t = max(0.0, min(1.0, t))
         return x1 + t * dx, y1 + t * dy
+
+    def _is_ground_body(self, body: Body) -> bool:
+        return bool(body.metadata.values.get("ground_anchor"))
+
+    def _ground_marker_id(self, body: Body) -> str | None:
+        marker_id = body.metadata.values.get("ground_marker_id")
+        if isinstance(marker_id, str):
+            return marker_id
+        structural = body.structural_markers()
+        if len(structural) == 1:
+            return structural[0].id
+        return None
+
+    def _is_internal_ground_joint(self, joint) -> bool:
+        return bool(getattr(joint, "metadata", None) and joint.metadata.values.get("internal_ground_anchor"))
+
+    def _collect_grounds(
+        self,
+        project: Project,
+        assembled: AssembledMechanism | None = None,
+    ) -> list[CanvasGround]:
+        grounds: list[CanvasGround] = []
+        for body in project.model.bodies:
+            if not self._is_ground_body(body):
+                continue
+            marker_id = self._ground_marker_id(body)
+            if marker_id is None:
+                continue
+            x, y = self._marker_world_position(project, body.id, marker_id, assembled)
+            if x is None or y is None:
+                continue
+            grounds.append(
+                CanvasGround(
+                    entity_id=body.id,
+                    marker_id=marker_id,
+                    name=body.name,
+                    x=x,
+                    y=y,
+                )
+            )
+        return grounds
 
     def _collect_sliders(self, project: Project) -> list[CanvasSlider]:
         sliders: list[CanvasSlider] = []
@@ -2845,6 +3088,8 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._screen_bodies = []
         marker_map = {marker.entity_id: marker for marker in markers}
         for body in project.model.bodies:
+            if self._is_ground_body(body):
+                continue
             structural = [marker_map[marker.id] for marker in body.structural_markers() if marker.id in marker_map]
             if not structural:
                 continue
@@ -2897,6 +3142,25 @@ class MechanismCanvas(QtWidgets.QWidget):
             text_height = fm.height()
             painter.drawText(name_pos.x() - text_width / 2, name_pos.y() + text_height / 4, body.name)
 
+    def _draw_grounds(
+        self,
+        painter: QtGui.QPainter,
+        grounds: list[CanvasGround],
+        transform,
+    ) -> None:
+        self._screen_grounds = []
+        for ground in grounds:
+            point = self._to_screen(ground.x, ground.y, transform)
+            self._screen_grounds.append((ground, point))
+            selected = self._selected_entity_id == ground.entity_id
+            line_color = QtGui.QColor("#7a5c2e") if not selected else QtGui.QColor("#c75b12")
+            painter.setPen(QtGui.QPen(line_color, 1.8))
+            painter.setBrush(QtGui.QBrush(QtGui.QColor("#faf8f2")))
+            painter.drawEllipse(point, 5.5, 5.5)
+            self._draw_ground_symbol(painter, point)
+            painter.setPen(QtGui.QPen(QtGui.QColor("#5b5247")))
+            painter.drawText(point + QtCore.QPointF(10.0, -10.0), ground.name)
+
     def _draw_joints(
         self,
         painter: QtGui.QPainter,
@@ -2908,13 +3172,17 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._screen_joints = []
         marker_map = {marker.entity_id: marker for marker in markers}
         slider_map = {slider.entity_id: slider for slider in sliders}
+        assembled = self._assembled_mechanism(project)
         for joint in project.model.joints:
+            if self._is_internal_ground_joint(joint):
+                continue
             position = self._joint_world_position(joint, marker_map, slider_map)
             if position is None:
                 continue
             point = self._to_screen(position[0], position[1], transform)
             self._screen_joints.append((joint.id, point))
             pen_color = QtGui.QColor("#2f3a4b")
+            self._draw_joint_angular_limit_arc(painter, joint, point, assembled)
             if self._selected_entity_id == joint.id:
                 pen_color = QtGui.QColor("#c75b12")
                 painter.setBrush(QtGui.QBrush(QtGui.QColor(231, 111, 81, 45)))
@@ -3003,49 +3271,307 @@ class MechanismCanvas(QtWidgets.QWidget):
         transform,
     ) -> None:
         self._screen_sensors = []
+        if not self._show_sensors:
+            return
         marker_map = {marker.entity_id: marker for marker in markers}
-        base_color = QtGui.QColor("#1a7a4a")
-        sel_color = QtGui.QColor("#27ae60")
         for sensor in project.model.sensors:
-            positions: list[QtCore.QPointF] = []
-            for mid in sensor.marker_ids:
-                m = marker_map.get(mid)
-                if m is not None:
-                    positions.append(self._to_screen(m.x, m.y, transform))
-            if not positions:
+            sensor_markers = [marker_map[mid] for mid in sensor.marker_ids if mid in marker_map]
+            if not sensor_markers:
                 continue
-            if len(positions) == 1:
-                center = positions[0]
-            else:
-                cx = sum(p.x() for p in positions) / len(positions)
-                cy = sum(p.y() for p in positions) / len(positions)
-                center = QtCore.QPointF(cx, cy)
+            positions = [self._to_screen(marker.x, marker.y, transform) for marker in sensor_markers]
+            anchor_world = self._sensor_anchor_world(sensor, sensor_markers)
+            if anchor_world is None:
+                continue
+            top_left_world = self._sensor_scope_world_position(sensor, anchor_world, transform)
+            if (
+                self._dragging_sensor_scope_preview is not None
+                and self._dragging_sensor_scope_preview[0] == sensor.id
+            ):
+                top_left_world = (
+                    self._dragging_sensor_scope_preview[1],
+                    self._dragging_sensor_scope_preview[2],
+                )
+            rows = self._sensor_scope_rows(project, sensor)
+            collapsed = sensor.id in self._collapsed_sensor_scopes
+            top_left_screen = self._to_screen(top_left_world[0], top_left_world[1], transform)
+            scope = self._build_sensor_scope(sensor, top_left_world, top_left_screen, rows, collapsed)
             is_selected = self._selected_entity_id == sensor.id
-            color = sel_color if is_selected else base_color
-            if is_selected:
-                painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
-                painter.setBrush(QtGui.QBrush(QtGui.QColor(39, 174, 96, 40)))
-                painter.drawEllipse(center, 16.0, 16.0)
-            if len(positions) > 1:
-                painter.setPen(QtGui.QPen(color, 1.0, QtCore.Qt.PenStyle.DashLine))
-                painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
-                for p in positions:
-                    painter.drawLine(center, p)
-            painter.setPen(QtGui.QPen(color, 1.5))
-            painter.setBrush(QtGui.QBrush(QtGui.QColor("#faf8f2")))
-            painter.drawEllipse(center, 6.0, 6.0)
-            painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
-            painter.setBrush(QtGui.QBrush(color))
-            painter.drawEllipse(center, 2.5, 2.5)
-            painter.setPen(QtGui.QPen(QtGui.QColor("#0d4d2e") if not is_selected else QtGui.QColor("#1a7a4a")))
-            painter.drawText(center + QtCore.QPointF(9.0, -6.0), sensor.name)
-            self._screen_sensors.append((sensor.id, center))
+            color = QtGui.QColor("#1a7a4a") if not is_selected else QtGui.QColor("#c75b12")
+            self._draw_sensor_measurement_geometry(
+                painter,
+                sensor,
+                sensor_markers,
+                positions,
+                color,
+                transform,
+            )
+            anchor_screen = self._to_screen(anchor_world[0], anchor_world[1], transform)
+            self._draw_sensor_scope_connector(painter, anchor_screen, scope, color)
+            self._draw_sensor_scope_box(painter, sensor, scope, rows, color, is_selected)
+            self._screen_sensors.append(scope)
 
     def _sensor_at(self, screen_pos: QtCore.QPointF) -> str | None:
-        for entity_id, center in reversed(self._screen_sensors):
-            if QtCore.QLineF(screen_pos, center).length() <= 12.0:
-                return entity_id
+        hit = self._sensor_hit(screen_pos)
+        if hit is not None:
+            return hit[0]
         return None
+
+    def _sensor_hit(self, screen_pos: QtCore.QPointF) -> tuple[str, str] | None:
+        for scope in reversed(self._screen_sensors):
+            if scope.toggle_rect.contains(screen_pos):
+                return scope.entity_id, "toggle"
+            if scope.rect.contains(screen_pos):
+                if scope.title_rect.contains(screen_pos):
+                    return scope.entity_id, "title"
+                if scope.body_rect.contains(screen_pos):
+                    return scope.entity_id, "body"
+                return scope.entity_id, "scope"
+        return None
+
+    def _sensor_scope_world_position(
+        self,
+        sensor: Sensor,
+        anchor_world: tuple[float, float],
+        transform,
+    ) -> tuple[float, float]:
+        metadata = sensor.metadata.values
+        scope_x = metadata.get("scope_x")
+        scope_y = metadata.get("scope_y")
+        if isinstance(scope_x, (int, float)) and isinstance(scope_y, (int, float)):
+            return float(scope_x), float(scope_y)
+        world_per_pixel = 1.0 / max(transform[0], 1e-9)
+        return (
+            anchor_world[0] + 44.0 * world_per_pixel,
+            anchor_world[1] - 54.0 * world_per_pixel,
+        )
+
+    def _sensor_scope_rows(self, project: Project, sensor: Sensor) -> list[tuple[str, str]]:
+        output = project.sensor_outputs.get(sensor.id)
+        if output and output.columns and output.data:
+            frame = max(0, min(self._current_frame_index, len(output.data) - 1))
+            row_data = output.data[frame]
+            rows: list[tuple[str, str]] = []
+            for index, column in enumerate(output.columns):
+                value = row_data[index] if index < len(row_data) else None
+                rows.append((column, "—" if value is None else f"{value:.6g}"))
+            return rows
+        rows = []
+        for channel, unit in sensor_channel_keys(sensor):
+            rows.append((channel, f"[{unit}]"))
+        return rows
+
+    def _build_sensor_scope(
+        self,
+        sensor: Sensor,
+        top_left_world: tuple[float, float],
+        top_left_screen: QtCore.QPointF,
+        rows: list[tuple[str, str]],
+        collapsed: bool,
+    ) -> CanvasSensorScope:
+        row_count = 0 if collapsed else len(rows)
+        width = 220.0
+        title_height = 24.0
+        row_height = 15.0
+        height = title_height + (row_count * row_height) + (8.0 if row_count else 0.0)
+        rect = QtCore.QRectF(top_left_screen.x(), top_left_screen.y(), width, height)
+        toggle_rect = QtCore.QRectF(rect.right() - 22.0, rect.top() + 4.0, 16.0, 16.0)
+        title_rect = QtCore.QRectF(rect.left(), rect.top(), rect.width(), title_height)
+        body_rect = QtCore.QRectF(rect.left(), rect.top() + title_height, rect.width(), max(0.0, rect.height() - title_height))
+        return CanvasSensorScope(
+            entity_id=sensor.id,
+            top_left_x=top_left_world[0],
+            top_left_y=top_left_world[1],
+            rect=rect,
+            toggle_rect=toggle_rect,
+            body_rect=body_rect,
+            title_rect=title_rect,
+            collapsed=collapsed,
+        )
+
+    def _draw_sensor_scope_box(
+        self,
+        painter: QtGui.QPainter,
+        sensor: Sensor,
+        scope: CanvasSensorScope,
+        rows: list[tuple[str, str]],
+        color: QtGui.QColor,
+        is_selected: bool,
+    ) -> None:
+        border_color = QtGui.QColor("#29443b") if not is_selected else color
+        title_bg = QtGui.QColor("#eef7f2") if not is_selected else QtGui.QColor(245, 224, 210)
+        body_bg = QtGui.QColor(255, 255, 255, 235)
+        painter.save()
+        painter.setPen(QtGui.QPen(border_color, 1.2))
+        painter.setBrush(QtGui.QBrush(body_bg))
+        painter.drawRoundedRect(scope.rect, 6.0, 6.0)
+        painter.fillRect(scope.title_rect, title_bg)
+        painter.setPen(QtGui.QPen(border_color, 1.0))
+        painter.drawLine(scope.title_rect.bottomLeft(), scope.title_rect.bottomRight())
+        painter.setBrush(QtGui.QBrush(color))
+        painter.setPen(QtCore.Qt.PenStyle.NoPen)
+        painter.drawEllipse(
+            QtCore.QPointF(scope.title_rect.left() + 12.0, scope.title_rect.center().y()),
+            4.0,
+            4.0,
+        )
+        painter.setPen(QtGui.QPen(QtGui.QColor("#1f2d2a")))
+        title_font = painter.font()
+        title_font.setPointSize(8)
+        title_font.setBold(True)
+        painter.setFont(title_font)
+        painter.drawText(
+            QtCore.QRectF(scope.title_rect.left() + 22.0, scope.title_rect.top(), scope.title_rect.width() - 50.0, scope.title_rect.height()),
+            QtCore.Qt.AlignmentFlag.AlignVCenter | QtCore.Qt.AlignmentFlag.AlignLeft,
+            f"{self._sensor_type_label(sensor)}  {sensor.name}",
+        )
+        painter.drawText(
+            scope.toggle_rect,
+            QtCore.Qt.AlignmentFlag.AlignCenter,
+            "+" if scope.collapsed else "–",
+        )
+        if not scope.collapsed:
+            body_font = painter.font()
+            body_font.setPointSize(7)
+            body_font.setBold(False)
+            painter.setFont(body_font)
+            y = scope.body_rect.top() + 13.0
+            for label, value in rows:
+                painter.drawText(scope.body_rect.left() + 8.0, y, label)
+                painter.drawText(scope.body_rect.right() - 78.0, y, value)
+                y += 15.0
+        painter.restore()
+
+    def _draw_sensor_scope_connector(
+        self,
+        painter: QtGui.QPainter,
+        anchor_screen: QtCore.QPointF,
+        scope: CanvasSensorScope,
+        color: QtGui.QColor,
+    ) -> None:
+        attach_right = anchor_screen.x() > scope.rect.center().x()
+        attach_x = scope.rect.right() if attach_right else scope.rect.left()
+        attach_y = max(scope.rect.top() + 8.0, min(anchor_screen.y(), scope.rect.bottom() - 8.0))
+        control_dx = 42.0 if not attach_right else -42.0
+        path = QtGui.QPainterPath(anchor_screen)
+        path.cubicTo(
+            anchor_screen.x() + control_dx,
+            anchor_screen.y(),
+            attach_x - control_dx,
+            attach_y,
+            attach_x,
+            attach_y,
+        )
+        painter.save()
+        painter.setPen(QtGui.QPen(color, 1.0, QtCore.Qt.PenStyle.DashLine))
+        painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        painter.drawPath(path)
+        painter.restore()
+
+    def _draw_sensor_measurement_geometry(
+        self,
+        painter: QtGui.QPainter,
+        sensor: Sensor,
+        sensor_markers: list[CanvasMarker],
+        positions: list[QtCore.QPointF],
+        color: QtGui.QColor,
+        transform,
+    ) -> None:
+        painter.save()
+        painter.setPen(QtGui.QPen(color, 1.0, QtCore.Qt.PenStyle.DashLine))
+        painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        if sensor.type.value == "point" and positions:
+            painter.drawEllipse(positions[0], 6.0, 6.0)
+        elif sensor.type.value in {"distance", "angle_horizontal", "angle_vertical"} and len(positions) >= 2:
+            painter.drawLine(positions[0], positions[1])
+        elif sensor.type.value == "angle_vector" and len(sensor_markers) >= 4:
+            center_world = self._angle_vector_center_world(sensor_markers)
+            if center_world is not None:
+                center = self._to_screen(center_world[0], center_world[1], transform)
+                angle_a = -math.degrees(math.atan2(positions[1].y() - center.y(), positions[1].x() - center.x()))
+                angle_b = -math.degrees(math.atan2(positions[3].y() - center.y(), positions[3].x() - center.x()))
+                span = angle_b - angle_a
+                while span > 180.0:
+                    span -= 360.0
+                while span < -180.0:
+                    span += 360.0
+                radius = min(
+                    24.0,
+                    max(
+                        10.0,
+                        0.28 * min(
+                            QtCore.QLineF(center, positions[1]).length(),
+                            QtCore.QLineF(center, positions[3]).length(),
+                        ),
+                    ),
+                )
+                rect = QtCore.QRectF(center.x() - radius, center.y() - radius, 2.0 * radius, 2.0 * radius)
+                painter.drawArc(rect, int(angle_a * 16), int(span * 16))
+        painter.restore()
+
+    def _sensor_anchor_world(
+        self,
+        sensor: Sensor,
+        sensor_markers: list[CanvasMarker],
+    ) -> tuple[float, float] | None:
+        if not sensor_markers:
+            return None
+        if sensor.type.value == "point":
+            return sensor_markers[0].x, sensor_markers[0].y
+        if sensor.type.value in {"distance", "angle_horizontal", "angle_vertical"} and len(sensor_markers) >= 2:
+            return (
+                0.5 * (sensor_markers[0].x + sensor_markers[1].x),
+                0.5 * (sensor_markers[0].y + sensor_markers[1].y),
+            )
+        if sensor.type.value == "angle_vector" and len(sensor_markers) >= 4:
+            center = self._angle_vector_center_world(sensor_markers)
+            if center is not None:
+                return center
+        return (
+            sum(marker.x for marker in sensor_markers) / len(sensor_markers),
+            sum(marker.y for marker in sensor_markers) / len(sensor_markers),
+        )
+
+    def _angle_vector_center_world(
+        self,
+        sensor_markers: list[CanvasMarker],
+    ) -> tuple[float, float] | None:
+        if len(sensor_markers) < 4:
+            return None
+        return self._line_intersection_world(
+            (sensor_markers[0].x, sensor_markers[0].y),
+            (sensor_markers[1].x, sensor_markers[1].y),
+            (sensor_markers[2].x, sensor_markers[2].y),
+            (sensor_markers[3].x, sensor_markers[3].y),
+        )
+
+    def _line_intersection_world(
+        self,
+        a1: tuple[float, float],
+        a2: tuple[float, float],
+        b1: tuple[float, float],
+        b2: tuple[float, float],
+    ) -> tuple[float, float] | None:
+        x1, y1 = a1
+        x2, y2 = a2
+        x3, y3 = b1
+        x4, y4 = b2
+        denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+        if abs(denom) <= 1e-9:
+            return None
+        det_a = x1 * y2 - y1 * x2
+        det_b = x3 * y4 - y3 * x4
+        px = (det_a * (x3 - x4) - (x1 - x2) * det_b) / denom
+        py = (det_a * (y3 - y4) - (y1 - y2) * det_b) / denom
+        return px, py
+
+    def _sensor_type_label(self, sensor: Sensor) -> str:
+        return {
+            "point": "Point",
+            "distance": "Distance",
+            "angle_horizontal": "Angle H",
+            "angle_vertical": "Angle V",
+            "angle_vector": "Angle 4M",
+        }.get(sensor.type.value, "Sensor")
 
     def _draw_markers(self, painter: QtGui.QPainter, markers: list[CanvasMarker], transform) -> None:
         self._screen_markers = []
@@ -4709,26 +5235,35 @@ class MechanismCanvas(QtWidgets.QWidget):
                 CanvasMode.CREATE_SKETCH_VERTICAL_DISTANCE,
                 CanvasMode.CREATE_SKETCH_COINCIDENT,
             }:
-                polyline_points.append(self._to_screen(self._hover_world[0], self._hover_world[1], transform))
+                if self._mode == CanvasMode.CREATE_SLIDER and self._slider_creation_marker is not None and self._creation_points:
+                    cx, cy = self._creation_points[0]
+                    hx, hy = self._hover_world
+                    polyline_points = [
+                        self._to_screen(2.0 * cx - hx, 2.0 * cy - hy, transform),
+                        self._to_screen(hx, hy, transform),
+                    ]
+                else:
+                    polyline_points.append(self._to_screen(self._hover_world[0], self._hover_world[1], transform))
             if len(polyline_points) >= 2:
                 painter.drawPolyline(QtGui.QPolygonF(polyline_points))
             painter.setBrush(QtGui.QBrush(QtGui.QColor("#2a9d8f")))
             for point in polyline_points[: len(self._creation_points)]:
                 painter.drawEllipse(point, 4.5, 4.5)
         self._draw_pose_pick_preview(painter, transform)
-        if self._joint_start_marker is not None and self._hover_world is not None:
-            painter.setPen(QtGui.QPen(QtGui.QColor("#f4a261"), 2.0, QtCore.Qt.PenStyle.DashLine))
-            start = self._to_screen(self._joint_start_marker.x, self._joint_start_marker.y, transform)
-            end = self._to_screen(self._hover_world[0], self._hover_world[1], transform)
-            painter.drawLine(start, end)
-        if self._slider_joint_start is not None and self._hover_world is not None:
+        if self._joint_start_entity is not None and self._hover_world is not None:
             painter.setPen(QtGui.QPen(QtGui.QColor("#8d6cab"), 2.0, QtCore.Qt.PenStyle.DashLine))
-            if isinstance(self._slider_joint_start, CanvasMarker):
-                start = self._to_screen(self._slider_joint_start.x, self._slider_joint_start.y, transform)
+            if isinstance(self._joint_start_entity, CanvasMarker):
+                start = self._to_screen(self._joint_start_entity.x, self._joint_start_entity.y, transform)
+            elif isinstance(self._joint_start_entity, CanvasSlider):
+                start = self._to_screen(
+                    self._joint_start_entity.origin_x,
+                    self._joint_start_entity.origin_y,
+                    transform,
+                )
             else:
                 start = self._to_screen(
-                    self._slider_joint_start.origin_x,
-                    self._slider_joint_start.origin_y,
+                    self._joint_start_entity.x,
+                    self._joint_start_entity.y,
                     transform,
                 )
             end = self._to_screen(self._hover_world[0], self._hover_world[1], transform)
@@ -5037,6 +5572,16 @@ class MechanismCanvas(QtWidgets.QWidget):
         self.modelChanged.emit(f"Created {name}")
         self.set_mode(CanvasMode.SELECT)
 
+    def _create_free_ground_at(self, world: tuple[float, float]) -> None:
+        if not self._require_editing():
+            return
+        name = self._next_name("Ground", [body.name for body in self.app_service.project.model.bodies])
+        x, y = world
+        body_id, _marker_id = self.app_service.create_free_ground(name, self._mm_expression(x), self._mm_expression(y))
+        self.entitySelected.emit(body_id)
+        self.modelChanged.emit(f"Created {name}")
+        self.set_mode(CanvasMode.SELECT)
+
     def _finalize_body_creation(self) -> None:
         if not self._require_editing():
             return
@@ -5072,6 +5617,42 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._creation_points.clear()
         self.entitySelected.emit(slider_id)
         self.modelChanged.emit(f"Created {name}")
+        self.set_mode(CanvasMode.SELECT)
+
+    def _create_slider_from_marker(self) -> None:
+        if not self._require_editing():
+            return
+        if len(self._creation_points) != 2 or self._slider_creation_marker is None:
+            return
+        details = self._request_ground_or_slider_joint("SliderJoint")
+        if details is None:
+            self._creation_points.clear()
+            self._slider_creation_marker = None
+            self.set_mode(CanvasMode.SELECT)
+            return
+        joint_name, joint_type = details
+        name = self._next_name("Slider", [slider.name for slider in self.app_service.project.model.sliders])
+        (cx, cy), (ex, ey) = self._creation_points
+        sx = 2.0 * cx - ex
+        sy = 2.0 * cy - ey
+        slider_id = self.app_service.create_slider_from_points(
+            name,
+            self._mm_expression(sx),
+            self._mm_expression(sy),
+            self._mm_expression(ex),
+            self._mm_expression(ey),
+        )
+        joint_id = self.app_service.connect_marker_to_slider(
+            self._slider_creation_marker.entity_id,
+            slider_id,
+            joint_type=joint_type,
+            name=joint_name,
+            align="none",
+        )
+        self._creation_points.clear()
+        self._slider_creation_marker = None
+        self.entitySelected.emit(joint_id)
+        self.modelChanged.emit(f"Created {name} and {joint_name}")
         self.set_mode(CanvasMode.SELECT)
 
     def _create_pending_joint(self, new_body_id: str) -> None:
@@ -5122,40 +5703,94 @@ class MechanismCanvas(QtWidgets.QWidget):
         self.modelChanged.emit(f"Created {joint_name}")
         self._pending_joint_creation = None
 
-    def _handle_joint_click(self, marker: CanvasMarker) -> None:
+    def _handle_joint_click(
+        self,
+        marker: CanvasMarker | None,
+        slider: CanvasSlider | None = None,
+        ground: CanvasGround | None = None,
+    ) -> None:
         if not self._require_editing():
             return
-        if self._joint_start_marker is None:
-            self._joint_start_marker = marker
-            self.entitySelected.emit(marker.entity_id)
+        selection = marker or slider or ground
+        if selection is None:
+            return
+        if self._joint_start_entity is None:
+            self._joint_start_entity = selection
+            self.entitySelected.emit(selection.entity_id)
             self.update()
             return
-        first = self._joint_start_marker
-        self._joint_start_marker = None
-        if first.entity_id == marker.entity_id:
+        first = self._joint_start_entity
+        self._joint_start_entity = None
+        if first.entity_id == selection.entity_id:
             self.update()
             return
         name = self._request_joint_name()
         if name is None:
             self.update()
             return
-        self.app_service.move_marker(first.entity_id, self._mm_expression(marker.x), self._mm_expression(marker.y))
-        if self._mode == CanvasMode.CREATE_RIGID:
-            joint_id = self.app_service.create_rigid_joint(
-                name,
-                JointEndpointInput(JointEndpointKind.MARKER, body_id=first.body_id, marker_id=first.entity_id),
-                JointEndpointInput(JointEndpointKind.MARKER, body_id=marker.body_id, marker_id=marker.entity_id),
+        joint_type = JointType.RIGID.value if self._mode == CanvasMode.CREATE_RIGID else JointType.REVOLUTE.value
+        joint_id: str | None = None
+        if isinstance(first, CanvasMarker) and isinstance(selection, CanvasMarker):
+            self.app_service.move_marker(first.entity_id, self._mm_expression(selection.x), self._mm_expression(selection.y))
+            if joint_type == JointType.RIGID.value:
+                joint_id = self.app_service.create_rigid_joint(
+                    name,
+                    JointEndpointInput(JointEndpointKind.MARKER, body_id=first.body_id, marker_id=first.entity_id),
+                    JointEndpointInput(JointEndpointKind.MARKER, body_id=selection.body_id, marker_id=selection.entity_id),
+                )
+            else:
+                joint_id = self.app_service.create_joint(
+                    name,
+                    joint_type,
+                    JointEndpointInput(JointEndpointKind.MARKER, body_id=first.body_id, marker_id=first.entity_id),
+                    JointEndpointInput(JointEndpointKind.MARKER, body_id=selection.body_id, marker_id=selection.entity_id),
+                )
+        elif isinstance(first, CanvasMarker) and isinstance(selection, CanvasSlider):
+            joint_id = self.app_service.connect_marker_to_slider(
+                first.entity_id,
+                selection.entity_id,
+                joint_type=joint_type,
+                name=name,
             )
+        elif isinstance(first, CanvasSlider) and isinstance(selection, CanvasMarker):
+            joint_id = self.app_service.connect_marker_to_slider(
+                selection.entity_id,
+                first.entity_id,
+                joint_type=joint_type,
+                name=name,
+            )
+        elif isinstance(first, CanvasMarker) and isinstance(selection, CanvasGround):
+            joint_id = self._create_marker_to_ground_anchor_joint(first, selection, name, joint_type)
+        elif isinstance(first, CanvasGround) and isinstance(selection, CanvasMarker):
+            joint_id = self._create_marker_to_ground_anchor_joint(selection, first, name, joint_type)
         else:
-            joint_id = self.app_service.create_joint(
-                name,
-                "revolute",
-                JointEndpointInput(JointEndpointKind.MARKER, body_id=first.body_id, marker_id=first.entity_id),
-                JointEndpointInput(JointEndpointKind.MARKER, body_id=marker.body_id, marker_id=marker.entity_id),
-            )
+            self.modelChanged.emit("Invalid joint endpoints")
+            self.update()
+            return
         self.entitySelected.emit(joint_id)
         self.modelChanged.emit(f"Created {name}")
         self.set_mode(CanvasMode.SELECT)
+
+    def _create_marker_to_ground_anchor_joint(
+        self,
+        marker: CanvasMarker,
+        ground: CanvasGround,
+        name: str,
+        joint_type: str,
+    ) -> str:
+        self.app_service.move_marker(marker.entity_id, self._mm_expression(ground.x), self._mm_expression(ground.y))
+        if joint_type == JointType.RIGID.value:
+            return self.app_service.create_rigid_joint(
+                name,
+                JointEndpointInput(JointEndpointKind.MARKER, body_id=marker.body_id, marker_id=marker.entity_id),
+                JointEndpointInput(JointEndpointKind.MARKER, body_id=ground.entity_id, marker_id=ground.marker_id),
+            )
+        return self.app_service.create_joint(
+            name,
+            JointType.REVOLUTE.value,
+            JointEndpointInput(JointEndpointKind.MARKER, body_id=marker.body_id, marker_id=marker.entity_id),
+            JointEndpointInput(JointEndpointKind.MARKER, body_id=ground.entity_id, marker_id=ground.marker_id),
+        )
 
     _SPRING_TYPE_NAMES = {
         CanvasMode.CREATE_LINEAR_SPRING: ("linear_spring", "LinearSpring"),
@@ -5351,17 +5986,20 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def _selected_body(self, fallback_body: str | None = None) -> Body | None:
         if fallback_body is not None:
-            return self.app_service.get_body(fallback_body)
+            body = self.app_service.get_body(fallback_body)
+            return None if body is not None and self._is_ground_body(body) else body
         if self._selected_entity_id is None:
             return None
         entity = self.app_service.get_entity(self._selected_entity_id)
         if entity is None:
             return None
         if isinstance(entity, Body):
-            return entity
+            return None if self._is_ground_body(entity) else entity
         if hasattr(entity, "body_id"):
-            return self.app_service.get_body(entity.body_id)
-        return self.app_service.get_body_by_marker(self._selected_entity_id)
+            body = self.app_service.get_body(entity.body_id)
+            return None if body is not None and self._is_ground_body(body) else body
+        body = self.app_service.get_body_by_marker(self._selected_entity_id)
+        return None if body is not None and self._is_ground_body(body) else body
 
     def _mm_expression(self, value: float) -> str:
         return f"{value:.3f} mm"
@@ -5696,6 +6334,92 @@ class MechanismCanvas(QtWidgets.QWidget):
         painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
         painter.drawPolygon(QtGui.QPolygonF(corners))
 
+    def _draw_joint_angular_limit_arc(self, painter: QtGui.QPainter, joint, point: QtCore.QPointF, assembled) -> None:
+        if assembled is None or not self.app_service.joint_supports_angular_limits(joint):
+            return
+        negative_limit = self.app_service.joint_angular_limit_value(joint, "angle_limit_negative", unit="rad")
+        positive_limit = self.app_service.joint_angular_limit_value(joint, "angle_limit_positive", unit="rad")
+        if negative_limit is not None and negative_limit >= 2.0 * math.pi - 1e-9:
+            negative_limit = None
+        if positive_limit is not None and positive_limit >= 2.0 * math.pi - 1e-9:
+            positive_limit = None
+        if negative_limit is None and positive_limit is None:
+            return
+        center_angle = self._joint_limit_center_angle(joint, assembled)
+        if center_angle is None:
+            return
+        neg = negative_limit if negative_limit is not None else (2.0 * math.pi - 1e-3)
+        pos = positive_limit if positive_limit is not None else (2.0 * math.pi - 1e-3)
+        total = min(neg + pos, 2.0 * math.pi - 1e-3)
+        start_angle = center_angle - neg
+        radius = 20.0
+        rect = QtCore.QRectF(point.x() - radius, point.y() - radius, 2.0 * radius, 2.0 * radius)
+        arc_color = QtGui.QColor("#b5651d") if self._selected_entity_id != joint.id else QtGui.QColor("#c75b12")
+        painter.save()
+        painter.setPen(QtGui.QPen(arc_color, 1.5, QtCore.Qt.PenStyle.DashLine))
+        painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        painter.drawArc(
+            rect,
+            int(-math.degrees(start_angle) * 16),
+            int(-math.degrees(total) * 16),
+        )
+        for boundary in (start_angle, center_angle + pos):
+            tip = QtCore.QPointF(
+                point.x() + radius * math.cos(boundary),
+                point.y() - radius * math.sin(boundary),
+            )
+            inner = QtCore.QPointF(
+                point.x() + (radius - 6.0) * math.cos(boundary),
+                point.y() - (radius - 6.0) * math.sin(boundary),
+            )
+            painter.drawLine(inner, tip)
+        painter.restore()
+
+    def _joint_limit_center_angle(self, joint, assembled) -> float | None:
+        if (
+            joint.endpoint_a.kind is JointEndpointKind.MARKER
+            and joint.endpoint_b.kind is JointEndpointKind.MARKER
+            and joint.endpoint_a.body_id is not None
+            and joint.endpoint_b.body_id is not None
+        ):
+            body_a = assembled.bodies.get(joint.endpoint_a.body_id)
+            body_b = assembled.bodies.get(joint.endpoint_b.body_id)
+            if body_a is None or body_b is None:
+                return None
+            current_a = self._displayed_body_angle(assembled, joint.endpoint_a.body_id)
+            if current_a is None:
+                return None
+            relative_reference = self._relative_angle_delta(body_b.angle, body_a.angle)
+            return current_a + relative_reference
+        marker_endpoint = self._marker_ground_endpoint(joint)
+        if marker_endpoint is None or marker_endpoint.body_id is None:
+            return None
+        body = assembled.bodies.get(marker_endpoint.body_id)
+        return body.angle if body is not None else None
+
+    def _displayed_body_angle(self, assembled, body_id: str | None) -> float | None:
+        if body_id is None:
+            return None
+        body = assembled.bodies.get(body_id)
+        if body is None:
+            return None
+        if self._state_overlay is None:
+            return body.angle
+        return self._state_overlay.get(f"{body_id}.angle", body.angle)
+
+    def _marker_ground_endpoint(self, joint):
+        endpoints = (joint.endpoint_a, joint.endpoint_b)
+        if not any(endpoint.kind is JointEndpointKind.GROUND for endpoint in endpoints):
+            return None
+        for endpoint in endpoints:
+            if endpoint.kind is JointEndpointKind.MARKER:
+                return endpoint
+        return None
+
+    @staticmethod
+    def _relative_angle_delta(angle: float, reference: float) -> float:
+        return math.atan2(math.sin(angle - reference), math.cos(angle - reference))
+
     def _create_driver_for_joint(self, joint_id: str, driver_type: str) -> None:
         if not self._require_editing():
             return
@@ -5828,7 +6552,20 @@ class MechanismCanvas(QtWidgets.QWidget):
             self.set_mode(CanvasMode.SELECT)
             return
         try:
-            self.app_service.create_sensor(name.strip(), sensor_type, marker_ids)
+            sensor_id = self.app_service.create_sensor(name.strip(), sensor_type, marker_ids)
+            sensor = self.app_service.get_entity(sensor_id)
+            project = self.app_service.project
+            assembled = self._assembled_mechanism(project) if project is not None else None
+            marker_map = {
+                marker.entity_id: marker
+                for marker in self._collect_markers(project, assembled)
+            } if project is not None else {}
+            if isinstance(sensor, Sensor):
+                sensor_markers = [marker_map[mid] for mid in marker_ids if mid in marker_map]
+                anchor = self._sensor_anchor_world(sensor, sensor_markers)
+                if anchor is not None:
+                    scope_x, scope_y = self._sensor_scope_world_position(sensor, anchor, self._current_transform())
+                    self.app_service.update_sensor_scope_position(sensor_id, scope_x, scope_y)
             self.modelChanged.emit(f"Created {type_labels.get(sensor_type, 'sensor')} {name.strip()}")
             self.set_mode(CanvasMode.SELECT)
         except Exception as exc:  # pragma: no cover - UI feedback

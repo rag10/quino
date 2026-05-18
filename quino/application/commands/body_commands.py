@@ -244,6 +244,26 @@ class BodyCommands:
             self._ctx.connect_marker_to_ground(structural.id, joint_type="rigid", name=f"Ground_{name}")
         return body_id, structural.id
 
+    def create_free_ground(self, name: str, x: str, y: str) -> tuple[str, str]:
+        """Create a movable ground entity represented by a fixed point-mass anchor.
+
+        Internally this reuses the existing rigid marker-to-ground topology so the
+        solver backend does not need a new primitive. The body itself is tagged in
+        metadata so the GUI can render and interact with it as a dedicated Ground.
+        """
+        project = self._project
+        self._ctx.validation.ensure_unique_name(project.model.bodies, name)
+        with self._ctx.operation():
+            body_id = self.create_body(name=name, markers=[MarkerInput(x, y, "P")], body_type=BodyType.POINT_MASS.value)
+            body = next(b for b in project.model.bodies if b.id == body_id)
+            structural = next(m for m in body.markers if m.type is MarkerType.STRUCTURAL)
+            body.metadata.values["ground_anchor"] = True
+            body.metadata.values["ground_marker_id"] = structural.id
+            joint_id = self._ctx.connect_marker_to_ground(structural.id, joint_type="rigid", name=f"Ground_{name}")
+            joint = next(j for j in project.model.joints if j.id == joint_id)
+            joint.metadata.values["internal_ground_anchor"] = True
+        return body_id, structural.id
+
     def get_marker_deletion_consequence(self, marker_id: str) -> str:
         """Returns 'to_bar', 'to_point_mass', or 'normal' for deleting a structural marker."""
         try:

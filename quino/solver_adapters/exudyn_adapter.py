@@ -7,7 +7,7 @@ import tempfile
 import threading
 import traceback
 
-from quino.domain.model import Project, ReactionOutput, SensorOutput, SimulationResult
+from quino.domain.model import Joint, Project, ReactionOutput, SensorOutput, SimulationResult
 from quino.domain.types import Dimension, DriverType, JointEndpointKind, JointType
 from quino.services.expressions import ExpressionService
 from quino.simulation.assembler import (
@@ -231,6 +231,16 @@ class ExudynAdapter(SolverAdapter):
         joint_objects: dict[str, int] = {}
         for joint in assembled.joints:
             joint_objects[joint.id] = self._create_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, joint)
+        for joint in assembled.joints:
+            self._add_revolute_limit_stops(
+                mbs,
+                item_interface,
+                project,
+                assembled,
+                node_numbers,
+                ground_object,
+                joint,
+            )
         friction_objects: dict[str, int] = {}
         for joint in assembled.joints:
             fobj = self._add_joint_friction(mbs, item_interface, assembled, node_numbers, body_objects, ground_object, joint, exu, joint_objects)
@@ -925,6 +935,45 @@ class ExudynAdapter(SolverAdapter):
             )
         )
 
+    def _add_revolute_limit_stops(
+        self,
+        mbs,
+        item_interface,
+        project: Project,
+        assembled: AssembledMechanism,
+        node_numbers: dict[str, int],
+        ground_object: int,
+        joint: Joint,
+    ) -> None:
+        limits = self._joint_angular_limits_rad(project, joint)
+        if limits is None:
+            return
+        marker_numbers = self._rotation_coordinate_markers(mbs, item_interface, node_numbers, ground_object, joint)
+        limit_data_node = mbs.AddNode(
+            item_interface.NodeGenericData(
+                initialCoordinates=[0.0, 0.0, 0.0],
+                numberOfDataCoordinates=3,
+            )
+        )
+        reference_angle = self._reference_joint_angle(assembled, joint)
+        negative_limit, positive_limit = limits
+        mbs.AddObject(
+            item_interface.ObjectConnectorCoordinateSpringDamperExt(
+                markerNumbers=marker_numbers,
+                nodeNumber=limit_data_node,
+                factor0=-1.0,
+                factor1=1.0,
+                stiffness=0.0,
+                damping=0.0,
+                offset=-reference_angle,
+                useLimitStops=True,
+                limitStopsLower=-negative_limit if negative_limit is not None else -1e30,
+                limitStopsUpper=positive_limit if positive_limit is not None else 1e30,
+                limitStopsStiffness=1e4,
+                limitStopsDamping=1e2,
+            )
+        )
+
     def _create_driver(
         self,
         mbs,
@@ -1043,6 +1092,60 @@ class ExudynAdapter(SolverAdapter):
 
     def _has_translation_drivers(self, assembled: AssembledMechanism) -> bool:
         return any(driver.driver_type == DriverType.TRANSLATION.value for driver in assembled.drivers)
+
+    def _joint_angular_limits_rad(self, project: Project, joint: Joint) -> tuple[float | None, float | None] | None:
+        if joint.type is not JointType.REVOLUTE:
+            return None
+        if joint.endpoint_a.kind is JointEndpointKind.SLIDER or joint.endpoint_b.kind is JointEndpointKind.SLIDER:
+            return None
+        negative = self._joint_metadata_angle(project, joint, "angle_limit_negative")
+        positive = self._joint_metadata_angle(project, joint, "angle_limit_positive")
+        if negative is not None and negative >= 2.0 * math.pi - 1e-9:
+            negative = None
+        if positive is not None and positive >= 2.0 * math.pi - 1e-9:
+            positive = None
+        if negative is None and positive is None:
+            return None
+        return negative, positive
+
+    def _joint_metadata_angle(self, project: Project, joint: Joint, path: str) -> float | None:
+        expression = joint.metadata.values.get(path)
+        if not isinstance(expression, str) or not expression.strip():
+            return None
+        quantity = self.expression_service.evaluate_expression(expression, project.parameters)
+        return self.expression_service.unit_service.convert(quantity, "rad")
+
+    def _reference_joint_angle(self, assembled: AssembledMechanism, joint: Joint) -> float:
+        if (
+            joint.endpoint_a.kind is JointEndpointKind.MARKER
+            and joint.endpoint_b.kind is JointEndpointKind.MARKER
+            and joint.endpoint_a.body_id is not None
+            and joint.endpoint_b.body_id is not None
+        ):
+            body_a = assembled.bodies.get(joint.endpoint_a.body_id)
+            body_b = assembled.bodies.get(joint.endpoint_b.body_id)
+            if body_a is None or body_b is None:
+                return 0.0
+            return self._relative_angle_delta(body_b.angle, body_a.angle)
+        marker_endpoint = self._marker_ground_endpoint(joint)
+        if marker_endpoint is not None and marker_endpoint.body_id is not None:
+            body = assembled.bodies.get(marker_endpoint.body_id)
+            if body is not None:
+                return body.angle
+        return 0.0
+
+    def _marker_ground_endpoint(self, joint: Joint):
+        endpoints = (joint.endpoint_a, joint.endpoint_b)
+        if not any(endpoint.kind is JointEndpointKind.GROUND for endpoint in endpoints):
+            return None
+        for endpoint in endpoints:
+            if endpoint.kind is JointEndpointKind.MARKER:
+                return endpoint
+        return None
+
+    @staticmethod
+    def _relative_angle_delta(angle: float, reference: float) -> float:
+        return math.atan2(math.sin(angle - reference), math.cos(angle - reference))
 
     def _rotation_coordinate_markers(self, mbs, item_interface, node_numbers: dict[str, int], ground_object: int, joint) -> list[int]:
         if joint.endpoint_a.kind is JointEndpointKind.MARKER and joint.endpoint_b.kind is JointEndpointKind.GROUND:

@@ -71,3 +71,22 @@ def test_roundtrip_load() -> None:
     assert load.fy.expression == "-5 N"
     assert load.fx.unit == "N"
     assert load.fy.unit == "N"
+
+
+def test_roundtrip_sensor_scope_and_visibility_state() -> None:
+    app = ApplicationService()
+    project = app.new_project("SensorDemo")
+    body_id = app.create_body("Link", [MarkerInput("0 mm", "0 mm", "A")])
+    marker_id = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "A")
+    sensor_id = app.create_sensor("Probe", "point", [marker_id])
+    app.update_sensor_scope_position(sensor_id, 25.0, 35.0)
+    project.view_state.show_sensors = False
+
+    mapper = JsonMapper()
+    data = mapper.dump(project)
+    restored = mapper.load(data)
+
+    restored_sensor = next(sensor for sensor in restored.model.sensors if sensor.id == sensor_id)
+    assert restored.view_state.show_sensors is False
+    assert restored_sensor.metadata.values["scope_x"] == 25.0
+    assert restored_sensor.metadata.values["scope_y"] == 35.0

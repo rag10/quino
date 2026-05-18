@@ -134,6 +134,7 @@ class KinematicValidator:
             return
         sample_times = self.simulation_sample_times(duration, steps)
         self.validate_translation_driver_travel(project, report, assembled, sample_times)
+        self.validate_rotation_driver_limits(project, report, assembled, sample_times)
         reported: set[tuple[str, str, str]] = set()
         for driver in project.model.drivers:
             if driver.type is not DriverType.ROTATION:
@@ -297,6 +298,64 @@ class KinematicValidator:
                                     f"Driver {driver.name} requests slider {slider.name} coordinate "
                                     f"{target_coordinate:.6g} mm at t={time_value:.3g}s, above "
                                     f"travel_max {slider.travel_max:.6g} mm"
+                                ),
+                                joint.id,
+                            )
+                        )
+                    break
+
+    def validate_rotation_driver_limits(
+        self,
+        project: Project,
+        report: ValidationReport,
+        assembled,
+        sample_times: list[float],
+    ) -> None:
+        reported: set[str] = set()
+        for driver in project.model.drivers:
+            if driver.type is not DriverType.ROTATION:
+                continue
+            try:
+                joint = self._find_joint(project, driver.target_joint_id)
+            except ValueError:
+                continue
+            limits = self._joint_angular_limits_rad(project, joint)
+            if limits is None:
+                continue
+            reference_angle = self._reference_joint_angle(assembled, joint)
+            for time_value in sample_times:
+                try:
+                    target_angle = self._driver_value_at(driver, project, time_value, "rad")
+                except Exception:
+                    break
+                relative_offset = self._relative_angle_delta(target_angle, reference_angle)
+                if limits[0] is not None and relative_offset < -limits[0] - 1e-9:
+                    if driver.id not in reported:
+                        reported.add(driver.id)
+                        report.messages.append(
+                            ValidationMessage(
+                                "warning",
+                                "kinematic_angle_limit",
+                                (
+                                    f"Driver {driver.name} requests joint {joint.name} angle offset "
+                                    f"{math.degrees(relative_offset):.6g} deg at t={time_value:.3g}s, below "
+                                    f"allowed negative limit {-math.degrees(limits[0]):.6g} deg"
+                                ),
+                                joint.id,
+                            )
+                        )
+                    break
+                if limits[1] is not None and relative_offset > limits[1] + 1e-9:
+                    if driver.id not in reported:
+                        reported.add(driver.id)
+                        report.messages.append(
+                            ValidationMessage(
+                                "warning",
+                                "kinematic_angle_limit",
+                                (
+                                    f"Driver {driver.name} requests joint {joint.name} angle offset "
+                                    f"{math.degrees(relative_offset):.6g} deg at t={time_value:.3g}s, above "
+                                    f"allowed positive limit {math.degrees(limits[1]):.6g} deg"
                                 ),
                                 joint.id,
                             )
@@ -662,6 +721,51 @@ class KinematicValidator:
             if joint.id == joint_id:
                 return joint
         raise ValueError(f"Unknown joint: {joint_id}")
+
+    def _joint_angular_limits_rad(self, project: Project, joint: Joint) -> tuple[float | None, float | None] | None:
+        if joint.type.value != "revolute":
+            return None
+        if joint.endpoint_a.kind is JointEndpointKind.SLIDER or joint.endpoint_b.kind is JointEndpointKind.SLIDER:
+            return None
+        negative = self._joint_metadata_angle(project, joint, "angle_limit_negative")
+        positive = self._joint_metadata_angle(project, joint, "angle_limit_positive")
+        if negative is not None and negative >= 2.0 * math.pi - 1e-9:
+            negative = None
+        if positive is not None and positive >= 2.0 * math.pi - 1e-9:
+            positive = None
+        if negative is None and positive is None:
+            return None
+        return negative, positive
+
+    def _joint_metadata_angle(self, project: Project, joint: Joint, path: str) -> float | None:
+        expression = joint.metadata.values.get(path)
+        if not isinstance(expression, str) or not expression.strip():
+            return None
+        quantity = self._expression_service.evaluate_expression(expression, project.parameters)
+        return self._unit_service.convert(quantity, "rad")
+
+    def _reference_joint_angle(self, assembled, joint: Joint) -> float:
+        if (
+            joint.endpoint_a.kind is JointEndpointKind.MARKER
+            and joint.endpoint_b.kind is JointEndpointKind.MARKER
+            and joint.endpoint_a.body_id is not None
+            and joint.endpoint_b.body_id is not None
+        ):
+            body_a = assembled.bodies.get(joint.endpoint_a.body_id)
+            body_b = assembled.bodies.get(joint.endpoint_b.body_id)
+            if body_a is None or body_b is None:
+                return 0.0
+            return self._relative_angle_delta(body_b.angle, body_a.angle)
+        marker_endpoint = self._marker_ground_endpoint(joint)
+        if marker_endpoint is not None and marker_endpoint.body_id is not None:
+            body = assembled.bodies.get(marker_endpoint.body_id)
+            if body is not None:
+                return body.angle
+        return 0.0
+
+    @staticmethod
+    def _relative_angle_delta(angle: float, reference: float) -> float:
+        return math.atan2(math.sin(angle - reference), math.cos(angle - reference))
 
     @staticmethod
     def _marker_slider_endpoints(joint: Joint) -> tuple[JointEndpoint | None, JointEndpoint | None]:

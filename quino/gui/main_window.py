@@ -448,6 +448,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_toggle_grid.triggered.connect(self._on_toggle_grid)
         self.action_toggle_grid.setToolTip("Show/hide grid")
 
+        self.action_toggle_sensors = QtGui.QAction(get_icon("sensor-point", color_base), "Sensors", self)
+        self.action_toggle_sensors.setCheckable(True)
+        self.action_toggle_sensors.setChecked(True)
+        self.action_toggle_sensors.triggered.connect(self._on_toggle_sensors)
+        self.action_toggle_sensors.setToolTip("Show/hide sensor overlays")
+
         self.action_add_gravity = QtGui.QAction(get_icon("gravity", color_dynamic), "Gravity", self)
         self.action_add_gravity.setToolTip("Add gravity — or select it if already present")
         self.action_add_gravity.triggered.connect(self._on_add_gravity)
@@ -466,10 +472,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_point_mass_tool = self._tool_action("Mass", CanvasMode.CREATE_POINT_MASS, get_icon("point-mass", color_kinematic), "Create a punctual mass (1 click)")
         self.action_body_tool = self._tool_action("Body", CanvasMode.CREATE_BODY, get_icon("body", color_kinematic), "Create a body")
         self.action_add_marker_tool = self._tool_action("Marker", CanvasMode.ADD_MARKER, get_icon("marker-plus", color_kinematic), "Add a marker to the selected body")
-        self.action_joint_tool = self._tool_action("Revolute", CanvasMode.CREATE_REVOLUTE, get_icon("revolute", color_kinematic), "Create a revolute joint")
-        self.action_rigid_joint_tool = self._tool_action("Rigid", CanvasMode.CREATE_RIGID, get_icon("rigid", color_kinematic), "Create a rigid joint")
-        self.action_slider_tool = self._tool_action("Slider", CanvasMode.CREATE_SLIDER, get_icon("slider", color_kinematic), "Create a slider")
-        self.action_ground_tool = self._tool_action("Ground", CanvasMode.CONNECT_GROUND, get_icon("ground", color_kinematic), "Connect a marker to ground")
+        self.action_joint_tool = self._tool_action("Revolute", CanvasMode.CREATE_REVOLUTE, get_icon("revolute", color_kinematic), "Create a revolute joint between marker-marker, marker-ground, or marker-slider")
+        self.action_rigid_joint_tool = self._tool_action("Rigid", CanvasMode.CREATE_RIGID, get_icon("rigid", color_kinematic), "Create a rigid joint between marker-marker, marker-ground, or marker-slider")
+        self.action_slider_tool = self._tool_action("Slider", CanvasMode.CREATE_SLIDER, get_icon("slider", color_kinematic), "Create a slider from 2 points, or from marker + point centered on the marker")
+        self.action_ground_tool = self._tool_action("Ground", CanvasMode.CONNECT_GROUND, get_icon("ground", color_kinematic), "Click a marker to connect it to ground, or empty canvas to create a free ground")
         self.action_slider_connect_tool = self._tool_action("ToSlide", CanvasMode.CONNECT_SLIDER, get_icon("slider-connect", color_kinematic), "Connect a marker to a slider")
         self.action_sketch_point_tool = self._tool_action("Point", CanvasMode.CREATE_SKETCH_POINT, get_icon("sketch-point", color_sketch), "Create a sketch point")
         self.action_sketch_line_tool = self._tool_action("Line", CanvasMode.CREATE_SKETCH_LINE_SEGMENT, get_icon("sketch-line", color_sketch), "Create a sketch line segment")
@@ -759,7 +765,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._add_toolbar_block(toolbar, [
             [self.action_select_tool, self.action_fit_view, self.action_delete],
-            [self.action_toggle_origin, self.action_toggle_grid, self.action_toggle_sketch_visible],
+            [self.action_toggle_origin, self.action_toggle_grid, self.action_toggle_sensors, self.action_toggle_sketch_visible],
         ], "View")
 
     def _build_sketch_toolbar(self) -> None:
@@ -802,7 +808,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._add_toolbar_block(t, [
             [self.action_joint_tool, self.action_rigid_joint_tool],
-            [self.action_ground_tool, self.action_slider_connect_tool],
+            [self.action_ground_tool, None],
         ], "Joints")
         self._add_toolbar_sep(t)
 
@@ -972,6 +978,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if hasattr(self, "poses_panel"):
             self.poses_panel.refresh()
         self.action_toggle_sketch_visible.setChecked(project.sketch.visible if project.sketch is not None else False)
+        self.action_toggle_sensors.setChecked(project.view_state.show_sensors)
+        self.canvas.set_show_sensors(project.view_state.show_sensors)
         self.canvas.set_selection(self._selected_entity_id)
         self._update_interaction_state()
         self._update_status_message()
@@ -1445,6 +1453,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_toggle_grid(self) -> None:
         self.canvas.set_show_grid(self.action_toggle_grid.isChecked())
 
+    def _on_toggle_sensors(self) -> None:
+        self.canvas.set_show_sensors(self.action_toggle_sensors.isChecked())
+
     def _on_add_gravity(self) -> None:
         project = self.app_service.project
         if project is None:
@@ -1678,6 +1689,7 @@ class MainWindow(QtWidgets.QMainWindow):
     # --- icon name per entity kind ---
     _KIND_ICON: dict[str, str] = {
         "bar": "bar", "body": "body",
+        "ground": "ground",
         "reaction": "sensor-point",
         "structural": "marker", "com": "marker",
         "slider": "slider",
@@ -1720,6 +1732,12 @@ class MainWindow(QtWidgets.QMainWindow):
         "Springs": "#2a9d8f",
     }
 
+    def _is_ground_body(self, body: Body) -> bool:
+        return bool(body.metadata.values.get("ground_anchor"))
+
+    def _is_internal_ground_joint(self, joint: Joint) -> bool:
+        return bool(joint.metadata.values.get("internal_ground_anchor"))
+
     def _populate_tree(self, project: Project) -> None:
         self.tree.blockSignals(True)
         self._expanded_tree_keys = self._collect_expanded_tree_keys()
@@ -1741,7 +1759,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         bodies_root = _root("Bodies", len(project.model.bodies))
         sliders_root = _root("Sliders", len(project.model.sliders))
-        joints_root = _root("Joints", len(project.model.joints))
+        visible_joints = [joint for joint in project.model.joints if not self._is_internal_ground_joint(joint)]
+        joints_root = _root("Joints", len(visible_joints))
         drivers_root = _root("Drivers", len(project.model.drivers))
         sensors_root = _root("Sensors", len(project.model.sensors))
         loads_count = len(project.model.loads) + (1 if project.model.gravity is not None else 0)
@@ -1783,15 +1802,18 @@ class MainWindow(QtWidgets.QMainWindow):
                     group_item.addChild(self._entity_item(entity.name, kind, entity.id))
 
         for body in project.model.bodies:
-            body_item = self._entity_item(body.name, body.type.value, body.id)
+            body_kind = "ground" if self._is_ground_body(body) else body.type.value
+            body_item = self._entity_item(body.name, body_kind, body.id)
             bodies_root.addChild(body_item)
+            if self._is_ground_body(body):
+                continue
             for marker in body.markers:
                 if not marker.visible and marker.type.value == "com":
                     continue
                 body_item.addChild(self._entity_item(marker.name, marker.type.value, marker.id))
         for slider in project.model.sliders:
             sliders_root.addChild(self._entity_item(slider.name, "slider", slider.id))
-        for joint in project.model.joints:
+        for joint in visible_joints:
             joints_root.addChild(self._entity_item(joint.name, joint.type.value, joint.id))
         for driver in project.model.drivers:
             drivers_root.addChild(self._entity_item(driver.name, driver.type.value, driver.id))
@@ -1882,7 +1904,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "",
             f"Bodies: {len(project.model.bodies)}",
             f"Sliders: {len(project.model.sliders)}",
-            f"Joints: {len(project.model.joints)}",
+            f"Joints: {len([joint for joint in project.model.joints if not self._is_internal_ground_joint(joint)])}",
             f"Drivers: {len(project.model.drivers)}",
             "",
         ]
@@ -2434,6 +2456,22 @@ class MainWindow(QtWidgets.QMainWindow):
             body_pose.y + sin_a * marker.local_x + cos_a * marker.local_y,
         )
 
+    def _pose_body_angle_from_assembled(self, assembled, body_id: str | None) -> float | None:
+        if body_id is None:
+            return None
+        body = assembled.bodies.get(body_id)
+        if body is None:
+            return None
+        pose = self.app_service.get_current_pose()
+        if pose is None:
+            return body.angle
+        body_pose = pose.body_poses.get(body_id)
+        return body_pose.angle if body_pose is not None else body.angle
+
+    @staticmethod
+    def _relative_angle_delta(angle: float, reference: float) -> float:
+        return math.atan2(math.sin(angle - reference), math.cos(angle - reference))
+
     def _pose_joint_constraint_violation(self, *, tolerance_mm: float) -> str | None:
         project = self.app_service.project
         if project is None:
@@ -2461,6 +2499,29 @@ class MainWindow(QtWidgets.QMainWindow):
                 gap = math.hypot(pos_a[0] - pos_b[0], pos_a[1] - pos_b[1])
                 if gap > tolerance_mm:
                     return f"Kinematic pose would violate joint {joint.name}: marker gap {gap:.6g} mm"
+                if self.app_service.joint_supports_angular_limits(joint):
+                    negative_limit = self.app_service.joint_angular_limit_value(joint, "angle_limit_negative", unit="rad")
+                    positive_limit = self.app_service.joint_angular_limit_value(joint, "angle_limit_positive", unit="rad")
+                    reference_a = assembled.bodies.get(marker_endpoints[0].body_id)
+                    reference_b = assembled.bodies.get(marker_endpoints[1].body_id)
+                    current_a = self._pose_body_angle_from_assembled(assembled, marker_endpoints[0].body_id)
+                    current_b = self._pose_body_angle_from_assembled(assembled, marker_endpoints[1].body_id)
+                    if reference_a is not None and reference_b is not None and current_a is not None and current_b is not None:
+                        reference_relative = self._relative_angle_delta(reference_b.angle, reference_a.angle)
+                        current_relative = self._relative_angle_delta(current_b, current_a)
+                        relative_offset = self._relative_angle_delta(current_relative, reference_relative)
+                        if negative_limit is not None and negative_limit < 2.0 * math.pi - 1e-9 and relative_offset < -negative_limit - 1e-9:
+                            return (
+                                f"Kinematic pose would violate joint {joint.name}: "
+                                f"relative angle offset {math.degrees(relative_offset):.6g} deg is below "
+                                f"the negative limit {-math.degrees(negative_limit):.6g} deg"
+                            )
+                        if positive_limit is not None and positive_limit < 2.0 * math.pi - 1e-9 and relative_offset > positive_limit + 1e-9:
+                            return (
+                                f"Kinematic pose would violate joint {joint.name}: "
+                                f"relative angle offset {math.degrees(relative_offset):.6g} deg is above "
+                                f"the positive limit {math.degrees(positive_limit):.6g} deg"
+                            )
                 continue
 
             if len(marker_endpoints) == 1 and any(endpoint.kind is JointEndpointKind.GROUND for endpoint in endpoints):
@@ -2475,6 +2536,24 @@ class MainWindow(QtWidgets.QMainWindow):
                 gap = math.hypot(pos[0] - marker.global_x, pos[1] - marker.global_y)
                 if gap > tolerance_mm:
                     return f"Kinematic pose would violate ground joint {joint.name}: gap {gap:.6g} mm"
+                if self.app_service.joint_supports_angular_limits(joint):
+                    negative_limit = self.app_service.joint_angular_limit_value(joint, "angle_limit_negative", unit="rad")
+                    positive_limit = self.app_service.joint_angular_limit_value(joint, "angle_limit_positive", unit="rad")
+                    current_angle = self._pose_body_angle_from_assembled(assembled, marker_endpoint.body_id)
+                    if body is not None and current_angle is not None:
+                        relative_offset = self._relative_angle_delta(current_angle, body.angle)
+                        if negative_limit is not None and negative_limit < 2.0 * math.pi - 1e-9 and relative_offset < -negative_limit - 1e-9:
+                            return (
+                                f"Kinematic pose would violate ground joint {joint.name}: "
+                                f"angle offset {math.degrees(relative_offset):.6g} deg is below "
+                                f"the negative limit {-math.degrees(negative_limit):.6g} deg"
+                            )
+                        if positive_limit is not None and positive_limit < 2.0 * math.pi - 1e-9 and relative_offset > positive_limit + 1e-9:
+                            return (
+                                f"Kinematic pose would violate ground joint {joint.name}: "
+                                f"angle offset {math.degrees(relative_offset):.6g} deg is above "
+                                f"the positive limit {math.degrees(positive_limit):.6g} deg"
+                            )
                 continue
 
             if len(marker_endpoints) == 1 and slider_endpoints:
@@ -3547,7 +3626,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.inspector.layout.addStretch()
 
             # --- markers section for Body/Bar (consolidated with reordering) ---
-            if isinstance(entity, Body) and entity.markers:
+            if isinstance(entity, Body) and entity.markers and not self._is_ground_body(entity):
                 visible_markers = [m for m in entity.markers if m.visible or m.type.value != "com"]
                 if visible_markers:
                     markers_label = QtWidgets.QLabel("Markers")
@@ -3659,6 +3738,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._suspend_property_updates = False
 
     def _entity_kind_label(self, entity: object) -> str:
+        if isinstance(entity, Body) and self._is_ground_body(entity):
+            return "ground"
         type_val = getattr(getattr(entity, "type", None), "value", None)
         if type_val:
             return type_val.replace("_", " ")
@@ -3692,6 +3773,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _entity_default_icon(self, entity: object) -> str:
         if isinstance(entity, Body):
+            if self._is_ground_body(entity):
+                return "ground"
             return "body"
         if isinstance(entity, Marker):
             return "marker"
@@ -3814,6 +3897,25 @@ class MainWindow(QtWidgets.QMainWindow):
 
         elif isinstance(entity, Joint):
             prop("type", "", entity.type.value, "readonly", entity.type.value)
+            if self.app_service.joint_supports_angular_limits(entity):
+                limit_positive = self.app_service.joint_angular_limit_expression(entity, "angle_limit_positive")
+                limit_negative = self.app_service.joint_angular_limit_expression(entity, "angle_limit_negative")
+                eval_positive = self.app_service.joint_angular_limit_value(entity, "angle_limit_positive", unit="deg")
+                eval_negative = self.app_service.joint_angular_limit_value(entity, "angle_limit_negative", unit="deg")
+                prop(
+                    "angle_limit_positive",
+                    "angle_limit_positive",
+                    limit_positive or "",
+                    "expression_or_null",
+                    f"{eval_positive:.6g} deg" if eval_positive is not None else "unrestricted",
+                )
+                prop(
+                    "angle_limit_negative",
+                    "angle_limit_negative",
+                    limit_negative or "",
+                    "expression_or_null",
+                    f"{eval_negative:.6g} deg" if eval_negative is not None else "unrestricted",
+                )
             friction_mode = self.app_service.joint_friction_mode(entity)
             if friction_mode == "rotation":
                 coulomb, viscous = self.app_service.joint_friction_values(entity)
@@ -3834,6 +3936,8 @@ class MainWindow(QtWidgets.QMainWindow):
         elif isinstance(entity, Driver):
             prop("type", "", entity.type.value, "readonly", entity.type.value)
             prop("law", "law", entity.law.expression, "expression", self._evaluate_scalar(entity.law, with_time=True))
+            if entity.type is DriverType.TRANSLATION:
+                prop("— reference", "", "relative to initial slider position", "readonly", "")
             if self._app_mode == "pose":
                 vel_unit = "rad/s" if entity.type is DriverType.ROTATION else "m/s"
                 stored = self.app_service.get_driver_initial_velocity(entity.id)
@@ -3988,9 +4092,12 @@ class MainWindow(QtWidgets.QMainWindow):
         elif isinstance(entity, Marker):
             body = self.app_service.get_body_by_marker(entity.id)
             if body is not None:
-                rel("Parent Body", "body" if body.type.value == "body" else "bar", body.name, body.type.value, body.id)
+                if self._is_ground_body(body):
+                    rel("Parent Body", "ground", body.name, "ground", body.id)
+                else:
+                    rel("Parent Body", "body" if body.type.value == "body" else "bar", body.name, body.type.value, body.id)
             joints = [j for j in project.model.joints
-                      if j.endpoint_a.marker_id == entity.id or j.endpoint_b.marker_id == entity.id]
+                      if not self._is_internal_ground_joint(j) and (j.endpoint_a.marker_id == entity.id or j.endpoint_b.marker_id == entity.id)]
             for j in joints:
                 icon_j = self._KIND_ICON.get(j.type.value, "revolute")
                 other_ep = j.endpoint_b if j.endpoint_a.marker_id == entity.id else j.endpoint_a
@@ -4008,6 +4115,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 rel("Joints", icon_j, j.name, detail, j.id)
 
         elif isinstance(entity, Joint):
+            if self._is_internal_ground_joint(entity):
+                return rels
             for label, ep in [("A", entity.endpoint_a), ("B", entity.endpoint_b)]:
                 if ep.kind.value == "ground":
                     rel("Endpoints", "ground", f"Endpoint {label}", "Ground", None)
@@ -4484,7 +4593,10 @@ class MainWindow(QtWidgets.QMainWindow):
             "create_bar": "2 clicks",
             "create_point_mass": "1 click",
             "create_body": "Click to place points, Enter/Esc to finish",
-            "create_slider": "2 clicks for axis",
+            "create_revolute": "marker-marker, marker-ground, or marker-slider",
+            "create_rigid": "marker-marker, marker-ground, or marker-slider",
+            "create_slider": "2 points, or marker + point",
+            "connect_ground": "marker to ground, or empty canvas creates ground",
             "create_sketch_point": "1 click",
             "create_sketch_line_segment": "2 clicks or snap to existing points",
             "create_sketch_rectangle": "2 opposite corners",
