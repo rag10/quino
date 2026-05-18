@@ -127,7 +127,11 @@ class SolvespaceBackend:
                     expressions=self._expressions,
                     units=self._units,
                 )
-            except ValueError:
+            except (ValueError, TypeError):
+                # ValueError: malformed constraint (handled by mapping).
+                # TypeError: python-solvespace native rejection (e.g. tangent
+                # called with circle entities, which is not yet supported by
+                # the C++ kernel binding). Mark as bad rather than crashing.
                 bad_constraints.append(c.id)
 
         # Lock the radius of every circle/arc that is NOT covered by a user RADIUS

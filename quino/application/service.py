@@ -52,7 +52,7 @@ from quino.solver_adapters.exudyn_pose_adapter import ExudynPoseAdapter
 class ApplicationService:
     schema_version = "0.1.0"
 
-    def __init__(self, *, sketch_solver_backend: str = "legacy") -> None:
+    def __init__(self, *, sketch_solver_backend: str = "solvespace") -> None:
         self.id_service = IdService()
         self.unit_service = UnitService()
         self.expression_service = ExpressionService(self.unit_service)

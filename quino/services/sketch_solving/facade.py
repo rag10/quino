@@ -13,7 +13,7 @@ class SketchSolver:
         expression_service: ExpressionService,
         unit_service: UnitService,
         *,
-        backend: str = "legacy",  # temporary default — switches to "solvespace" in Task 12
+        backend: str = "solvespace",
     ) -> None:
         self._backend: SketchSolverBackend = _make_backend(
             backend, expression_service, unit_service
