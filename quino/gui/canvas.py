@@ -3274,62 +3274,67 @@ class MechanismCanvas(QtWidgets.QWidget):
         sel_color = QtGui.QColor("#27ae60")
         line_color = QtGui.QColor("#5f8f77")
         for sensor in project.model.sensors:
-            geometry = self._sensor_screen_geometry(sensor, marker_map, transform)
-            if geometry is None:
-                continue
-            is_selected = self._selected_entity_id == sensor.id
-            color = sel_color if is_selected else base_color
-            anchor = geometry["anchor"]
-            box_origin = self._sensor_scope_top_left(sensor, anchor)
-            collapsed = sensor.id in self._collapsed_sensor_scopes
-            box_rect = self._sensor_scope_rect(sensor, box_origin, collapsed)
-            header_rect = QtCore.QRectF(box_rect.x(), box_rect.y(), box_rect.width(), 22.0)
-            collapse_rect = QtCore.QRectF(box_rect.right() - 18.0, box_rect.y() + 3.0, 14.0, 14.0)
-            self._draw_sensor_measured_geometry(painter, geometry, line_color)
-            self._draw_sensor_scope_connector(painter, anchor, box_rect, line_color)
-            if is_selected:
-                painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
-                painter.setBrush(QtGui.QBrush(QtGui.QColor(39, 174, 96, 28)))
-                painter.drawRoundedRect(box_rect.adjusted(-4.0, -4.0, 4.0, 4.0), 8.0, 8.0)
-            painter.setPen(QtGui.QPen(color, 1.2))
-            painter.setBrush(QtGui.QBrush(QtGui.QColor("#fffdf7")))
-            painter.drawRoundedRect(box_rect, 7.0, 7.0)
-            painter.setPen(QtGui.QPen(QtGui.QColor("#dfe8de"), 1.0))
-            painter.setBrush(QtGui.QBrush(QtGui.QColor("#eef7ef")))
-            painter.drawRoundedRect(header_rect, 7.0, 7.0)
-            painter.fillRect(QtCore.QRectF(header_rect.x(), header_rect.bottom() - 7.0, header_rect.width(), 7.0), QtGui.QColor("#eef7ef"))
-            painter.setPen(QtGui.QPen(color, 1.0))
-            painter.setBrush(QtGui.QBrush(color))
-            painter.drawEllipse(QtCore.QPointF(header_rect.x() + 11.0, header_rect.center().y()), 4.0, 4.0)
-            title_font = QtGui.QFont(painter.font())
-            title_font.setPointSizeF(max(7.0, title_font.pointSizeF() - 1.0 if title_font.pointSizeF() > 0 else 8.0))
-            title_font.setBold(True)
-            painter.setFont(title_font)
-            painter.setPen(QtGui.QPen(QtGui.QColor("#0d4d2e")))
-            painter.drawText(QtCore.QRectF(header_rect.x() + 20.0, header_rect.y(), header_rect.width() - 40.0, header_rect.height()), QtCore.Qt.AlignmentFlag.AlignVCenter, sensor.name)
-            arrow = ">" if collapsed else "v"
-            painter.drawText(collapse_rect, QtCore.Qt.AlignmentFlag.AlignCenter, arrow)
-            if not collapsed:
-                value_font = QtGui.QFont(painter.font())
-                value_font.setBold(False)
-                value_font.setPointSizeF(max(6.0, value_font.pointSizeF() - 1.0 if value_font.pointSizeF() > 0 else 7.0))
-                painter.setFont(value_font)
-                painter.setPen(QtGui.QPen(QtGui.QColor("#48624f")))
-                rows = self._sensor_scope_rows(project, sensor)
-                y = header_rect.bottom() + 6.0
-                for label, value in rows:
-                    painter.drawText(QtCore.QRectF(box_rect.x() + 6.0, y, box_rect.width() * 0.55, 12.0), QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter, label)
-                    painter.drawText(QtCore.QRectF(box_rect.x() + box_rect.width() * 0.55, y, box_rect.width() * 0.4 - 6.0, 12.0), QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter, value)
-                    y += 12.0
-            self._screen_sensors.append(
-                CanvasSensorScope(
-                    sensor_id=sensor.id,
-                    box_rect=box_rect,
-                    header_rect=header_rect,
-                    collapse_rect=collapse_rect,
-                    anchor_point=anchor,
+            try:
+                geometry = self._sensor_screen_geometry(sensor, marker_map, transform)
+                if geometry is None:
+                    continue
+                is_selected = self._selected_entity_id == sensor.id
+                color = sel_color if is_selected else base_color
+                anchor = geometry["anchor"]
+                box_origin = self._sensor_scope_top_left(sensor, anchor)
+                collapsed = sensor.id in self._collapsed_sensor_scopes
+                box_rect = self._sensor_scope_rect(sensor, box_origin, collapsed)
+                header_rect = QtCore.QRectF(box_rect.x(), box_rect.y(), box_rect.width(), 22.0)
+                collapse_rect = QtCore.QRectF(box_rect.right() - 18.0, box_rect.y() + 3.0, 14.0, 14.0)
+                self._draw_sensor_measured_geometry(painter, geometry, line_color)
+                self._draw_sensor_scope_connector(painter, anchor, box_rect, line_color)
+                if is_selected:
+                    painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
+                    painter.setBrush(QtGui.QBrush(QtGui.QColor(39, 174, 96, 28)))
+                    painter.drawRoundedRect(box_rect.adjusted(-4.0, -4.0, 4.0, 4.0), 8.0, 8.0)
+                painter.setPen(QtGui.QPen(color, 1.2))
+                painter.setBrush(QtGui.QBrush(QtGui.QColor("#fffdf7")))
+                painter.drawRoundedRect(box_rect, 7.0, 7.0)
+                painter.setPen(QtGui.QPen(QtGui.QColor("#dfe8de"), 1.0))
+                painter.setBrush(QtGui.QBrush(QtGui.QColor("#eef7ef")))
+                painter.drawRoundedRect(header_rect, 7.0, 7.0)
+                painter.fillRect(QtCore.QRectF(header_rect.x(), header_rect.bottom() - 7.0, header_rect.width(), 7.0), QtGui.QColor("#eef7ef"))
+                painter.setPen(QtGui.QPen(color, 1.0))
+                painter.setBrush(QtGui.QBrush(color))
+                painter.drawEllipse(QtCore.QPointF(header_rect.x() + 11.0, header_rect.center().y()), 4.0, 4.0)
+                title_font = QtGui.QFont(painter.font())
+                title_font.setPointSizeF(max(7.0, title_font.pointSizeF() - 1.0 if title_font.pointSizeF() > 0 else 8.0))
+                title_font.setBold(True)
+                painter.setFont(title_font)
+                painter.setPen(QtGui.QPen(QtGui.QColor("#0d4d2e")))
+                painter.drawText(QtCore.QRectF(header_rect.x() + 20.0, header_rect.y(), header_rect.width() - 40.0, header_rect.height()), QtCore.Qt.AlignmentFlag.AlignVCenter, sensor.name)
+                arrow = ">" if collapsed else "v"
+                painter.drawText(collapse_rect, QtCore.Qt.AlignmentFlag.AlignCenter, arrow)
+                if not collapsed:
+                    value_font = QtGui.QFont(painter.font())
+                    value_font.setBold(False)
+                    value_font.setPointSizeF(max(6.0, value_font.pointSizeF() - 1.0 if value_font.pointSizeF() > 0 else 7.0))
+                    painter.setFont(value_font)
+                    painter.setPen(QtGui.QPen(QtGui.QColor("#48624f")))
+                    rows = self._sensor_scope_rows(project, sensor)
+                    y = header_rect.bottom() + 6.0
+                    for label, value in rows:
+                        painter.drawText(QtCore.QRectF(box_rect.x() + 6.0, y, box_rect.width() * 0.55, 12.0), QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter, label)
+                        painter.drawText(QtCore.QRectF(box_rect.x() + box_rect.width() * 0.55, y, box_rect.width() * 0.4 - 6.0, 12.0), QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter, value)
+                        y += 12.0
+                self._screen_sensors.append(
+                    CanvasSensorScope(
+                        sensor_id=sensor.id,
+                        box_rect=box_rect,
+                        header_rect=header_rect,
+                        collapse_rect=collapse_rect,
+                        anchor_point=anchor,
+                    )
                 )
-            )
+            except Exception:
+                # Keep the rest of the canvas responsive even if one sensor is incomplete
+                # or transiently inconsistent during an interactive drag.
+                continue
 
     def _sensor_at(self, screen_pos: QtCore.QPointF) -> tuple[str, str] | None:
         if not self._show_sensors:
@@ -3349,6 +3354,8 @@ class MechanismCanvas(QtWidgets.QWidget):
         if sensor_type == "point":
             return {"kind": sensor_type, "anchor": positions[0], "points": positions}
         if sensor_type in {"distance", "angle_horizontal", "angle_vertical"}:
+            if len(positions) < 2:
+                return None
             p1, p2 = positions[:2]
             anchor = QtCore.QPointF((p1.x() + p2.x()) * 0.5, (p1.y() + p2.y()) * 0.5)
             return {"kind": sensor_type, "anchor": anchor, "points": [p1, p2]}
@@ -3360,6 +3367,8 @@ class MechanismCanvas(QtWidgets.QWidget):
                     sum(point.y() for point in positions[:4]) / 4.0,
                 )
             return {"kind": sensor_type, "anchor": intersection, "points": positions[:4]}
+        if sensor_type == "angle_vector":
+            return None
         anchor = positions[0]
         return {"kind": sensor_type, "anchor": anchor, "points": positions}
 

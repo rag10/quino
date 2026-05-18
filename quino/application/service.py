@@ -641,6 +641,12 @@ class ApplicationService:
         except ValueError:
             return None
 
+    def _bar_length(self, body: Body) -> float:
+        return self.bodies._bar_length(body)
+
+    def _bar_com_percent(self, body: Body) -> float:
+        return self.bodies._bar_com_percent(body)
+
     def joint_friction_mode(self, joint: Joint) -> str | None:
         return self.joints.joint_friction_mode(joint)
 

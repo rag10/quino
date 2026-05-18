@@ -2325,6 +2325,59 @@ def test_sensor_scope_can_be_dragged_and_persisted() -> None:
     qt_app.processEvents()
 
 
+def test_canvas_drag_render_survives_incomplete_sensor_geometry() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_body("Body", [MarkerInput("0 mm", "0 mm", "P")])
+    marker_id = next(marker.id for marker in window.app_service._find_body(body_id).markers if marker.name == "P")
+    window.app_service.create_sensor("BrokenDist", "distance", [marker_id])
+    window.refresh_all()
+    qt_app.processEvents()
+
+    pos = window.canvas.screen_position_for_entity(marker_id)
+    assert pos is not None
+    QtTest.QTest.mousePress(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=pos)
+    QtTest.QTest.mouseMove(window.canvas, pos + QtCore.QPoint(20, 10))
+    QtTest.QTest.mouseRelease(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=pos + QtCore.QPoint(20, 10))
+    qt_app.processEvents()
+
+    assert window.canvas.screen_position_for_entity(marker_id) is not None
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_canvas_dragging_bar_marker_keeps_canvas_rendering() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+
+    body_id = window.app_service.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    marker_b = next(marker.id for marker in window.app_service._find_body(body_id).markers if marker.name == "B")
+    window.refresh_all()
+    qt_app.processEvents()
+
+    pos = window.canvas.screen_position_for_entity(marker_b)
+    assert pos is not None
+    QtTest.QTest.mousePress(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=pos)
+    QtTest.QTest.mouseMove(window.canvas, pos + QtCore.QPoint(40, 15))
+    qt_app.processEvents()
+
+    markers = window.canvas._collect_markers(
+        window.app_service.project,
+        window.canvas._assembled_mechanism(window.app_service.project),
+    )
+    assert any(marker.entity_id == marker_b for marker in markers)
+
+    QtTest.QTest.mouseRelease(window.canvas, QtCore.Qt.MouseButton.LeftButton, pos=pos + QtCore.QPoint(40, 15))
+    window.close()
+    qt_app.processEvents()
+
+
 def test_coincident_on_line_click_uses_entity_reference() -> None:
     """Clicking a line in COINCIDENT mode should treat it as a geometric target."""
     from quino.domain.types import SketchEntityType
