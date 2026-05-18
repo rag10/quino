@@ -30,6 +30,21 @@ Reglas:
 - `EntityCommands` recibe referencias directas a los otros command-services (DI) porque `update_property` y `delete_entity` despachan a todos.
 - La fachada conserva los métodos públicos originales como delegaciones de 1 línea (compatibilidad con GUI y tests).
 
+## Sketch solver
+El motor del modo Sketch vive en `quino/services/sketch_solving/`:
+- `facade.py` — `SketchSolver` (despacha al backend según preferencia)
+- `solvespace_backend.py` — adapter sobre `python-solvespace` (default)
+- `legacy_backend.py` — solver iterativo propio (opt-in fallback)
+- `constraint_mapping.py` — traduce cada `SketchConstraintType` al constraint nativo
+- `_auxiliary_geometry.py` — emite líneas H/V invisibles para `HORIZONTAL_DISTANCE`/`VERTICAL_DISTANCE`
+
+El backend se elige con `ApplicationService(sketch_solver_backend="solvespace"|"legacy")` (default `"solvespace"`) o, en GUI, vía Edit → Preferences. La preferencia se persiste con `QtCore.QSettings("QUINO", "QUINO")` envuelto en `quino/gui/preferences.py`. Hot-swap: `app_service.set_sketch_solver_backend(name)` reinstancia el solver sin reiniciar.
+
+Notas:
+- `quino/services/sketch_solver.py` queda como re-export shim (compat).
+- Solvespace mantiene radios de circles/arcs locked vía `sys.diameter()` salvo cuando un constraint RADIUS user los gobierna.
+- 6 tests en `tests/test_application.py` están pineados al backend legacy: 3 por divergencia de bias en sketches under-constrained, 3 por gaps de tangencia en el binding `python-solvespace` (ver `sketch_solver_backend="legacy"` inline en esos tests).
+
 ## Glosario de dominio
 - **Body**: rígido (bar, point_mass, ground_anchor).
 - **Marker**: punto material anclado a un body (incluye COM y end-effectors).
@@ -50,6 +65,7 @@ Reglas:
 - `quino/gui/main_window.py` 4532 LOC (Fase 4 pendiente)
 - `quino/solver_adapters/exudyn_adapter.py` 1684 LOC (Fase 4 pendiente)
 - `quino/application/service.py` 863 LOC (Fase 2 ✓ — antes 3258)
+- `quino/services/sketch_solving/legacy_backend.py` ~530 LOC (movido desde sketch_solver.py al migrar a Solvespace)
 
 ## Comandos
 - Tests: `pytest tests/ -q`
