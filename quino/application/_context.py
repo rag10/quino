@@ -27,3 +27,6 @@ class ServiceContext:
     validation: ValidationService
     find_entity: Callable[[str], object]
     sync_all_special_com_markers: Callable[[], None]
+    load_expression_variables: Callable[..., dict]
+    build_validated_scalar_property: Callable[[object, str, str], object]
+    assign_scalar_property: Callable[[object, str, object], None]

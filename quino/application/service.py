@@ -53,6 +53,7 @@ from quino.domain.types import (
 )
 from quino.application._context import ServiceContext
 from quino.application.commands.parameter_commands import ParameterCommands
+from quino.application.commands.force_commands import ForceCommands
 from quino.serialization.json_io import JsonMapper
 from quino.pose.geometry import create_reference_pose as build_reference_pose
 from quino.pose.model import PoseConstraint, PoseSolveResult, PoseSolveSettings
@@ -112,8 +113,12 @@ class ApplicationService:
             validation=self.validation_service,
             find_entity=self._find_entity,
             sync_all_special_com_markers=self._sync_all_special_com_markers,
+            load_expression_variables=self._kinematic_validator.load_expression_variables,
+            build_validated_scalar_property=self._build_validated_scalar_property,
+            assign_scalar_property=self._assign_scalar_property,
         )
         self.parameters = ParameterCommands(self._service_context)
+        self.forces = ForceCommands(self._service_context)
 
     def new_project(self, name: str) -> Project:
         self.id_service = IdService()
@@ -3050,84 +3055,25 @@ class ApplicationService:
             )
 
     def create_sensor(self, name: str, sensor_type: str, marker_ids: list[str]) -> str:
-        if self.project is None:
-            raise ValueError("No project loaded")
-        sensor_id = self.id_service.new("sensor")
-        sensor = Sensor(
-            id=sensor_id,
-            name=name,
-            type=SensorType(sensor_type),
-            marker_ids=marker_ids,
-            metadata=Metadata(),
-        )
-        self._snapshot()
-        self.project.model.sensors.append(sensor)
-        return sensor_id
+        return self.forces.create_sensor(name, sensor_type, marker_ids)
 
     def delete_sensor(self, sensor_id: str) -> None:
-        if self.project is None:
-            raise ValueError("No project loaded")
-        self._snapshot()
-        self.project.model.sensors = [s for s in self.project.model.sensors if s.id != sensor_id]
+        self.forces.delete_sensor(sensor_id)
 
     def rename_sensor(self, sensor_id: str, name: str) -> None:
-        if self.project is None:
-            raise ValueError("No project loaded")
-        sensor = next((s for s in self.project.model.sensors if s.id == sensor_id), None)
-        if sensor is not None:
-            self._snapshot()
-            sensor.name = name
+        self.forces.rename_sensor(sensor_id, name)
 
     def create_load(self, name: str, marker_id: str, fx_expression: str, fy_expression: str) -> str:
-        if self.project is None:
-            raise ValueError("No project loaded")
-        self.validation_service.ensure_unique_name(self.project.model.loads, name)
-        load_id = self.id_service.new("load")
-        fx = ScalarProperty(expression=fx_expression, unit="N", expected_dimension=Dimension.FORCE)
-        fy = ScalarProperty(expression=fy_expression, unit="N", expected_dimension=Dimension.FORCE)
-        variables = self._kinematic_validator.load_expression_variables(self.project, time_value=0.0)
-        self.expression_service.evaluate_property(fx, self.project.parameters, variables=variables)
-        self.expression_service.evaluate_property(fy, self.project.parameters, variables=variables)
-        load = Load(
-            id=load_id,
-            name=name,
-            target_marker_id=marker_id,
-            fx=fx,
-            fy=fy,
-            metadata=Metadata(),
-        )
-        self._snapshot()
-        self.project.model.loads.append(load)
-        return load_id
+        return self.forces.create_load(name, marker_id, fx_expression, fy_expression)
 
     def delete_load(self, load_id: str) -> None:
-        if self.project is None:
-            raise ValueError("No project loaded")
-        self._snapshot()
-        self.project.model.loads = [ld for ld in self.project.model.loads if ld.id != load_id]
+        self.forces.delete_load(load_id)
 
     def rename_load(self, load_id: str, name: str) -> None:
-        if self.project is None:
-            raise ValueError("No project loaded")
-        load = next((ld for ld in self.project.model.loads if ld.id == load_id), None)
-        if load is not None:
-            self._snapshot()
-            load.name = name
+        self.forces.rename_load(load_id, name)
 
     def update_load_property(self, load_id: str, property_path: str, expression: str) -> None:
-        if self.project is None:
-            raise ValueError("No project loaded")
-        load = next((ld for ld in self.project.model.loads if ld.id == load_id), None)
-        if load is None:
-            raise ValueError(f"Load {load_id} not found")
-        scalar = self._build_validated_scalar_property(load, property_path, expression)
-        self.expression_service.evaluate_property(
-            scalar,
-            self.project.parameters,
-            variables=self._kinematic_validator.load_expression_variables(self.project, time_value=0.0),
-        )
-        self._snapshot()
-        self._assign_scalar_property(load, property_path, scalar)
+        self.forces.update_load_property(load_id, property_path, expression)
 
     # ------------------------------------------------------------------ springs
 
@@ -3138,95 +3084,25 @@ class ApplicationService:
         endpoint_a: SpringEndpoint,
         endpoint_b: SpringEndpoint,
     ) -> str:
-        project = self._require_project()
-        spring_id = self.id_service.new("spring")
-        is_rotational = spring_type in ("rotational_spring", "rotational_actuator")
-        rest_value = ScalarProperty(
-            expression="0 deg" if is_rotational else "0 mm",
-            unit="deg" if is_rotational else "mm",
-            expected_dimension=Dimension.ANGLE if is_rotational else Dimension.LENGTH,
-        )
-        law = None
-        if spring_type in ("linear_actuator", "rotational_actuator"):
-            law = ScalarProperty(
-                expression="0 N*mm" if is_rotational else "0 N",
-                unit="N*mm" if is_rotational else "N",
-                expected_dimension=Dimension.TORQUE if is_rotational else Dimension.FORCE,
-            )
-        spring = Spring(
-            id=spring_id,
-            name=name,
-            spring_type=SpringType(spring_type),
-            endpoint_a=endpoint_a,
-            endpoint_b=endpoint_b,
-            rest_value=rest_value,
-            law=law,
-            metadata=Metadata({"stiffness": 0.0, "damping": 0.0}),
-        )
-        self._snapshot()
-        project.model.springs.append(spring)
-        return spring_id
+        return self.forces.create_spring(name, spring_type, endpoint_a, endpoint_b)
 
     def delete_spring(self, spring_id: str) -> None:
-        project = self._require_project()
-        self._snapshot()
-        project.model.springs = [sp for sp in project.model.springs if sp.id != spring_id]
+        self.forces.delete_spring(spring_id)
 
     def rename_spring(self, spring_id: str, name: str) -> None:
-        spring = self._require_spring(spring_id)
-        self._snapshot()
-        spring.name = name
+        self.forces.rename_spring(spring_id, name)
 
     def get_spring(self, spring_id: str) -> Spring:
-        return self._require_spring(spring_id)
+        return self.forces.get_spring(spring_id)
 
     def spring_stiffness(self, spring: Spring) -> float:
-        try:
-            return float(spring.metadata.values.get("stiffness", 0.0))
-        except (TypeError, ValueError):
-            return 0.0
+        return self.forces.spring_stiffness(spring)
 
     def spring_damping(self, spring: Spring) -> float:
-        try:
-            return float(spring.metadata.values.get("damping", 0.0))
-        except (TypeError, ValueError):
-            return 0.0
+        return self.forces.spring_damping(spring)
 
     def update_spring_property(self, spring_id: str, property_path: str, value: "PropertyValueInput") -> None:
-        spring = self._require_spring(spring_id)
-        project = self._require_project()
-        if value.kind != "expression" or not isinstance(value.value, str):
-            raise ValueError(f"{property_path} requires an expression value")
-        if property_path in ("stiffness", "damping"):
-            try:
-                numeric = float(value.value.strip().replace(",", "."))
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f"{property_path} must be a plain number") from exc
-            self._snapshot()
-            spring.metadata.values[property_path] = numeric
-            return
-        if property_path == "rest_value":
-            is_rotational = spring.spring_type in (SpringType.ROTATIONAL_SPRING, SpringType.ROTATIONAL_ACTUATOR)
-            scalar = self._scalar(value.value, "deg" if is_rotational else "mm", Dimension.ANGLE if is_rotational else Dimension.LENGTH)
-            self.expression_service.evaluate_property(scalar, project.parameters)
-            self._snapshot()
-            spring.rest_value = scalar
-            return
-        if property_path == "law":
-            is_rotational = spring.spring_type in (SpringType.ROTATIONAL_ACTUATOR,)
-            scalar = self._scalar(value.value, "N*mm" if is_rotational else "N", Dimension.TORQUE if is_rotational else Dimension.FORCE)
-            self.expression_service.evaluate_property(
-                scalar, project.parameters,
-                variables={"t": self.expression_service.unit_service.quantity(0.0, "s")},
-            )
-            self._snapshot()
-            spring.law = scalar
-            return
-        raise ValueError(f"Unknown spring property: {property_path}")
+        self.forces.update_spring_property(spring_id, property_path, value)
 
     def _require_spring(self, spring_id: str) -> Spring:
-        project = self._require_project()
-        spring = next((sp for sp in project.model.springs if sp.id == spring_id), None)
-        if spring is None:
-            raise ValueError(f"Spring {spring_id} not found")
-        return spring
+        return self.forces._require_spring(spring_id)
