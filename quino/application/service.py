@@ -53,6 +53,7 @@ from quino.application.commands.pose_commands import PoseCommands
 from quino.application.commands.sketch_commands import SketchCommands
 from quino.application.commands.body_commands import BodyCommands
 from quino.application.commands.joint_commands import JointCommands
+from quino.application.commands.entity_commands import EntityCommands
 from quino.serialization.json_io import JsonMapper
 from quino.pose.model import PoseConstraint, PoseSolveResult, PoseSolveSettings
 from quino.pose.runner import PoseRunner
@@ -89,7 +90,6 @@ class ApplicationService:
         self._undo_stack: list[Project] = []
         self._redo_stack: list[Project] = []
         self._in_operation = False
-        self._entity_index: dict[str, object] | None = None
         self.sketch_solver = SketchSolver(self.expression_service, self.unit_service)
         self.simulation_runner = SimulationRunner(ExudynAdapter(self.expression_service))
         self.pose_runner = PoseRunner(ExudynPoseAdapter(self.expression_service))
@@ -123,11 +123,24 @@ class ApplicationService:
         self.sketch = SketchCommands(self._service_context, self.sketch_solver)
         self.bodies = BodyCommands(self._service_context)
         self.joints = JointCommands(self._service_context)
+        self.entities = EntityCommands(
+            self._service_context,
+            bodies=self.bodies,
+            joints=self.joints,
+            sketch=self.sketch,
+            forces=self.forces,
+            parameters=self.parameters,
+            poses=self.poses,
+        )
         # Rewire context callables to their canonical implementations
         self._service_context.sync_all_special_com_markers = self.bodies.sync_all_special_com_markers
         self._service_context.connect_marker_to_ground = self.joints.connect_marker_to_ground
         self._service_context.joints_for_marker = self.joints._joints_for_marker
         self._service_context.translate_direct_joint_counterparts = self.joints._translate_direct_joint_counterparts
+        self._service_context.find_entity = self.entities._find_entity
+        self._service_context.build_validated_scalar_property = self.entities._build_validated_scalar_property
+        self._service_context.assign_scalar_property = self.entities._assign_scalar_property
+        self._service_context.apply_style_update = self.entities._apply_style_update
 
     def new_project(self, name: str) -> Project:
         self.id_service = IdService()
@@ -448,10 +461,7 @@ class ApplicationService:
         return self.joints.connect_marker_to_slider(marker_id, slider_id, joint_type, name, align)
 
     def rename_entity(self, entity_id: str, new_name: str) -> None:
-        entity = self._find_entity(entity_id)
-        self._validate_entity_name(entity, new_name)
-        self._snapshot()
-        self._rename_entity_no_snapshot(entity, new_name)
+        return self.entities.rename_entity(entity_id, new_name)
 
     def set_sketch_visible(self, visible: bool) -> None:
         return self.sketch.set_sketch_visible(visible)
@@ -470,223 +480,16 @@ class ApplicationService:
         return self.bodies.move_marker(marker_id, x_expression, y_expression)
 
     def update_property(self, entity_id: str, property_path: str, value: PropertyValueInput) -> None:
-        if entity_id == "__gravity__":
-            self._update_gravity_property(property_path, value)
-            return
-        entity = self._find_entity(entity_id)
-        if isinstance(entity, Marker) and entity.type is MarkerType.COM:
-            body = self._find_body_by_marker(entity.id)
-            if property_path in {"x", "y"}:
-                if body.type is BodyType.POINT_MASS:
-                    raise ValueError("CoM of a point mass cannot be moved independently")
-                if body.type is BodyType.BAR:
-                    raise ValueError("Bar CoM must be edited with position_percent or position_distance")
-            if body.type is BodyType.BAR and property_path in {"position_percent", "position_distance"}:
-                self._update_bar_com_property(body, property_path, value)
-                return
-        if isinstance(entity, Joint) and property_path in {"friction_coulomb", "friction_viscous", "friction_pin_radius"}:
-            self._update_joint_friction_property(entity, property_path, value)
-            return
-        if isinstance(entity, Spring) and property_path in {"stiffness", "damping", "rest_value", "law"}:
-            self.update_spring_property(entity.id, property_path, value)
-            return
-        if isinstance(entity, Marker) and property_path in {"x", "y"}:
-            if value.kind != "expression" or not isinstance(value.value, str):
-                raise ValueError("Marker coordinates require an expression value")
-            target_x = value.value if property_path == "x" else entity.x.expression
-            target_y = value.value if property_path == "y" else entity.y.expression
-            self.move_marker(entity.id, target_x, target_y)
-            return
-        if isinstance(entity, Slider) and property_path in {"origin_x", "origin_y"}:
-            if value.kind != "expression" or not isinstance(value.value, str):
-                raise ValueError("Slider origin coordinates require an expression value")
-            target_x = value.value if property_path == "origin_x" else entity.origin_x.expression
-            target_y = value.value if property_path == "origin_y" else entity.origin_y.expression
-            self._move_slider_origin(entity.id, target_x, target_y)
-            return
-        if isinstance(entity, Slider) and property_path == "angle":
-            if value.kind != "expression" or not isinstance(value.value, str):
-                raise ValueError("Slider angle requires an expression value")
-            self._rotate_slider(entity.id, value.value)
-            return
-        if property_path == "name":
-            if value.kind != "expression" or not isinstance(value.value, str):
-                raise ValueError("Name updates require an expression/string value")
-            self._validate_entity_name(entity, value.value)
-            self._snapshot()
-            self._rename_entity_no_snapshot(entity, value.value)
-            return
-        if property_path == "edge_order":
-            if not isinstance(entity, Body):
-                raise ValueError("edge_order only applies to Body")
-            if value.kind != "expression" or not isinstance(value.value, str):
-                raise ValueError("edge_order updates require a comma-separated expression/string value")
-            edge_order = self._validated_edge_order(entity, value.value)
-            self._snapshot()
-            entity.edge_order = edge_order
-            return
-        if property_path in {"visible", "closed_shape"}:
-            if value.kind != "boolean" or not isinstance(value.value, bool):
-                raise ValueError("Boolean property requires a boolean input")
-            self._snapshot()
-            setattr(entity, property_path, value.value)
-            return
-        if property_path in {"mass", "travel_min", "travel_max"} and value.kind == "null":
-            self._snapshot()
-            setattr(entity, property_path, None)
-            return
-        if property_path.startswith("style."):
-            self._apply_style_update(entity, property_path, value)
-            return
-        if property_path == "law":
-            if not isinstance(entity, Driver):
-                raise ValueError("law only applies to Driver")
-            if value.kind != "expression" or not isinstance(value.value, str):
-                raise ValueError("Driver law requires an expression value")
-            law = ScalarProperty(
-                expression=value.value,
-                unit=entity.law.unit,
-                expected_dimension=entity.law.expected_dimension,
-            )
-            self.expression_service.evaluate_property(
-                law,
-                self._require_project().parameters,
-                variables={"t": self.unit_service.quantity(0.0, "s")},
-            )
-            self._snapshot()
-            entity.law = law
-            return
-        if value.kind != "expression" or not isinstance(value.value, str):
-            raise ValueError("Scalar properties require an expression value")
-        scalar = self._build_validated_scalar_property(entity, property_path, value.value)
-        self._snapshot()
-        self._assign_scalar_property(entity, property_path, scalar)
+        return self.entities.update_property(entity_id, property_path, value)
 
     def add_gravity(self) -> None:
-        project = self._require_project()
-        if project.model.gravity is not None:
-            return
-        self._snapshot()
-        project.model.gravity = GravityLoad()
+        return self.entities.add_gravity()
 
     def delete_gravity(self) -> None:
-        project = self._require_project()
-        if project.model.gravity is None:
-            return
-        self._snapshot()
-        project.model.gravity = None
+        return self.entities.delete_gravity()
 
     def delete_entity(self, entity_id: str) -> None:
-        if entity_id == "__gravity__":
-            self.delete_gravity()
-            return
-        project = self._require_project()
-        if project.sketch is not None and entity_id in project.sketch.entities:
-            self.delete_sketch_entity(entity_id)
-            return
-        if project.sketch is not None and entity_id in project.sketch.constraints:
-            self.delete_sketch_constraint(entity_id)
-            return
-        if any(body.id == entity_id for body in project.model.bodies):
-            self._snapshot()
-            body = self._find_body(entity_id)
-            marker_ids = {marker.id for marker in body.markers}
-            removed_joint_ids = {
-                joint.id
-                for joint in project.model.joints
-                if joint.endpoint_a.marker_id in marker_ids or joint.endpoint_b.marker_id in marker_ids
-            }
-            project.model.joints = [
-                joint
-                for joint in project.model.joints
-                if joint.endpoint_a.marker_id not in marker_ids and joint.endpoint_b.marker_id not in marker_ids
-            ]
-            project.model.drivers = [
-                driver for driver in project.model.drivers if driver.target_joint_id not in removed_joint_ids
-            ]
-            project.model.loads = [
-                load for load in project.model.loads if load.target_marker_id not in marker_ids
-            ]
-            project.model.bodies = [item for item in project.model.bodies if item.id != entity_id]
-            self._invalidate_pose_state()
-            return
-        if any(slider.id == entity_id for slider in project.model.sliders):
-            self._snapshot()
-            slider_joint_ids = {
-                joint.id
-                for joint in project.model.joints
-                if joint.endpoint_a.slider_id == entity_id or joint.endpoint_b.slider_id == entity_id
-            }
-            project.model.joints = [
-                joint
-                for joint in project.model.joints
-                if joint.endpoint_a.slider_id != entity_id and joint.endpoint_b.slider_id != entity_id
-            ]
-            project.model.drivers = [
-                driver for driver in project.model.drivers if driver.target_joint_id not in slider_joint_ids
-            ]
-            project.model.sliders = [item for item in project.model.sliders if item.id != entity_id]
-            self._invalidate_pose_state()
-            return
-        if any(joint.id == entity_id for joint in project.model.joints):
-            self._snapshot()
-            project.model.joints = [item for item in project.model.joints if item.id != entity_id]
-            project.model.drivers = [driver for driver in project.model.drivers if driver.target_joint_id != entity_id]
-            self._invalidate_pose_state()
-            return
-        if any(driver.id == entity_id for driver in project.model.drivers):
-            self._snapshot()
-            project.model.drivers = [item for item in project.model.drivers if item.id != entity_id]
-            self._cleanup_driver_velocities({entity_id})
-            return
-        if any(load.id == entity_id for load in project.model.loads):
-            self._snapshot()
-            project.model.loads = [item for item in project.model.loads if item.id != entity_id]
-            return
-        if any(sensor.id == entity_id for sensor in project.model.sensors):
-            self._snapshot()
-            project.model.sensors = [item for item in project.model.sensors if item.id != entity_id]
-            return
-        if any(spring.id == entity_id for spring in project.model.springs):
-            self._snapshot()
-            project.model.springs = [item for item in project.model.springs if item.id != entity_id]
-            return
-        body = self._find_body_by_marker(entity_id)
-        if any(marker.id == entity_id and marker.type is MarkerType.COM for marker in body.markers):
-            raise ValueError("CoM marker cannot be deleted")
-        if len(body.structural_markers()) <= 1:
-            raise ValueError("The last structural marker of a body cannot be deleted")
-        self._snapshot()
-        removed_joint_ids = {
-            joint.id
-            for joint in project.model.joints
-            if joint.endpoint_a.marker_id == entity_id or joint.endpoint_b.marker_id == entity_id
-        }
-        body.markers = [marker for marker in body.markers if marker.id != entity_id]
-        body.edge_order = [marker_id for marker_id in body.edge_order if marker_id != entity_id]
-        project.model.joints = [
-            joint
-            for joint in project.model.joints
-            if joint.endpoint_a.marker_id != entity_id and joint.endpoint_b.marker_id != entity_id
-        ]
-        project.model.drivers = [
-            driver for driver in project.model.drivers if driver.target_joint_id not in removed_joint_ids
-        ]
-        project.model.sensors = [
-            sensor
-            for sensor in project.model.sensors
-            if entity_id not in sensor.marker_ids
-        ]
-        project.model.loads = [
-            load for load in project.model.loads if load.target_marker_id != entity_id
-        ]
-        if len(body.structural_markers()) == 1:
-            body.type = BodyType.POINT_MASS
-            body.closed_shape = False
-        elif body.type is BodyType.BODY and len(body.structural_markers()) == 2:
-            body.closed_shape = True
-        self._sync_special_com_marker(body)
-        self._invalidate_pose_state()
+        return self.entities.delete_entity(entity_id)
 
     def validate_model(self, duration: float = 1.0, steps: int = 20) -> ValidationReport:
         project = self._require_project()
@@ -738,7 +541,7 @@ class ApplicationService:
         if self.project is not None:
             self._redo_stack.append(copy.deepcopy(self.project))
         self.project = self._undo_stack.pop()
-        self._entity_index = None
+        self.entities.invalidate_index()
         self.poses.clear_current()
         return True
 
@@ -748,7 +551,7 @@ class ApplicationService:
         if self.project is not None:
             self._undo_stack.append(copy.deepcopy(self.project))
         self.project = self._redo_stack.pop()
-        self._entity_index = None
+        self.entities.invalidate_index()
         self.poses.clear_current()
         return True
 
@@ -761,7 +564,7 @@ class ApplicationService:
         if self.project is not None and not self._in_operation:
             self._undo_stack.append(copy.deepcopy(self.project))
             self._redo_stack.clear()
-            self._entity_index = None
+            self.entities.invalidate_index()
             self.sketch.invalidate_cache()
 
     def _invalidate_pose_state(self) -> None:
@@ -777,12 +580,7 @@ class ApplicationService:
             self.project.simulation_initial_pose_id = None
 
     def _cleanup_driver_velocities(self, removed_driver_ids: set[str]) -> None:
-        if not removed_driver_ids or self.project is None:
-            return
-        for pose in self.project.poses:
-            for driver_id in list(pose.initial_velocities.keys()):
-                if driver_id in removed_driver_ids:
-                    pose.initial_velocities.pop(driver_id, None)
+        return self.entities._cleanup_driver_velocities(removed_driver_ids)
 
     def _operation(self):
         """Context manager that takes a single snapshot for the whole operation."""
@@ -800,10 +598,10 @@ class ApplicationService:
         return _ctx()
 
     def _scalar(self, expression: str, unit: str, dimension: Dimension) -> ScalarProperty:
-        return ScalarProperty(expression=expression, unit=unit, expected_dimension=dimension)
+        return self.entities._scalar(expression, unit, dimension)
 
     def _mm_expression(self, value: float) -> str:
-        return f"{value:.6g} mm"
+        return self.entities._mm_expression(value)
 
     # --- Body helper back-compat shims ----------------------------------------
     # Canonical implementations live in BodyCommands; these shims keep existing
@@ -832,24 +630,11 @@ class ApplicationService:
         return self.bodies._find_body_by_marker(marker_id)
 
     def _normalize_angle_expression(self, expression: str) -> str:
-        stripped = expression.strip()
-        if self._PLAIN_NUMBER_RE.fullmatch(stripped):
-            return f"{stripped} deg"
-        return expression
+        return self.entities._normalize_angle_expression(expression)
 
     def _is_literal_expression(self, expression: str) -> bool:
         """Return True if expression is a plain number with optional unit (no parameters)."""
-        cleaned = expression.strip()
-        # Strip known unit suffixes
-        for unit in ("mm", "m", "deg", "rad", "s"):
-            if cleaned.endswith(unit):
-                cleaned = cleaned[: -len(unit)].strip()
-                break
-        try:
-            float(cleaned)
-            return True
-        except ValueError:
-            return False
+        return self.entities._is_literal_expression(expression)
 
     def _make_endpoint(self, endpoint: JointEndpointInput) -> JointEndpoint:
         return self.joints._make_endpoint(endpoint)
@@ -879,58 +664,15 @@ class ApplicationService:
         return self.joints._find_joint(joint_id)
 
     def _build_entity_index(self) -> dict[str, object]:
-        project = self._require_project()
-        index: dict[str, object] = {}
-        if project.sketch is not None:
-            index[project.sketch.id] = project.sketch
-            for entity in project.sketch.entities.values():
-                index[entity.id] = entity
-            for constraint in project.sketch.constraints.values():
-                index[constraint.id] = constraint
-        for collection in (
-            project.model.bodies,
-            project.model.joints,
-            project.model.sliders,
-            project.model.drivers,
-            project.model.loads,
-            project.model.sensors,
-            project.model.springs,
-            project.parameters,
-        ):
-            for entity in collection:
-                index[entity.id] = entity
-        for body in project.model.bodies:
-            for marker in body.markers:
-                index[marker.id] = marker
-        return index
+        return self.entities._build_entity_index()
 
     def _find_entity(self, entity_id: str) -> object:
-        if entity_id == "__gravity__":
-            gravity = self._require_project().model.gravity
-            if gravity is None:
-                raise ValueError("No gravity in this project")
-            return gravity
-        if self._entity_index is None:
-            self._entity_index = self._build_entity_index()
-        entity = self._entity_index.get(entity_id)
-        if entity is not None:
-            return entity
-        raise ValueError(f"Unknown entity: {entity_id}")
+        return self.entities._find_entity(entity_id)
 
     # Public read-only query API -------------------------------------------------
     def get_entity(self, entity_id: str) -> object | None:
         """Return any entity by id, or None if not found."""
-        if entity_id == "__gravity__":
-            project = self.project
-            return project.model.gravity if project else None
-        if entity_id.startswith("__reaction__"):
-            joint_id = entity_id[len("__reaction__"):]
-            project = self.project
-            return project.reaction_outputs.get(joint_id) if project else None
-        try:
-            return self._find_entity(entity_id)
-        except ValueError:
-            return None
+        return self.entities.get_entity(entity_id)
 
     def get_body_by_marker(self, marker_id: str) -> Body | None:
         """Return the Body that owns the given marker, or None."""
@@ -961,58 +703,16 @@ class ApplicationService:
             return None
 
     def _build_validated_scalar_property(self, entity: object, property_path: str, expression: str) -> ScalarProperty:
-        dimension_map = {
-            "x": Dimension.LENGTH,
-            "y": Dimension.LENGTH,
-            "origin_x": Dimension.LENGTH,
-            "origin_y": Dimension.LENGTH,
-            "travel_min": Dimension.LENGTH,
-            "travel_max": Dimension.LENGTH,
-            "angle": Dimension.ANGLE,
-            "mass": Dimension.MASS,
-            "fx": Dimension.FORCE,
-            "fy": Dimension.FORCE,
-            "law": getattr(entity, "law", None).expected_dimension if isinstance(entity, Driver) else None,
-        }
-        if property_path not in dimension_map:
-            raise ValueError(f"Unsupported property path: {property_path}")
-        current = getattr(entity, property_path, None)
-        unit = "deg" if property_path == "angle" else "kg" if property_path == "mass" else "N" if property_path in ("fx", "fy") else "mm"
-        if current is not None and isinstance(current, ScalarProperty):
-            unit = current.unit
-        scalar = ScalarProperty(expression=expression, unit=unit, expected_dimension=dimension_map[property_path])
-        if property_path == "law":
-            variables = {"t": self.unit_service.quantity(0.0, "s")}
-        elif property_path in {"fx", "fy"}:
-            variables = self._kinematic_validator.load_expression_variables(self._require_project(), time_value=0.0)
-        else:
-            variables = None
-        self.expression_service.evaluate_property(scalar, self._require_project().parameters, variables=variables)
-        return scalar
+        return self.entities._build_validated_scalar_property(entity, property_path, expression)
 
     def _assign_scalar_property(self, entity: object, property_path: str, scalar: ScalarProperty) -> None:
-        setattr(entity, property_path, scalar)
-        if isinstance(entity, Body) and property_path == "mass":
-            value = self.expression_service.evaluate_property(scalar, self._require_project().parameters).value
-            entity.com_marker().visible = value != 0
+        return self.entities._assign_scalar_property(entity, property_path, scalar)
 
     def _rename_entity_no_snapshot(self, entity: object, new_name: str) -> None:
-        entity.name = new_name
+        return self.entities._rename_entity_no_snapshot(entity, new_name)
 
     def _update_gravity_property(self, path: str, value: PropertyValueInput) -> None:
-        gravity = self._require_project().model.gravity
-        if gravity is None:
-            raise ValueError("No gravity in this project")
-        if path not in {"magnitude", "direction_x", "direction_y"}:
-            raise ValueError(f"Unknown gravity property: {path}")
-        if value.kind != "expression":
-            raise ValueError(f"Gravity {path} requires a numeric expression")
-        try:
-            float_val = float(value.value)
-        except (ValueError, TypeError):
-            raise ValueError(f"Gravity {path} must be a number, got: {value.value!r}")
-        self._snapshot()
-        setattr(gravity, path, float_val)
+        return self.entities._update_gravity_property(path, value)
 
     def joint_friction_mode(self, joint: Joint) -> str | None:
         return self.joints.joint_friction_mode(joint)
@@ -1027,50 +727,10 @@ class ApplicationService:
         return self.joints._update_joint_friction_property(joint, path, value)
 
     def _apply_style_update(self, entity: object, property_path: str, value: PropertyValueInput) -> None:
-        field = property_path.split(".", 1)[1]
-        expected_type = self._STYLE_FIELD_TYPES.get(field)
-        if expected_type is None:
-            raise ValueError(f"Unknown style field: {field}")
-        if expected_type is bool and value.kind != "boolean":
-            raise ValueError(f"Style field '{field}' requires a boolean value")
-        if expected_type is str and value.kind != "expression":
-            raise ValueError(f"Style field '{field}' requires a string/expression value")
-        if expected_type is float and value.kind != "expression":
-            raise ValueError(f"Style field '{field}' requires a numeric expression")
-        if expected_type is float:
-            try:
-                float_value = float(value.value)
-            except Exception:
-                raise ValueError(f"Style field '{field}' requires a numeric value")
-            self._snapshot()
-            setattr(entity.style, field, float_value)
-            return
-        self._snapshot()
-        setattr(entity.style, field, value.value)
+        return self.entities._apply_style_update(entity, property_path, value)
 
     def _validate_entity_name(self, entity: object, new_name: str) -> None:
-        project = self._require_project()
-        if isinstance(entity, Sketch):
-            return
-        if isinstance(entity, (SketchPoint, SketchLineSegment, SketchCircle, SketchArc, SketchInfiniteLine)):
-            self.sketch._validate_sketch_entity_name(new_name, entity.id)
-        elif isinstance(entity, SketchConstraint):
-            self.sketch._validate_sketch_constraint_name(new_name, entity.id)
-        elif isinstance(entity, Body):
-            self.validation_service.ensure_unique_name(project.model.bodies, new_name, entity.id)
-        elif isinstance(entity, Joint):
-            self.validation_service.ensure_unique_name(project.model.joints, new_name, entity.id)
-        elif isinstance(entity, Slider):
-            self.validation_service.ensure_unique_name(project.model.sliders, new_name, entity.id)
-        elif isinstance(entity, Driver):
-            self.validation_service.ensure_unique_name(project.model.drivers, new_name, entity.id)
-        elif isinstance(entity, Sensor):
-            self.validation_service.ensure_unique_name(project.model.sensors, new_name, entity.id)
-        elif isinstance(entity, Parameter):
-            self.validation_service.ensure_unique_name(project.parameters, new_name, entity.id)
-        elif isinstance(entity, Marker):
-            body = self._find_body_by_marker(entity.id)
-            self.validation_service.ensure_unique_marker_name(body, new_name, entity.id)
+        return self.entities._validate_entity_name(entity, new_name)
 
     # --- Sketch helper back-compat shims --------------------------------------
     # The following methods used to live on ApplicationService and are referenced
@@ -1102,13 +762,7 @@ class ApplicationService:
         return self.sketch._current_sketch_constraint_label_position(constraint)
 
     def _validated_edge_order(self, body: Body, raw_value: str) -> list[str]:
-        requested_names = [item.strip() for item in raw_value.split(",") if item.strip()]
-        structural = body.structural_markers()
-        structural_names = [marker.name for marker in structural]
-        if sorted(requested_names) != sorted(structural_names):
-            raise ValueError("edge_order must list every structural marker name exactly once")
-        marker_by_name = {marker.name: marker.id for marker in structural}
-        return [marker_by_name[name] for name in requested_names]
+        return self.entities._validated_edge_order(body, raw_value)
 
     def _validate_parameter_definition(self, expression: str, unit: str, parameter_id: str | None = None) -> None:
         project = self._require_project()
