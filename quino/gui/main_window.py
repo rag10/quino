@@ -40,6 +40,7 @@ from quino.domain.model import (
 )
 from quino.gui.canvas import CanvasMode, MechanismCanvas
 from quino.gui.panels.poses_panel import PosesPanel
+from quino.gui.preferences import Preferences
 from quino.pose.geometry import assembled_reference_mechanism, marker_world_position, pose_to_state_overlay
 from quino.pose.kinematics import _pose_at_angle, build_drag_initial_pose, get_drag_driver, has_ground_revolute
 from quino.pose.model import PoseConstraint, PoseSolveResult, PoseSolveSettings
@@ -52,7 +53,12 @@ from quino.gui.widgets.inspector_widget import InspectorPropertyWidget
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, app_service: ApplicationService | None = None) -> None:
         super().__init__()
-        self.app_service = app_service or ApplicationService()
+        self._preferences = Preferences()
+        if app_service is None:
+            app_service = ApplicationService(
+                sketch_solver_backend=self._preferences.sketch_solver_backend,
+            )
+        self.app_service = app_service
         if self.app_service.project is None:
             self.app_service.new_project("Untitled")
 
@@ -1524,6 +1530,20 @@ class MainWindow(QtWidgets.QMainWindow):
         color_layout.addStretch()
         layout.addRow("Background color:", color_layout)
 
+        # Sketch solver selector
+        solver_combo = QtWidgets.QComboBox()
+        solver_combo.addItem("Solvespace", "solvespace")
+        solver_combo.addItem("Legacy (iterative)", "legacy")
+        current_backend = self._preferences.sketch_solver_backend
+        solver_index = solver_combo.findData(current_backend)
+        if solver_index >= 0:
+            solver_combo.setCurrentIndex(solver_index)
+        solver_combo.setToolTip(
+            "Solvespace is the recommended robust solver. "
+            "Legacy is the previous iterative solver, kept as an opt-in fallback."
+        )
+        layout.addRow("Sketch solver:", solver_combo)
+
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel
         )
@@ -1539,6 +1559,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.canvas.set_background_color(current_color)
             self.action_toggle_origin.setChecked(show_axes)
             self.action_toggle_grid.setChecked(self.canvas.show_grid())
+            new_backend = solver_combo.currentData()
+            if new_backend != self._preferences.sketch_solver_backend:
+                self._preferences.sketch_solver_backend = new_backend
+                self.app_service.set_sketch_solver_backend(new_backend)
+                self._append_message(f"Sketch solver changed to {new_backend}.")
 
     def _update_trajectories(self) -> None:
         project = self.app_service.project
