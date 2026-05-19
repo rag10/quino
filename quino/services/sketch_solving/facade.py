@@ -28,3 +28,6 @@ class SketchSolver:
 
     def solve(self, project: Project, **kwargs) -> SketchSolveResult:
         return self._backend.solve(project, **kwargs)
+
+    def analyze_dof(self, project: Project):
+        return self._backend.analyze_dof(project)

@@ -255,3 +255,191 @@ class SolvespaceBackend:
     def _read_point(sys, handle) -> tuple[float, float]:
         params = sys.params(handle.params)
         return (float(params[0]), float(params[1]))
+
+    def analyze_dof(self, project: "Project") -> "DofResult":
+        """Per-point DOF analysis via Solvespace perturbation testing.
+
+        For each non-fixed SketchPoint and each axis, build a temp solver
+        system equivalent to the sketch with the test point initialised at a
+        perturbed location. If Solvespace lets the point stay near the
+        perturbation, the axis is free; if it pulls the point back, the axis
+        is constrained.
+        """
+        from quino.services.sketch_solving.base import DofResult
+
+        sketch = project.sketch
+        if sketch is None:
+            return DofResult({}, set(), set(), 0)
+
+        points = list(sketch.points())
+        if not points:
+            return DofResult({}, set(), set(), 0)
+
+        # Solve once to get reference positions and identify points that
+        # cannot meaningfully be tested (broken sketches).
+        ref_result = self.solve(project)
+        ref_positions = ref_result.positions if ref_result.success else {}
+
+        # Identify points fixed via FIX constraint (DOF=0 trivially, no test needed).
+        fixed_ids: set[str] = set()
+        for c in sketch.constraints.values():
+            if c.type is SketchConstraintType.FIX:
+                fixed_ids.update(c.references)
+
+        epsilon = 1.0  # mm of perturbation
+        threshold = epsilon * 0.3  # If the point ends within this of the target, the axis is free.
+
+        point_dof: dict[str, int] = {}
+        for p in points:
+            if p.id in fixed_ids:
+                point_dof[p.id] = 0
+                continue
+            ref_xy = ref_positions.get(p.id)
+            if ref_xy is None:
+                # Reference solve failed for this point — treat as fully free defensively.
+                point_dof[p.id] = 2
+                continue
+            free_axes = 0
+            for axis in (0, 1):
+                if self._axis_is_free(project, sketch, p.id, ref_xy, axis, epsilon, threshold):
+                    free_axes += 1
+            point_dof[p.id] = free_axes
+
+        fully_constrained_points = {pid for pid, dof in point_dof.items() if dof == 0}
+
+        fully_constrained_entities: set[str] = set()
+        for entity in sketch.entities.values():
+            ref_point_ids = self._entity_point_ids(entity)
+            if ref_point_ids and all(pid in fully_constrained_points for pid in ref_point_ids):
+                fully_constrained_entities.add(entity.id)
+
+        total_free_dof = sum(point_dof.values())
+        return DofResult(
+            point_dof=point_dof,
+            fully_constrained_point_ids=fully_constrained_points,
+            fully_constrained_entity_ids=fully_constrained_entities,
+            total_free_dof=total_free_dof,
+        )
+
+    def _axis_is_free(
+        self,
+        project: "Project",
+        sketch: "Sketch",
+        point_id: str,
+        ref_xy: tuple[float, float],
+        axis: int,
+        epsilon: float,
+        threshold: float,
+    ) -> bool:
+        """True if perturbing point along the given axis (0=X, 1=Y) results in
+        the solver leaving the point at the perturbed location."""
+        ref_x, ref_y = ref_xy
+        target = (
+            (ref_x + epsilon, ref_y) if axis == 0 else (ref_x, ref_y + epsilon)
+        )
+        try:
+            new_xy = self._solve_with_dragged_point(project, sketch, point_id, target)
+        except Exception:
+            return False
+        if new_xy is None:
+            return False
+        new_x, new_y = new_xy
+        if axis == 0:
+            return abs(new_x - target[0]) < threshold
+        return abs(new_y - target[1]) < threshold
+
+    def _solve_with_dragged_point(
+        self,
+        project: "Project",
+        sketch: "Sketch",
+        dragged_id: str,
+        target_xy: tuple[float, float],
+    ) -> tuple[float, float] | None:
+        """Build a fresh SolverSystem replicating the sketch with `dragged_id`
+        initialised at target_xy. The dragged point is otherwise free — solver
+        decides whether to keep it (axis free) or pull it back (constrained).
+
+        Returns the resolved (x, y) of the dragged point, or None on failure.
+        """
+        from quino.services.sketch_solving.constraint_mapping import emit_constraint
+
+        sys = ps.SolverSystem()
+        wp = sys.create_2d_base()
+        nm_3d = sys.entity(0)
+
+        fixed_ids: set[str] = set()
+        for c in sketch.constraints.values():
+            if c.type is SketchConstraintType.FIX:
+                fixed_ids.update(c.references)
+
+        point_handles: dict[str, object] = {}
+        for p in sketch.points():
+            if p.id == dragged_id:
+                # Initialise at perturbed target; otherwise FREE (no dragged()).
+                handle = sys.add_point_2d(target_xy[0], target_xy[1], wp)
+            else:
+                x, y = self._evaluate_point(project, p)
+                handle = sys.add_point_2d(x, y, wp)
+                if p.id in fixed_ids:
+                    sys.dragged(handle, wp)
+            point_handles[p.id] = handle
+
+        entity_handles: dict[str, object] = {}
+        radius_entities: dict[str, object] = {}
+        for entity in sketch.entities.values():
+            self._create_entity(
+                sys, wp, nm_3d, entity, point_handles, entity_handles, radius_entities, project,
+            )
+
+        constrained_radii: set[str] = set()
+        for c in sketch.constraints.values():
+            if c.type is SketchConstraintType.FIX:
+                continue
+            if c.type is SketchConstraintType.RADIUS:
+                constrained_radii.update(c.entity_references or [])
+                constrained_radii.update(c.references or [])
+            if c.type is SketchConstraintType.TANGENT:
+                constrained_radii.update(c.entity_references or [])
+            try:
+                emit_constraint(
+                    sys, wp, c,
+                    points=point_handles,
+                    entities=entity_handles,
+                    project=project,
+                    expressions=self._expressions,
+                    units=self._units,
+                )
+            except (ValueError, TypeError):
+                # Bad constraint — skip; the solve may still succeed for DOF purposes.
+                pass
+
+        for entity in sketch.entities.values():
+            if entity.id in constrained_radii:
+                continue
+            handle = entity_handles.get(entity.id)
+            if handle is None:
+                continue
+            if isinstance(entity, (SketchCircle, SketchArc)):
+                radius_mm = self._evaluate_radius(entity, project)
+                if radius_mm is not None:
+                    sys.diameter(handle, 2.0 * radius_mm)
+
+        result_code = sys.solve()
+        if result_code != ps.ResultFlag.OKAY:
+            return None
+        return self._read_point(sys, point_handles[dragged_id])
+
+    @staticmethod
+    def _entity_point_ids(entity) -> list[str]:
+        """Return the SketchPoint ids referenced by a SketchEntity."""
+        if isinstance(entity, SketchPoint):
+            return [entity.id]
+        if isinstance(entity, SketchLineSegment):
+            return [entity.start_point_id, entity.end_point_id]
+        if isinstance(entity, SketchInfiniteLine):
+            return [entity.point_a_id, entity.point_b_id]
+        if isinstance(entity, SketchCircle):
+            return [entity.center_point_id]
+        if isinstance(entity, SketchArc):
+            return [entity.center_point_id, entity.start_point_id, entity.end_point_id]
+        return []
