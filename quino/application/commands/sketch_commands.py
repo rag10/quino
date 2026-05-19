@@ -526,15 +526,36 @@ class SketchCommands:
         result = self._apply_sketch_constraints(set(), strict=True)
         if result.success:
             report.messages.append(ValidationMessage("info", "sketch_solved", "Sketch solved", None))
-        else:
-            report.messages.append(
-                ValidationMessage(
-                    "warning",
-                    "sketch_not_solved",
-                    result.message or "Sketch solver did not converge",
-                    None,
+            return report
+
+        # Translate UUID-based bad_constraints into human descriptions.
+        sketch = self._project.sketch
+        if sketch is not None and result.bad_constraints:
+            for cid in result.bad_constraints:
+                constraint = sketch.constraints.get(cid)
+                if constraint is None:
+                    continue
+                detail = result.bad_constraint_details.get(cid, "constraint could not be applied")
+                label = constraint.name or constraint.type.value
+                report.messages.append(
+                    ValidationMessage(
+                        "warning",
+                        "sketch_constraint_failed",
+                        f"{label}: {detail}",
+                        None,
+                    )
                 )
+            return report
+
+        # Solver failed without per-constraint bad list (overall convergence)
+        report.messages.append(
+            ValidationMessage(
+                "warning",
+                "sketch_not_solved",
+                result.message or "Sketch solver did not converge",
+                None,
             )
+        )
         return report
 
     def update_sketch_entity(self, entity_id: str, property_path: str, value: PropertyValueInput) -> None:

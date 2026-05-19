@@ -109,6 +109,7 @@ class SolvespaceBackend:
         # Emit geometric constraints (FIX is already handled above via dragged).
         from quino.services.sketch_solving.constraint_mapping import emit_constraint
         bad_constraints: list[str] = []
+        bad_constraint_details: dict[str, str] = {}
         constrained_radii: set[str] = set()
         for c in sketch.constraints.values():
             if c.type is SketchConstraintType.FIX:
@@ -131,12 +132,13 @@ class SolvespaceBackend:
                     expressions=self._expressions,
                     units=self._units,
                 )
-            except (ValueError, TypeError):
+            except (ValueError, TypeError) as exc:
                 # ValueError: malformed constraint (handled by mapping).
                 # TypeError: python-solvespace native rejection (e.g. tangent
                 # called with circle entities, which is not yet supported by
                 # the C++ kernel binding). Mark as bad rather than crashing.
                 bad_constraints.append(c.id)
+                bad_constraint_details[c.id] = str(exc)
 
         # Lock the radius of every circle/arc that is NOT covered by a user RADIUS
         # constraint. Without this, the `add_distance` entity for the radius is a
@@ -175,9 +177,10 @@ class SolvespaceBackend:
             positions=positions,
             iterations=0,
             max_error=0.0 if success else math.inf,
-            message=None if success else f"Solvespace result: {result_code!r}; bad: {bad_constraints}",
+            message=None if success else f"Solver did not converge ({len(bad_constraints)} bad constraint{'s' if len(bad_constraints) != 1 else ''})",
             bad_constraints=bad_constraints,
             radius_updates=radius_updates,
+            bad_constraint_details=bad_constraint_details,
         )
 
     def _evaluate_point(self, project: Project, point: SketchPoint) -> tuple[float, float]:
