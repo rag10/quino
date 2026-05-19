@@ -10,6 +10,8 @@ _PROPERTY_DIMENSION_HINTS: dict[str, str] = {
     "origin_y": "length (e.g. 50 mm)",
     "travel_min": "length (e.g. 50 mm)",
     "travel_max": "length (e.g. 50 mm)",
+    "angle_limit_positive": "angle from model zero (e.g. 30 deg)",
+    "angle_limit_negative": "angle from model zero (e.g. 15 deg)",
     "angle": "angle (e.g. 90 deg)",
     "mass": "mass (e.g. 1.5 kg)",
 

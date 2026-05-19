@@ -177,6 +177,8 @@ class EntityCommands:
             "origin_y": Dimension.LENGTH,
             "travel_min": Dimension.LENGTH,
             "travel_max": Dimension.LENGTH,
+            "angle_limit_positive": Dimension.ANGLE,
+            "angle_limit_negative": Dimension.ANGLE,
             "angle": Dimension.ANGLE,
             "mass": Dimension.MASS,
             "fx": Dimension.FORCE,

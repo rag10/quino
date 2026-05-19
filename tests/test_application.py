@@ -160,6 +160,19 @@ def test_joint_duplicates_are_rejected() -> None:
         app.connect_marker_to_ground(marker_id, name="Ground_A2")
 
 
+def test_create_free_ground_creates_tagged_ground_anchor() -> None:
+    app = make_app()
+
+    body_id, marker_id = app.create_free_ground("Ground1", "10 mm", "20 mm")
+
+    body = app.get_body(body_id)
+    assert body is not None
+    assert body.metadata.values.get("ground_anchor") is True
+    assert body.metadata.values.get("ground_marker_id") == marker_id
+    internal_joint = next(joint for joint in app.project.model.joints if joint.metadata.values.get("internal_ground_anchor"))
+    assert internal_joint.endpoint_a.marker_id == marker_id or internal_joint.endpoint_b.marker_id == marker_id
+
+
 def test_delete_cascades_joints() -> None:
     app = make_app()
     body_id = app.create_bar("Crank", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("L1", "0 mm", "B"))
@@ -238,6 +251,23 @@ def test_slider_joint_friction_properties_can_be_edited() -> None:
 
     assert app.joint_friction_mode(joint) == "translation"
     assert app.joint_friction_values(joint) == pytest.approx((5.0, 0.25))
+
+
+def test_revolute_joint_angular_limit_properties_can_be_edited() -> None:
+    app = make_app()
+    body_id = app.create_bar("Crank", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    marker_id = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "A")
+    joint_id = app.connect_marker_to_ground(marker_id, name="Ground_A")
+    joint = app.get_joint(joint_id)
+
+    app.update_property(joint_id, "angle_limit_positive", PropertyValueInput("expression", "30 deg"))
+    app.update_property(joint_id, "angle_limit_negative", PropertyValueInput("expression", "15 deg"))
+
+    assert app.joint_supports_angular_limits(joint) is True
+    assert app.joint_angular_limit_expression(joint, "angle_limit_positive") == "30 deg"
+    assert app.joint_angular_limit_expression(joint, "angle_limit_negative") == "15 deg"
+    assert app.joint_angular_limit_value(joint, "angle_limit_positive", unit="deg") == pytest.approx(30.0)
+    assert app.joint_angular_limit_value(joint, "angle_limit_negative", unit="deg") == pytest.approx(15.0)
 
 
 def test_move_marker_translates_only_direct_joint_counterparts() -> None:
@@ -591,6 +621,35 @@ def test_validate_model_reports_translation_driver_outside_slider_travel() -> No
     report = app.validate_model(duration=1.0, steps=20)
 
     assert any(message.code == "kinematic_travel" for message in report.messages)
+
+
+def test_validate_model_uses_relative_translation_driver_position() -> None:
+    app = ApplicationService()
+    app.new_project("Relative Translation Travel")
+    body_id = app.create_body("Mass", [MarkerInput("4 mm", "0 mm", "P")])
+    marker_id = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "P")
+    slider_id = app.create_slider("Guide", SliderInput("0 mm", "0 mm", "0 deg", "0 mm", "5 mm"))
+    joint_id = app.connect_marker_to_slider(marker_id, slider_id, name="Slider_P", align="none")
+    app.create_driver("SliderDrive", DriverType.TRANSLATION.value, joint_id, "3 mm * t / 1 s", "mm")
+
+    report = app.validate_model(duration=1.0, steps=20)
+
+    assert any(message.code == "kinematic_travel" for message in report.messages)
+
+
+def test_validate_model_reports_rotation_driver_outside_angular_limits() -> None:
+    app = ApplicationService()
+    app.new_project("Rotation Limit")
+    body_id = app.create_bar("Crank", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    marker_id = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "A")
+    joint_id = app.connect_marker_to_ground(marker_id, name="Ground_A")
+    app.update_property(joint_id, "angle_limit_positive", PropertyValueInput("expression", "30 deg"))
+    app.update_property(joint_id, "angle_limit_negative", PropertyValueInput("expression", "10 deg"))
+    app.create_driver("CrankDrive", DriverType.ROTATION.value, joint_id, "45 deg * t / 1 s", "deg")
+
+    report = app.validate_model(duration=1.0, steps=20)
+
+    assert any(message.code == "kinematic_angle_limit" for message in report.messages)
 
 
 def test_run_simulation_attempts_solver_after_unreachable_preflight() -> None:

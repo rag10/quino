@@ -372,6 +372,7 @@ class ViewState:
     show_markers: bool = True
     show_com: bool = False
     show_sliders: bool = True
+    show_sensors: bool = True
 
 
 @dataclass(slots=True)

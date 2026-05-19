@@ -88,6 +88,16 @@ class ExudynPoseAdapter(ExudynAdapter):
             )
             for joint in assembled.joints:
                 self._create_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, joint)
+            for joint in assembled.joints:
+                self._add_revolute_limit_stops(
+                    mbs,
+                    item_interface,
+                    project,
+                    assembled,
+                    node_numbers,
+                    ground_object,
+                    joint,
+                )
             # Drivers are deliberately NOT applied in pose mode. They are
             # time-dependent constraints for simulation; evaluating them at t=0
             # would lock the driven body at the reference angle and remove the
