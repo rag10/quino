@@ -25,7 +25,6 @@ from quino.domain.model import (
 from quino.domain.sketch_constraints import CONSTRAINT_SPECS, ConstraintSpec
 from quino.domain.types import BodyType, DriverType, JointEndpointKind, JointType, MarkerType, SketchConstraintType, SketchEntityType, SpringEndpointKind
 from quino.services.mechanism_dof import compute_mechanism_dof
-from quino.services.sketch_dof import SketchDofAnalyzer
 from quino.simulation.assembler import AssembledMechanism
 from quino.simulation.sensor_expressions import sensor_channel_keys
 
@@ -1540,7 +1539,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         if self._interaction_mode == "sketch":
             project = self.app_service.project
             if project is not None and project.sketch is not None:
-                dof_result = SketchDofAnalyzer().analyze(project.sketch)
+                dof_result = self.app_service.sketch_solver.analyze_dof(project)
                 self._dof_result = dof_result
                 self.dofInfoChanged.emit(f"Free DOF: {dof_result.total_free_dof}")
             else:
@@ -2729,7 +2728,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         if not invalid:
             project = self.app_service.project
             if project is not None and project.sketch is not None:
-                dof_result = SketchDofAnalyzer().analyze(project.sketch)
+                dof_result = self.app_service.sketch_solver.analyze_dof(project)
                 self._dof_result = dof_result
 
         def _entity_color(entity_id: str, construction: bool) -> QtGui.QColor:
