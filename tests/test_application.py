@@ -25,21 +25,6 @@ def make_app() -> ApplicationService:
     return app
 
 
-def make_app_legacy() -> ApplicationService:
-    """Variant pinned to the legacy iterative backend.
-
-    Used by tests whose assertions depend on legacy-specific solver behavior:
-    - Tests of under-constrained sketches where legacy preferentially moves
-      a specific point (e.g. on_circle, coincident-point-on-curve), while
-      solvespace may move other free points to satisfy the constraint.
-    - Tests of tangent constraints involving circles (python-solvespace's
-      tangent() does not yet accept circle entities; mapping pending).
-    """
-    app = ApplicationService(sketch_solver_backend="legacy")
-    app.new_project("Demo")
-    app.create_parameter("L1", "120 mm", "mm")
-    return app
-
 
 def _mm(app: ApplicationService, expression: str) -> float:
     return app.unit_service.convert(
@@ -932,46 +917,6 @@ def test_update_gravity_magnitude_undoable() -> None:
     assert app.project.model.gravity.magnitude == original
 
 
-def test_sketch_entities_support_crud_and_cascade_delete() -> None:
-    # Pinned to legacy: CRUD assertion `point.x.text == "10 mm"` relies on the
-    # solver NOT enforcing arc validity (3-point arc requires equidistant
-    # endpoints from center). Solvespace enforces it, so updating one point
-    # repositions the others. The CRUD intent is preserved on legacy.
-    app = make_app_legacy()
-    app.new_project("SketchDemo")
-
-    sketch_id = app.create_sketch()
-    assert sketch_id.startswith("sketch_")
-
-    p1 = app.create_sketch_point("0 mm", "0 mm", "PointA")
-    p2 = app.create_sketch_point("100 mm", "0 mm", "PointB")
-    p3 = app.create_sketch_point("100 mm", "50 mm", "PointC")
-    line_id = app.create_sketch_line_segment(p1, p2, "Line1")
-    circle_id = app.create_sketch_circle(p1, "25 mm", "Circle1")
-    arc_id = app.create_sketch_arc(p1, p2, p3, "Arc1")
-    inf_id = app.create_sketch_infinite_line(p2, p3, "Axis1")
-
-    assert {entity.id for entity in app.project.sketch.entities.values()} >= {p1, p2, p3, line_id, circle_id, arc_id, inf_id}
-
-    app.update_sketch_entity(p1, "x", PropertyValueInput("expression", "10 mm"))
-    app.update_sketch_entity(circle_id, "radius", PropertyValueInput("expression", "30 mm"))
-    app.update_sketch_entity(line_id, "construction", PropertyValueInput("boolean", True))
-
-    point = app._find_sketch_point(p1)
-    circle = app._find_sketch_entity(circle_id)
-    line = app._find_sketch_entity(line_id)
-    assert point.x.text == "10 mm"
-    assert circle.radius.text == "30 mm"
-    assert line.construction is True
-
-    app.delete_sketch_entity(p1)
-    remaining_ids = {entity.id for entity in app.project.sketch.entities.values()}
-    assert p1 not in remaining_ids
-    assert line_id not in remaining_ids
-    assert circle_id not in remaining_ids
-    assert arc_id not in remaining_ids
-    assert inf_id in remaining_ids
-
 
 def test_create_sketch_rectangle_builds_constrained_profile() -> None:
     app = make_app()
@@ -1067,93 +1012,6 @@ def test_sketch_validation_warns_on_unsolved_conflicting_constraints() -> None:
     assert any(message.code == "sketch_not_solved" for message in report.messages)
 
 
-def test_sketch_solver_handles_parallel_midpoint_angle_and_on_circle() -> None:
-    # Pinned to legacy: on_circle is under-constrained (circle center is free);
-    # legacy preferentially moves the point onto the circle while solvespace may
-    # equivalently slide the center. Both satisfy the constraint, but the test
-    # asserts the legacy-biased outcome (point at radius from original center).
-    app = make_app_legacy()
-    app.new_project("SketchAdvanced")
-
-    a = app.create_sketch_point("0 mm", "0 mm", "A")
-    b = app.create_sketch_point("10 mm", "0 mm", "B")
-    c = app.create_sketch_point("0 mm", "5 mm", "C")
-    d = app.create_sketch_point("10 mm", "7 mm", "D")
-    midpoint = app.create_sketch_point("5 mm", "9 mm", "M")
-    center = app.create_sketch_point("30 mm", "0 mm", "O")
-    radius_pt = app.create_sketch_point("40 mm", "0 mm", "R")
-    on_circle_pt = app.create_sketch_point("35 mm", "0 mm", "P")
-    vertex = app.create_sketch_point("60 mm", "0 mm", "V")
-    arm_a = app.create_sketch_point("70 mm", "0 mm", "VA")
-    arm_b = app.create_sketch_point("70 mm", "10 mm", "VB")
-    circle_id = app.create_sketch_circle(center, "10 mm", "C1")
-
-    app.create_sketch_constraint("parallel", [a, b, c, d], name="Parallel1")
-    app.create_sketch_constraint("midpoint", [midpoint, a, b], name="Mid1")
-    app.create_sketch_constraint("on_circle", [on_circle_pt], name="OnCircle1", entity_references=[circle_id])
-    app.create_sketch_constraint("angle", [vertex, arm_a, arm_b], value="45 deg", name="Angle1")
-
-    point_a = app._find_sketch_point(a)
-    point_b = app._find_sketch_point(b)
-    point_c = app._find_sketch_point(c)
-    point_d = app._find_sketch_point(d)
-    ax = float(point_a.x.text.split()[0])
-    ay = float(point_a.y.text.split()[0])
-    bx = float(point_b.x.text.split()[0])
-    by = float(point_b.y.text.split()[0])
-    cx = float(point_c.x.text.split()[0])
-    cy = float(point_c.y.text.split()[0])
-    dx = float(point_d.x.text.split()[0])
-    dy = float(point_d.y.text.split()[0])
-    cross = (bx - ax) * (dy - cy) - (by - ay) * (dx - cx)
-    assert abs(cross) < 1e-3
-
-    mid = app._find_sketch_point(midpoint)
-    mx = float(mid.x.text.split()[0])
-    my = float(mid.y.text.split()[0])
-    assert abs(mx - 0.5 * (ax + bx)) < 1e-3
-    assert abs(my - 0.5 * (ay + by)) < 1e-3
-
-    p = app._find_sketch_point(on_circle_pt)
-    px = float(p.x.text.split()[0])
-    py = float(p.y.text.split()[0])
-    assert abs((((px - 30.0) ** 2 + (py - 0.0) ** 2) ** 0.5) - 10.0) < 1e-3
-
-    v = app._find_sketch_point(vertex)
-    va = app._find_sketch_point(arm_a)
-    vb = app._find_sketch_point(arm_b)
-    vx, vy = float(v.x.text.split()[0]), float(v.y.text.split()[0])
-    vax, vay = float(va.x.text.split()[0]), float(va.y.text.split()[0])
-    vbx, vby = float(vb.x.text.split()[0]), float(vb.y.text.split()[0])
-    d1x, d1y = vax - vx, vay - vy
-    d2x, d2y = vbx - vx, vby - vy
-    angle = abs(math.degrees(math.atan2(d1x * d2y - d1y * d2x, d1x * d2x + d1y * d2y)))
-    assert abs(angle - 45.0) < 1.0
-
-
-def test_sketch_coincident_accepts_point_on_line_and_circle() -> None:
-    # Pinned to legacy: coincident point-on-line and point-on-circle are
-    # under-constrained; legacy snaps the point onto the curve while solvespace
-    # may move the curve's anchor instead. See test above.
-    app = make_app_legacy()
-    app.new_project("SketchCoincidentEntities")
-    a = app.create_sketch_point("0 mm", "0 mm", "A")
-    b = app.create_sketch_point("10 mm", "0 mm", "B")
-    p_line = app.create_sketch_point("5 mm", "4 mm", "P")
-    center = app.create_sketch_point("30 mm", "0 mm", "O")
-    p_circle = app.create_sketch_point("34 mm", "3 mm", "Q")
-    line_id = app.create_sketch_line_segment(a, b, "L1")
-    circle_id = app.create_sketch_circle(center, "10 mm", "C1")
-
-    app.create_sketch_constraint("coincident", [p_line], entity_references=[line_id])
-    app.create_sketch_constraint("coincident", [p_circle], entity_references=[circle_id])
-
-    line_point = app._find_sketch_point(p_line)
-    circle_point = app._find_sketch_point(p_circle)
-    assert abs(float(line_point.y.text.split()[0])) < 1e-3
-    qx = float(circle_point.x.text.split()[0])
-    qy = float(circle_point.y.text.split()[0])
-    assert abs(math.hypot(qx - 30.0, qy) - 10.0) < 1e-3
 
 
 def test_collinear_constraint_accepts_two_segments() -> None:
@@ -1175,39 +1033,6 @@ def test_collinear_constraint_accepts_two_segments() -> None:
         cross = (bx - ax) * (py - ay) - (by - ay) * (px - ax)
         assert abs(cross) < 1e-3
 
-
-def test_sketch_solver_handles_tangent_constraint() -> None:
-    # Pinned to legacy: this test asserts the line endpoints move to satisfy
-    # tangency (with everything else free). Solvespace's solution-picking bias
-    # in under-constrained sketches moves the radius instead, which is equally
-    # valid geometrically but breaks the specific assertion here. The new
-    # tests in test_sketch_solver_solvespace.py cover the same tangency logic
-    # with fully-constrained setups. See also: docs/superpowers/plans/2026-05-19-sketch-ux-fixes.md
-    app = make_app_legacy()
-    app.new_project("SketchTangent")
-
-    line_a = app.create_sketch_point("-10 mm", "0 mm", "L1")
-    line_b = app.create_sketch_point("10 mm", "0 mm", "L2")
-    center = app.create_sketch_point("0 mm", "10 mm", "O")
-    app.create_sketch_point("5 mm", "10 mm", "Probe")
-    circle_id = app.create_sketch_circle(center, "5 mm", "C1")
-
-    app.create_sketch_constraint(
-        "tangent",
-        [line_a, line_b],
-        value="1",
-        name="Tan1",
-        entity_references=[circle_id],
-    )
-
-    point_a = app._find_sketch_point(line_a)
-    point_b = app._find_sketch_point(line_b)
-    ax = float(point_a.x.text.split()[0])
-    ay = float(point_a.y.text.split()[0])
-    bx = float(point_b.x.text.split()[0])
-    by = float(point_b.y.text.split()[0])
-    distance = abs((by - ay) * 0.0 - (bx - ax) * 10.0 + bx * ay - by * ax) / math.hypot(by - ay, bx - ax)
-    assert abs(distance - 5.0) < 1e-2
 
 
 def test_tangent_constraint_creates_helper_point_on_line_and_curve() -> None:
@@ -1241,35 +1066,6 @@ def test_tangent_constraint_creates_helper_point_on_line_and_curve() -> None:
     assert len(helper_constraints) == 2
 
 
-def test_sketch_solver_handles_curve_curve_tangent_constraint() -> None:
-    # Pinned to legacy: same bias-divergence issue as the sibling
-    # test_sketch_solver_handles_tangent_constraint — the assertion encodes
-    # the legacy solver's specific preference in an under-constrained sketch.
-    # Solvespace coverage of curve-curve tangent lives in
-    # test_sketch_solver_solvespace.py.
-    app = make_app_legacy()
-    app.new_project("SketchCurveTangent")
-
-    c1 = app.create_sketch_point("0 mm", "0 mm", "O1")
-    c2 = app.create_sketch_point("15 mm", "0 mm", "O2")
-    circle_1 = app.create_sketch_circle(c1, "10 mm", "C1")
-    circle_2 = app.create_sketch_circle(c2, "4 mm", "C2")
-
-    app.create_sketch_constraint(
-        "tangent",
-        [],
-        value="1",
-        name="TanCC",
-        entity_references=[circle_1, circle_2],
-    )
-
-    point_1 = app._find_sketch_point(c1)
-    point_2 = app._find_sketch_point(c2)
-    x1 = float(point_1.x.text.split()[0])
-    y1 = float(point_1.y.text.split()[0])
-    x2 = float(point_2.x.text.split()[0])
-    y2 = float(point_2.y.text.split()[0])
-    assert abs(math.hypot(x2 - x1, y2 - y1) - 14.0) < 1e-3
 
 
 
@@ -1873,25 +1669,3 @@ def test_delete_structural_marker_convert_to_bar() -> None:
     assert abs(cy - 0.0) < 1e-6
 
 
-def test_application_service_default_solver_backend():
-    svc = ApplicationService()
-    assert svc.sketch_solver.backend_name == "solvespace"
-
-
-def test_application_service_explicit_legacy_backend():
-    svc = ApplicationService(sketch_solver_backend="legacy")
-    assert svc.sketch_solver.backend_name == "legacy"
-
-
-def test_set_sketch_solver_backend_swaps_instance():
-    svc = ApplicationService(sketch_solver_backend="legacy")
-    old = svc.sketch_solver
-    svc.set_sketch_solver_backend("legacy")  # re-set, still legacy
-    assert svc.sketch_solver is not old
-    assert svc.sketch_solver.backend_name == "legacy"
-
-
-def test_set_sketch_solver_backend_rejects_unknown():
-    svc = ApplicationService()
-    with pytest.raises(ValueError, match="Unknown sketch solver backend"):
-        svc.set_sketch_solver_backend("xyz")

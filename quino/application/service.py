@@ -52,7 +52,7 @@ from quino.solver_adapters.exudyn_pose_adapter import ExudynPoseAdapter
 class ApplicationService:
     schema_version = "0.1.0"
 
-    def __init__(self, *, sketch_solver_backend: str = "solvespace") -> None:
+    def __init__(self) -> None:
         self.id_service = IdService()
         self.unit_service = UnitService()
         self.expression_service = ExpressionService(self.unit_service)
@@ -62,11 +62,9 @@ class ApplicationService:
         self._undo_stack: list[Project] = []
         self._redo_stack: list[Project] = []
         self._in_operation = False
-        self._sketch_solver_backend = sketch_solver_backend
         self.sketch_solver = SketchSolver(
             self.expression_service,
             self.unit_service,
-            backend=sketch_solver_backend,
         )
         self.simulation_runner = SimulationRunner(ExudynAdapter(self.expression_service))
         self.pose_runner = PoseRunner(ExudynPoseAdapter(self.expression_service))
@@ -534,17 +532,6 @@ class ApplicationService:
         self.entities.invalidate_index()
         self.poses.clear_current()
         return True
-
-    def set_sketch_solver_backend(self, name: str) -> None:
-        """Switch the sketch solver backend at runtime (e.g. from Preferences dialog)."""
-        if name not in ("solvespace", "legacy"):
-            raise ValueError(f"Unknown sketch solver backend: {name!r}")
-        self._sketch_solver_backend = name
-        self.sketch_solver = SketchSolver(
-            self.expression_service,
-            self.unit_service,
-            backend=name,
-        )
 
     def _require_project(self) -> Project:
         if self.project is None:

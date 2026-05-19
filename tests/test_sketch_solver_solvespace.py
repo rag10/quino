@@ -225,7 +225,7 @@ def test_collinear_four_points():
     # COLLINEAR uses 4 point refs: first two define the anchor line, next two lie on it.
     # Anchor: p1=(0,0) fixed, p2=(10,0) fixed → line along y=0.
     # p3=(5,3) and p4=(8,-2) start off the line; constraint pulls them to y=0.
-    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc = ApplicationService()
     svc.new_project("T")
     svc.create_sketch("S")
     p1 = svc.create_sketch_point("0 mm", "0 mm", "P1")
@@ -247,7 +247,7 @@ def test_symmetric_about_axis_line():
     # axis_a=(-10,0), axis_b=(10,0) → axis is y=0.
     # p1=(0,5) is fixed. p2=(0,-3) starts asymmetric.
     # Constraint → p2 must mirror p1 about y=0 → p2.y = -5.
-    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc = ApplicationService()
     svc.new_project("T")
     svc.create_sketch("S")
     p1 = svc.create_sketch_point("0 mm", "5 mm", "P1")
@@ -268,7 +268,7 @@ def test_on_circle_pulls_point_to_circumference():
     # ON_CIRCLE: references=[point_id], entity_references=[circle_entity_id].
     # Center at (0,0) fixed, circle radius=10 mm.
     # pt=(5,5) starts off the circle (dist ≈ 7.07 mm); constraint pulls it to radius.
-    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc = ApplicationService()
     svc.new_project("T")
     svc.create_sketch("S")
     center = svc.create_sketch_point("0 mm", "0 mm", "C")
@@ -285,7 +285,7 @@ def test_on_circle_pulls_point_to_circumference():
 
 def test_radius_constraint_updates_circle_radius():
     """RADIUS constraint must change the circle's stored radius to the target."""
-    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc = ApplicationService()
     svc.new_project("T")
     svc.create_sketch("S")
     center = svc.create_sketch_point("0 mm", "0 mm", "C")
@@ -301,7 +301,7 @@ def test_radius_constraint_updates_circle_radius():
 
 def test_radius_constraint_lets_on_circle_pull_to_new_radius():
     """A point with on_circle on a circle constrained to radius=8 must end on r=8."""
-    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc = ApplicationService()
     svc.new_project("T")
     svc.create_sketch("S")
     center = svc.create_sketch_point("0 mm", "0 mm", "C")
@@ -320,7 +320,7 @@ def test_radius_constraint_lets_on_circle_pull_to_new_radius():
 
 
 def test_horizontal_distance_constrains_x_delta():
-    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc = ApplicationService()
     svc.new_project("T")
     svc.create_sketch("S")
     p1 = svc.create_sketch_point("0 mm", "0 mm", "P1")
@@ -335,7 +335,7 @@ def test_horizontal_distance_constrains_x_delta():
 
 
 def test_vertical_distance_constrains_y_delta():
-    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc = ApplicationService()
     svc.new_project("T")
     svc.create_sketch("S")
     p1 = svc.create_sketch_point("0 mm", "0 mm", "P1")
@@ -350,7 +350,7 @@ def test_vertical_distance_constrains_y_delta():
 
 def test_no_aux_geometry_leaks_into_project():
     """Critical invariant: aux geometry must NOT pollute the QUINO domain."""
-    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc = ApplicationService()
     svc.new_project("T")
     svc.create_sketch("S")
     p1 = svc.create_sketch_point("0 mm", "0 mm", "P1")
@@ -371,7 +371,7 @@ def test_locked_points_remain_fixed_during_solve():
     locked points. The solver must keep the locked pair in place and move only
     the free point.
     """
-    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc = ApplicationService()
     svc.new_project("T")
     svc.create_sketch("S")
     # Place p1 away from the sketch origin so it is not coincident with it.
@@ -396,7 +396,7 @@ def test_drag_pattern_moves_only_unlocked_point():
     a constraint *between two locked points* would over-constrain the dragged
     group and cause solvespace to report INCONSISTENT.
     """
-    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc = ApplicationService()
     svc.new_project("T")
     svc.create_sketch("S")
     # p1 is away from origin to avoid coincidence with the auto-created origin point.
@@ -424,7 +424,7 @@ def test_lock_overrides_fix_constraint_semantics():
     A point with neither FIX nor locked status is solvable; once FIX or locked
     is applied, the solver must not move it.
     """
-    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc = ApplicationService()
     svc.new_project("T")
     svc.create_sketch("S")
     p1 = svc.create_sketch_point("0 mm", "0 mm", "P1")
@@ -442,7 +442,7 @@ def test_lock_overrides_fix_constraint_semantics():
 
 def test_tangent_line_to_circle_makes_line_touch_circle():
     """Recta tangente a circulo: la distancia del centro a la recta = radio."""
-    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc = ApplicationService()
     svc.new_project("T")
     svc.create_sketch("S")
     # Recta de (0,0) a (10,0), inicialmente alejada del circulo.
@@ -467,7 +467,7 @@ def test_tangent_line_to_circle_makes_line_touch_circle():
 
 def test_tangent_circle_to_circle_external():
     """Dos circulos tangentes externos: distancia entre centros = r1 + r2."""
-    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc = ApplicationService()
     svc.new_project("T")
     svc.create_sketch("S")
     c1 = svc.create_sketch_point("0 mm", "0 mm", "C1")
@@ -488,7 +488,7 @@ def test_tangent_circle_to_circle_external():
 
 def test_tangent_circle_to_circle_internal():
     """Dos circulos tangentes internos: distancia entre centros = |r1 - r2|."""
-    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc = ApplicationService()
     svc.new_project("T")
     svc.create_sketch("S")
     c1 = svc.create_sketch_point("0 mm", "0 mm", "C1")
