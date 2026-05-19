@@ -4632,14 +4632,20 @@ class MechanismCanvas(QtWidgets.QWidget):
                 return
             value_str = f"{angle_deg} deg"
         elif self._mode == CanvasMode.CREATE_SKETCH_TANGENT:
-            items = ["External (+1)", "Internal (-1)"]
-            item, ok = QtWidgets.QInputDialog.getItem(
-                self, "Tangent Constraint", "Tangency type:", items, 0, False
-            )
-            if not ok:
-                self.set_mode(CanvasMode.SELECT)
-                return
-            value_str = "1" if item == items[0] else "-1"
+            # External/Internal sign only matters for curve-curve tangency.
+            # For line+curve the sign has no geometric meaning — skip the dialog.
+            if len(entity_refs) == 2 and not point_ids:
+                items = ["External (+1)", "Internal (-1)"]
+                item, ok = QtWidgets.QInputDialog.getItem(
+                    self, "Tangent Constraint", "Tangency type:", items, 0, False
+                )
+                if not ok:
+                    self.set_mode(CanvasMode.SELECT)
+                    return
+                value_str = "1" if item == items[0] else "-1"
+            else:
+                # Line+curve case: sign is irrelevant; pass +1 as a placeholder.
+                value_str = "1"
 
         try:
             constraint_id = self.app_service.create_sketch_constraint(
