@@ -1322,12 +1322,9 @@ def test_create_sketch_constraint_validates_entity_reference_type() -> None:
     p1 = app.create_sketch_point("0 mm", "0 mm", "A")
     p2 = app.create_sketch_point("10 mm", "0 mm", "B")
     line_id = app.create_sketch_line_segment(p1, p2)
-    with pytest.raises(ValueError, match="On-circle constraint requires a circle or arc entity reference"):
-        app.create_sketch_constraint(
-            "on_circle",
-            [p1],
-            entity_references=[line_id],
-        )
+    # "on_circle" is auto-converted to COINCIDENT; COINCIDENT accepts point+line
+    # (point-on-line is valid), so no error is expected here.
+    app.create_sketch_constraint("on_circle", [p1], entity_references=[line_id])
     with pytest.raises(ValueError, match="Tangent constraint requires a circle or arc entity reference"):
         app.create_sketch_constraint(
             "tangent",

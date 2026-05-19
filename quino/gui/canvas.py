@@ -144,7 +144,6 @@ class CanvasMode:
     CREATE_SKETCH_MIDPOINT = "create_sketch_midpoint"
     CREATE_SKETCH_COLLINEAR = "create_sketch_collinear"
     CREATE_SKETCH_SYMMETRIC = "create_sketch_symmetric"
-    CREATE_SKETCH_ON_CIRCLE = "create_sketch_on_circle"
     CREATE_SKETCH_TANGENT = "create_sketch_tangent"
     CREATE_SKETCH_CONCENTRIC = "create_sketch_concentric"
     CREATE_SKETCH_ARC_CENTER = "create_sketch_arc_center"
@@ -166,7 +165,6 @@ _CONSTRAINT_MODE_TO_TYPE: dict[str, SketchConstraintType] = {
     CanvasMode.CREATE_SKETCH_MIDPOINT:      SketchConstraintType.MIDPOINT,
     CanvasMode.CREATE_SKETCH_COLLINEAR:     SketchConstraintType.COLLINEAR,
     CanvasMode.CREATE_SKETCH_SYMMETRIC:     SketchConstraintType.SYMMETRIC,
-    CanvasMode.CREATE_SKETCH_ON_CIRCLE:     SketchConstraintType.ON_CIRCLE,
     CanvasMode.CREATE_SKETCH_TANGENT:       SketchConstraintType.TANGENT,
     CanvasMode.CREATE_SKETCH_CONCENTRIC:    SketchConstraintType.COINCIDENT,  # maps to coincident
 }
@@ -216,7 +214,6 @@ _SKETCH_CONSTRAINT_TYPE_STR: dict[str, str] = {
     CanvasMode.CREATE_SKETCH_MIDPOINT:      "midpoint",
     CanvasMode.CREATE_SKETCH_COLLINEAR:     "collinear",
     CanvasMode.CREATE_SKETCH_SYMMETRIC:     "symmetric",
-    CanvasMode.CREATE_SKETCH_ON_CIRCLE:     "on_circle",
     CanvasMode.CREATE_SKETCH_TANGENT:       "tangent",
     # CONCENTRIC maps to coincident at finalization (no new type)
 }
@@ -532,7 +529,6 @@ class MechanismCanvas(QtWidgets.QWidget):
             CanvasMode.CREATE_SKETCH_MIDPOINT: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_SKETCH_COLLINEAR: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_SKETCH_SYMMETRIC: QtCore.Qt.CursorShape.CrossCursor,
-            CanvasMode.CREATE_SKETCH_ON_CIRCLE: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_SKETCH_TANGENT: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_SKETCH_CONCENTRIC: QtCore.Qt.CursorShape.CrossCursor,
             CanvasMode.CREATE_BAR: QtCore.Qt.CursorShape.CrossCursor,
@@ -1523,7 +1519,6 @@ class MechanismCanvas(QtWidgets.QWidget):
             CanvasMode.CREATE_SKETCH_MIDPOINT,
             CanvasMode.CREATE_SKETCH_COLLINEAR,
             CanvasMode.CREATE_SKETCH_SYMMETRIC,
-            CanvasMode.CREATE_SKETCH_ON_CIRCLE,
             CanvasMode.CREATE_SKETCH_TANGENT,
             CanvasMode.CREATE_SKETCH_CONCENTRIC,
         }:

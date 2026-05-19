@@ -503,7 +503,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_sketch_midpoint_tool = self._tool_action("Mid", CanvasMode.CREATE_SKETCH_MIDPOINT, get_icon("midpoint", color_sketch), "Constrain a point to be the midpoint of a segment (midpoint + 2 ends)")
         self.action_sketch_collinear_tool = self._tool_action("Colin", CanvasMode.CREATE_SKETCH_COLLINEAR, get_icon("collinear", color_sketch), "Constrain 3 points to be collinear (click 3 points or 1 line + 1 point)")
         self.action_sketch_symmetric_tool = self._tool_action("Sym", CanvasMode.CREATE_SKETCH_SYMMETRIC, get_icon("symmetric", color_sketch), "Constrain 2 points to be symmetric about an axis (2 pts + axis line)")
-        self.action_sketch_on_circle_tool = self._tool_action("OnCirc", CanvasMode.CREATE_SKETCH_ON_CIRCLE, get_icon("on-circle", color_sketch), "Constrain a point to lie on a circle (1 point + 1 circle)")
         self.action_sketch_tangent_tool = self._tool_action("Tangent", CanvasMode.CREATE_SKETCH_TANGENT, get_icon("tangent", color_sketch), "Constrain tangency between a line and a circle/arc, or between two circles/arcs")
         self.action_sketch_concentric_tool = self._tool_action("Conc", CanvasMode.CREATE_SKETCH_CONCENTRIC, get_icon("concentric", color_sketch), "Constrain two circles/arcs to be concentric (click 2 curves)")
         self.action_sketch_arc_center_tool = self._tool_action("CtrArc", CanvasMode.CREATE_SKETCH_ARC_CENTER, get_icon("arc-center", color_sketch), "Create an arc: click center, start, end")
@@ -589,7 +588,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_sketch_midpoint_tool,
             self.action_sketch_collinear_tool,
             self.action_sketch_symmetric_tool,
-            self.action_sketch_on_circle_tool,
             self.action_sketch_tangent_tool,
             self.action_sketch_concentric_tool,
             self.action_sketch_arc_center_tool,
@@ -789,7 +787,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._add_toolbar_block(t, [
             [self.action_sketch_fix_tool, self.action_sketch_horizontal_tool, self.action_sketch_vertical_tool, self.action_sketch_coincident_tool, self.action_sketch_distance_tool, self.action_sketch_horizontal_distance_tool, self.action_sketch_vertical_distance_tool, self.action_sketch_angle_tool, self.action_sketch_midpoint_tool],
-            [self.action_sketch_collinear_tool, self.action_sketch_symmetric_tool, self.action_sketch_on_circle_tool, self.action_sketch_parallel_tool, self.action_sketch_perpendicular_tool, self.action_sketch_equal_length_tool, self.action_sketch_tangent_tool, self.action_sketch_concentric_tool],
+            [self.action_sketch_collinear_tool, self.action_sketch_symmetric_tool, self.action_sketch_parallel_tool, self.action_sketch_perpendicular_tool, self.action_sketch_equal_length_tool, self.action_sketch_tangent_tool, self.action_sketch_concentric_tool],
         ], "Constraints")
         self._add_toolbar_sep(t)
 
@@ -1979,7 +1977,7 @@ class MainWindow(QtWidgets.QMainWindow):
         CanvasMode.CREATE_SKETCH_EQUAL_LENGTH, CanvasMode.CREATE_SKETCH_ANGLE,
         CanvasMode.CREATE_SKETCH_MIDPOINT,
         CanvasMode.CREATE_SKETCH_COLLINEAR, CanvasMode.CREATE_SKETCH_SYMMETRIC,
-        CanvasMode.CREATE_SKETCH_ON_CIRCLE, CanvasMode.CREATE_SKETCH_TANGENT,
+        CanvasMode.CREATE_SKETCH_TANGENT,
         CanvasMode.CREATE_SKETCH_CONCENTRIC, CanvasMode.CREATE_SKETCH_ARC_CENTER,
     }
 
@@ -3589,7 +3587,6 @@ class MainWindow(QtWidgets.QMainWindow):
             CanvasMode.CREATE_SKETCH_MIDPOINT: self.action_sketch_midpoint_tool,
             CanvasMode.CREATE_SKETCH_COLLINEAR: self.action_sketch_collinear_tool,
             CanvasMode.CREATE_SKETCH_SYMMETRIC: self.action_sketch_symmetric_tool,
-            CanvasMode.CREATE_SKETCH_ON_CIRCLE: self.action_sketch_on_circle_tool,
             CanvasMode.CREATE_SKETCH_TANGENT: self.action_sketch_tangent_tool,
             CanvasMode.CREATE_SKETCH_CONCENTRIC: self.action_sketch_concentric_tool,
             CanvasMode.CREATE_SKETCH_ARC_CENTER: self.action_sketch_arc_center_tool,
@@ -4552,7 +4549,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_sketch_midpoint_tool,
             self.action_sketch_collinear_tool,
             self.action_sketch_symmetric_tool,
-            self.action_sketch_on_circle_tool,
             self.action_sketch_tangent_tool,
             self.action_sketch_concentric_tool,
             self.action_sketch_arc_center_tool,
@@ -4622,7 +4618,6 @@ class MainWindow(QtWidgets.QMainWindow):
             "create_sketch_midpoint": "Mid",
             "create_sketch_collinear": "Colin",
             "create_sketch_symmetric": "Sym",
-            "create_sketch_on_circle": "OnCirc",
             "create_sketch_tangent": "Tangent",
             "create_sketch_concentric": "Conc",
             "create_sketch_arc_center": "Arc",
@@ -4652,7 +4647,6 @@ class MainWindow(QtWidgets.QMainWindow):
             "create_sketch_midpoint": "Click midpoint then 2 endpoints",
             "create_sketch_collinear": "Click 2 segments",
             "create_sketch_symmetric": "Click 2 points then axis line (2 pts)",
-            "create_sketch_on_circle": "Click 1 point then 1 circle",
             "create_sketch_tangent": "Click 1 line + 1 curve, or 2 curves",
             "create_sketch_concentric": "Click 2 circles/arcs",
             "create_sketch_arc_center": "Click center, start, end",

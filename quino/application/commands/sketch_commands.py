@@ -376,6 +376,11 @@ class SketchCommands:
         normalized_entity_refs = list(entity_references) if entity_references else []
         if constraint_enum is SketchConstraintType.DISTANCE and len(normalized_refs) == 1 and len(normalized_entity_refs) == 1:
             constraint_enum = SketchConstraintType.RADIUS
+        # ON_CIRCLE is deprecated as a separate type; auto-fold into COINCIDENT
+        # which already covers point-on-curve semantics. The handler for the
+        # ON_CIRCLE type stays available for loading legacy JSON.
+        if constraint_enum is SketchConstraintType.ON_CIRCLE:
+            constraint_enum = SketchConstraintType.COINCIDENT
         self._validate_sketch_constraint_references(constraint_enum, normalized_refs, normalized_entity_refs)
         scalar_value = None
         if constraint_enum in {
