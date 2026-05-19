@@ -330,6 +330,7 @@ class Sketch:
     variables: dict[str, Variable] = field(default_factory=dict)
     metadata: Metadata = field(default_factory=Metadata)
     solve_error: str | None = None
+    bad_constraint_ids: list[str] = field(default_factory=list)
 
     def points(self) -> list[SketchPoint]:
         return [entity for entity in self.entities.values() if isinstance(entity, SketchPoint)]

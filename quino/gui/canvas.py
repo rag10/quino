@@ -2877,9 +2877,15 @@ class MechanismCanvas(QtWidgets.QWidget):
             anchor = self._sketch_constraint_anchor(constraint, point_map, transform)
             if anchor is None:
                 continue
-            color = QtGui.QColor("#b84840" if invalid else "#7f8c8d")
+            is_bad = constraint.id in (project.sketch.bad_constraint_ids or [])
+            if is_bad:
+                color = QtGui.QColor("#e74c3c")  # solid red — this constraint failed
+            elif invalid:
+                color = QtGui.QColor("#b84840")  # legacy rust for whole-sketch invalid
+            else:
+                color = QtGui.QColor("#7f8c8d")  # normal grey
             if self._selected_entity_id == constraint.id:
-                color = QtGui.QColor("#c75b12")
+                color = QtGui.QColor("#c75b12")  # selection overrides
             painter.setPen(QtGui.QPen(color, 1.1, QtCore.Qt.PenStyle.DashLine))
             if constraint.type in {
                 SketchConstraintType.DISTANCE,

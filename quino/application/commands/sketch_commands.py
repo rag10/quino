@@ -1016,6 +1016,8 @@ class SketchCommands:
         else:
             result = self._solver.solve(project, locked_point_ids=locked_point_ids)
             self._solve_cache = (sig, result)
+        # Persist bad_constraint_ids on the domain so the canvas can highlight them.
+        project.sketch.bad_constraint_ids = list(result.bad_constraints)
         if result.success:
             project.sketch.solve_error = None
             for point_id, (x, y) in result.positions.items():
