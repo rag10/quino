@@ -31,19 +31,18 @@ Reglas:
 - La fachada conserva los métodos públicos originales como delegaciones de 1 línea (compatibilidad con GUI y tests).
 
 ## Sketch solver
-El motor del modo Sketch vive en `quino/services/sketch_solving/`:
-- `facade.py` — `SketchSolver` (despacha al backend según preferencia)
-- `solvespace_backend.py` — adapter sobre `python-solvespace` (default)
-- `legacy_backend.py` — solver iterativo propio (opt-in fallback)
+Solvespace (`python-solvespace`) es el único solver. El motor vive en `quino/services/sketch_solving/`:
+- `facade.py` — `SketchSolver` (wrapper fino sobre `SolvespaceBackend`)
+- `solvespace_backend.py` — adapter sobre `python-solvespace`, incluye `solve()` y `analyze_dof()`
 - `constraint_mapping.py` — traduce cada `SketchConstraintType` al constraint nativo
-- `_auxiliary_geometry.py` — emite líneas H/V invisibles para `HORIZONTAL_DISTANCE`/`VERTICAL_DISTANCE`
+- `_auxiliary_geometry.py` — emite líneas invisibles para `HORIZONTAL_DISTANCE`/`VERTICAL_DISTANCE`
 
-El backend se elige con `ApplicationService(sketch_solver_backend="solvespace"|"legacy")` (default `"solvespace"`) o, en GUI, vía Edit → Preferences. La preferencia se persiste con `QtCore.QSettings("QUINO", "QUINO")` envuelto en `quino/gui/preferences.py`. Hot-swap: `app_service.set_sketch_solver_backend(name)` reinstancia el solver sin reiniciar.
+**Solvespace es fuente única de verdad** para constraints, DOF per-punto y "fully constrained". El cálculo de DOF usa `SolvespaceBackend.analyze_dof()` que ejecuta un perturbation test por eje (2N+1 solves donde N es número de puntos no fijos).
 
 Notas:
 - `quino/services/sketch_solver.py` queda como re-export shim (compat).
-- Solvespace mantiene radios de circles/arcs locked vía `sys.diameter()` salvo cuando un constraint RADIUS user los gobierna.
-- 6 tests en `tests/test_application.py` están pineados al backend legacy: 3 por divergencia de bias en sketches under-constrained, 3 por gaps de tangencia en el binding `python-solvespace` (ver `sketch_solver_backend="legacy"` inline en esos tests).
+- Solvespace mantiene radios de circles/arcs locked vía `sys.diameter()` salvo cuando hay constraint RADIUS o TANGENT que los gobierna.
+- TANGENT line+curve y curve+curve se reducen a equivalencias con `PT_ON_CIRCLE` + punto auxiliar, no usa `sys.tangent()` (que no acepta circles en python-solvespace 3.0.8).
 
 ## Glosario de dominio
 - **Body**: rígido (bar, point_mass, ground_anchor).
