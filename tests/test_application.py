@@ -1118,8 +1118,12 @@ def test_collinear_constraint_accepts_two_segments() -> None:
 
 
 def test_sketch_solver_handles_tangent_constraint() -> None:
-    # Pinned to legacy: python-solvespace's tangent() does not yet accept
-    # circle entities (only arc/cubic). Tangent-to-circle mapping is pending.
+    # Pinned to legacy: this test asserts the line endpoints move to satisfy
+    # tangency (with everything else free). Solvespace's solution-picking bias
+    # in under-constrained sketches moves the radius instead, which is equally
+    # valid geometrically but breaks the specific assertion here. The new
+    # tests in test_sketch_solver_solvespace.py cover the same tangency logic
+    # with fully-constrained setups. See also: docs/superpowers/plans/2026-05-19-sketch-ux-fixes.md
     app = make_app_legacy()
     app.new_project("SketchTangent")
 
@@ -1148,12 +1152,7 @@ def test_sketch_solver_handles_tangent_constraint() -> None:
 
 
 def test_tangent_constraint_creates_helper_point_on_line_and_curve() -> None:
-    # Pinned to legacy: tangent-to-circle is not yet supported by the
-    # python-solvespace tangent() binding (see sibling tests above). The
-    # test asserts on helper-point creation, but the underlying solve emits
-    # a noisy unraisable TypeError on solvespace; staying on legacy keeps
-    # the test focused on what it actually verifies.
-    app = make_app_legacy()
+    app = make_app()
     app.new_project("SketchTangentHelper")
 
     line_a = app.create_sketch_point("-10 mm", "0 mm", "L1")
@@ -1184,8 +1183,11 @@ def test_tangent_constraint_creates_helper_point_on_line_and_curve() -> None:
 
 
 def test_sketch_solver_handles_curve_curve_tangent_constraint() -> None:
-    # Pinned to legacy: python-solvespace's tangent() does not yet accept
-    # circle entities (only arc/cubic). Curve-curve tangent for circles pending.
+    # Pinned to legacy: same bias-divergence issue as the sibling
+    # test_sketch_solver_handles_tangent_constraint — the assertion encodes
+    # the legacy solver's specific preference in an under-constrained sketch.
+    # Solvespace coverage of curve-curve tangent lives in
+    # test_sketch_solver_solvespace.py.
     app = make_app_legacy()
     app.new_project("SketchCurveTangent")
 

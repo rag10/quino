@@ -82,6 +82,19 @@ def _emit_distance(sys, wp, c, points, entities, project, expressions, units):
 
 
 def _emit_coincident(sys, wp, c, points, entities, project, expressions, units):
+    # Two valid shapes:
+    #  - >=2 point references (regular point coincidence).
+    #  - 1 point + 1 entity reference (point-on-curve / point-on-line; the
+    #    validator accepts this form — see SketchCommands._validate_sketch_constraint_references).
+    if len(c.references) == 1 and len(c.entity_references) == 1:
+        point = points.get(c.references[0])
+        entity = entities.get(c.entity_references[0])
+        if point is None:
+            raise ValueError(f"coincident: unknown point {c.references[0]!r}")
+        if entity is None:
+            raise ValueError(f"coincident: unknown entity {c.entity_references[0]!r}")
+        sys.coincident(point, entity, wp)
+        return
     if len(c.references) < 2:
         raise ValueError(f"coincident expects >=2 references, got {c.references!r}")
     refs = list(c.references)
@@ -276,24 +289,32 @@ def _emit_tangent(sys, wp, c, points, entities, project, expressions, units):
     """Tangency between line+curve or curve+curve.
 
     python-solvespace's sys.tangent() only accepts arc/cubic entities (not
-    circles). We sidestep the gap by reducing tangency to distance equalities:
+    circles). We sidestep the gap with an auxiliary point that lies on both
+    target entities at the tangent point:
 
-    - line + circle/arc -> distance(center, line) == radius
-    - circle/arc + circle/arc -> distance(center1, center2) == |r1 + sign*r2|
-      where sign comes from constraint.value ("1" external = +, "-1" internal = -)
+    - line + circle/arc: aux point on the line, on the curve, with the segment
+      center->aux perpendicular to the line. This enforces aux as the foot of
+      perpendicular from the curve's center to the line; PT_ON_CIRCLE then
+      forces distance(center, line) = radius, which is tangency.
+    - curve + curve: aux point on both circles. Solvespace will pick external
+      or internal tangency based on the initial geometry (the closer solution).
 
     QUINO stores tangent constraints as:
       - references=[line_p1, line_p2], entity_references=[curve_entity_id]
       - references=[], entity_references=[curve1_id, curve2_id]
+
+    The auxiliary geometry lives only inside the SolverSystem; it never enters
+    the QUINO domain.
     """
+    import python_solvespace as _ps
     from quino.domain.model import SketchArc, SketchCircle
 
     sketch = project.sketch
     n_refs = len(c.references)
     n_ents = len(c.entity_references)
 
-    def _curve_center_and_radius(entity_id: str):
-        """Return (center_handle, curve_handle, radius_mm) for a circle/arc entity."""
+    def _curve_handles(entity_id: str):
+        """Return (center_handle, curve_handle, center_xy) for a circle/arc."""
         ent = sketch.entities.get(entity_id) if sketch is not None else None
         if not isinstance(ent, (SketchCircle, SketchArc)):
             raise ValueError(f"tangent: entity {entity_id!r} is not a circle/arc")
@@ -303,45 +324,61 @@ def _emit_tangent(sys, wp, c, points, entities, project, expressions, units):
         curve_handle = entities.get(entity_id)
         if curve_handle is None:
             raise ValueError(f"tangent: entity {entity_id!r} not built in solver")
-        if isinstance(ent, SketchCircle):
-            quantity = expressions.evaluate_expression(ent.radius.text, project.parameters)
-            radius_mm = float(units.convert(quantity, ent.radius.unit))
-        else:
-            # Arc: radius = distance from center to start point
-            center_pt = next(p for p in sketch.points() if p.id == ent.center_point_id)
-            start_pt = next(p for p in sketch.points() if p.id == ent.start_point_id)
-            cx_q = expressions.evaluate_expression(center_pt.x.text, project.parameters)
-            cy_q = expressions.evaluate_expression(center_pt.y.text, project.parameters)
-            sx_q = expressions.evaluate_expression(start_pt.x.text, project.parameters)
-            sy_q = expressions.evaluate_expression(start_pt.y.text, project.parameters)
-            cx = float(units.convert(cx_q, center_pt.x.unit))
-            cy = float(units.convert(cy_q, center_pt.y.unit))
-            sx = float(units.convert(sx_q, start_pt.x.unit))
-            sy = float(units.convert(sy_q, start_pt.y.unit))
-            radius_mm = ((sx - cx) ** 2 + (sy - cy) ** 2) ** 0.5
-        return center_handle, curve_handle, radius_mm
+        center_pt = next(p for p in sketch.points() if p.id == ent.center_point_id)
+        cx_q = expressions.evaluate_expression(center_pt.x.text, project.parameters)
+        cy_q = expressions.evaluate_expression(center_pt.y.text, project.parameters)
+        cx = float(units.convert(cx_q, center_pt.x.unit))
+        cy = float(units.convert(cy_q, center_pt.y.unit))
+        return center_handle, curve_handle, (cx, cy)
+
+    def _point_xy(point_id: str) -> tuple[float, float]:
+        pt = next(p for p in sketch.points() if p.id == point_id)
+        xq = expressions.evaluate_expression(pt.x.text, project.parameters)
+        yq = expressions.evaluate_expression(pt.y.text, project.parameters)
+        return (
+            float(units.convert(xq, pt.x.unit)),
+            float(units.convert(yq, pt.y.unit)),
+        )
 
     if n_refs == 2 and n_ents == 1:
-        # Line tangent to circle/arc -> distance(center, line) = radius.
-        # python-solvespace's sys.distance(point, line, value) is a numeric
-        # equality, so we pass the current radius value. Solvespace will move
-        # whichever endpoints/center are free to satisfy the equality; the
-        # post-loop in solvespace_backend locks the radius to prevent it from
-        # absorbing the constraint.
+        # Line tangent to circle/arc.
         line_p1 = points.get(c.references[0])
         line_p2 = points.get(c.references[1])
         if line_p1 is None or line_p2 is None:
             raise ValueError(f"tangent: unknown line point in {c.references}")
         line = sys.add_line_2d(line_p1, line_p2, wp)
-        center_handle, _, radius_mm = _curve_center_and_radius(c.entity_references[0])
-        sys.distance(center_handle, line, radius_mm, wp)
+        center_handle, curve_handle, (cx, cy) = _curve_handles(c.entity_references[0])
+        # Auxiliary point at foot of perpendicular from center to line (initial guess).
+        ax, ay = _point_xy(c.references[0])
+        bx, by = _point_xy(c.references[1])
+        dx, dy = bx - ax, by - ay
+        denom = dx * dx + dy * dy
+        if denom <= 1e-12:
+            init_x, init_y = cx, cy
+        else:
+            t = ((cx - ax) * dx + (cy - ay) * dy) / denom
+            init_x = ax + t * dx
+            init_y = ay + t * dy
+        aux = sys.add_point_2d(init_x, init_y, wp)
+        none_e = _ps.Entity()
+        sys.add_constraint(
+            _ps.Constraint.PT_ON_LINE, wp, 0.0,
+            aux, none_e, line, none_e, none_e, none_e, 0, 0,
+        )
+        aux_line = sys.add_line_2d(aux, center_handle, wp)
+        sys.perpendicular(aux_line, line, wp, False)
+        sys.add_constraint(
+            _ps.Constraint.PT_ON_CIRCLE, wp, 0.0,
+            aux, none_e, curve_handle, none_e, none_e, none_e, 0, 0,
+        )
         return
 
     if n_refs == 0 and n_ents == 2:
-        # Curve-curve tangency: distance(c1, c2) = |r1 + sign * r2|, where
-        # sign = +1 (external) or -1 (internal) from constraint.value.
-        c1_center, _, r1 = _curve_center_and_radius(c.entity_references[0])
-        c2_center, _, r2 = _curve_center_and_radius(c.entity_references[1])
+        # Curve-curve tangency: aux point on both circles. Initial aux position
+        # biases Solvespace toward external (between centers) or internal
+        # (beyond the second center) — the value field carries the sign.
+        c1_center, curve1, (c1x, c1y) = _curve_handles(c.entity_references[0])
+        c2_center, curve2, (c2x, c2y) = _curve_handles(c.entity_references[1])
         sign = 1.0
         if c.value is not None:
             try:
@@ -350,8 +387,32 @@ def _emit_tangent(sys, wp, c, points, entities, project, expressions, units):
                 sign = -1.0 if sign_val < 0 else 1.0
             except Exception:
                 sign = 1.0
-        target_distance = abs(r1 + sign * r2)
-        sys.distance(c1_center, c2_center, target_distance, wp)
+        dx = c2x - c1x
+        dy = c2y - c1y
+        norm = (dx * dx + dy * dy) ** 0.5
+        if norm <= 1e-12:
+            ux, uy = 1.0, 0.0
+        else:
+            ux, uy = dx / norm, dy / norm
+        if sign > 0:
+            # External: aux between centers.
+            init_ax = 0.5 * (c1x + c2x)
+            init_ay = 0.5 * (c1y + c2y)
+        else:
+            # Internal: aux beyond c2 in the c1->c2 direction (forces both circles
+            # to touch on the far side of c2, which is the internal tangent topology).
+            init_ax = c2x + ux * max(norm, 1.0)
+            init_ay = c2y + uy * max(norm, 1.0)
+        aux = sys.add_point_2d(init_ax, init_ay, wp)
+        none_e = _ps.Entity()
+        sys.add_constraint(
+            _ps.Constraint.PT_ON_CIRCLE, wp, 0.0,
+            aux, none_e, curve1, none_e, none_e, none_e, 0, 0,
+        )
+        sys.add_constraint(
+            _ps.Constraint.PT_ON_CIRCLE, wp, 0.0,
+            aux, none_e, curve2, none_e, none_e, none_e, 0, 0,
+        )
         return
 
     raise ValueError(

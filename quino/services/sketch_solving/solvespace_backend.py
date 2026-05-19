@@ -118,6 +118,10 @@ class SolvespaceBackend:
                 # so we don't double-constrain their radii below.
                 constrained_radii.update(c.entity_references or [])
                 constrained_radii.update(c.references or [])
+            if c.type is SketchConstraintType.TANGENT:
+                # Tangent constraints work by equating distances to radii; the
+                # radii must therefore stay free, so don't auto-lock them.
+                constrained_radii.update(c.entity_references or [])
             try:
                 emit_constraint(
                     sys, wp, c,
