@@ -431,6 +431,29 @@ class JointCommands:
         negative = self._coerce_joint_limit(joint.metadata.values.get(self._ANGLE_LIMIT_NEGATIVE_KEY))
         return positive, negative
 
+    def joint_angular_limit_expression(self, joint: Joint, path: str) -> str | None:
+        key = {
+            "angle_limit_positive": self._ANGLE_LIMIT_POSITIVE_KEY,
+            "angle_limit_negative": self._ANGLE_LIMIT_NEGATIVE_KEY,
+        }.get(path)
+        if key is None:
+            return None
+        value = self._coerce_joint_limit(joint.metadata.values.get(key))
+        if value is None:
+            return None
+        return f"{value:g} deg"
+
+    def joint_angular_limit_value(self, joint: Joint, path: str, unit: str = "deg") -> float | None:
+        positive, negative = self.joint_angular_limit_values(joint)
+        value = {"angle_limit_positive": positive, "angle_limit_negative": negative}.get(path)
+        if value is None:
+            return None
+        if unit == "deg":
+            return float(value)
+        if unit == "rad":
+            return math.radians(value)
+        return None
+
     def _coerce_joint_limit(self, value: object) -> float | None:
         if value is None:
             return None

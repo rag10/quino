@@ -17,15 +17,16 @@ class BlockDef:
 
     Stateless blocks only provide ``compute``.
     Stateful blocks provide ``init_state`` and ``update`` instead.
+    All callables receive an optional ``context`` argument (e.g. the Exudyn bridge).
     """
 
     def __init__(
         self,
         input_specs: list[PortSpec],
         output_specs: list[PortSpec],
-        compute: Callable[[dict[str, np.ndarray], dict[str, Any], float], dict[str, np.ndarray]] | None = None,
-        init_state: Callable[[dict[str, Any]], dict[str, np.ndarray]] | None = None,
-        update: Callable[[dict[str, np.ndarray], dict[str, Any], float, float, dict[str, np.ndarray]], dict[str, np.ndarray]] | None = None,
+        compute: Callable[..., dict[str, np.ndarray]] | None = None,
+        init_state: Callable[..., dict[str, np.ndarray]] | None = None,
+        update: Callable[..., dict[str, np.ndarray]] | None = None,
     ) -> None:
         self.input_specs = input_specs
         self.output_specs = output_specs
@@ -40,25 +41,25 @@ class BlockDef:
 # Sources
 # ---------------------------------------------------------------------------
 
-def _constant(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float) -> dict[str, np.ndarray]:
+def _constant(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float, **kwargs) -> dict[str, np.ndarray]:
     value = float(parameters.get("value", 0.0))
     return {"out": np.array([value])}
 
 
-def _step(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float) -> dict[str, np.ndarray]:
+def _step(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float, **kwargs) -> dict[str, np.ndarray]:
     step_time = float(parameters.get("step_time", 0.0))
     initial = float(parameters.get("initial_value", 0.0))
     final = float(parameters.get("final_value", 1.0))
     return {"out": np.array([final if t >= step_time else initial])}
 
 
-def _ramp(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float) -> dict[str, np.ndarray]:
+def _ramp(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float, **kwargs) -> dict[str, np.ndarray]:
     slope = float(parameters.get("slope", 1.0))
     start_time = float(parameters.get("start_time", 0.0))
     return {"out": np.array([slope * max(t - start_time, 0.0)])}
 
 
-def _sine(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float) -> dict[str, np.ndarray]:
+def _sine(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float, **kwargs) -> dict[str, np.ndarray]:
     amplitude = float(parameters.get("amplitude", 1.0))
     frequency = float(parameters.get("frequency", 1.0))
     phase = float(parameters.get("phase", 0.0))
@@ -70,33 +71,47 @@ def _sine(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float) -
 # Math / Operations
 # ---------------------------------------------------------------------------
 
-def _gain(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float) -> dict[str, np.ndarray]:
+def _gain(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float, **kwargs) -> dict[str, np.ndarray]:
     k = float(parameters.get("k", 1.0))
     return {"out": k * inputs["in"]}
 
 
-def _adder(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float) -> dict[str, np.ndarray]:
-    # Sum all inputs (signs are handled by separate Gain blocks before adding)
+def _adder(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float, **kwargs) -> dict[str, np.ndarray]:
     result = np.zeros_like(next(iter(inputs.values())))
-    for arr in inputs.values():
-        result = result + arr
+    signs = parameters.get("signs")
+    if signs is not None:
+        for key, arr in inputs.items():
+            # Try to extract numeric index from port name (e.g. 'in0' -> 0, 'a' -> 0)
+            idx = None
+            if key.startswith("in"):
+                try:
+                    idx = int(key[2:])
+                except ValueError:
+                    pass
+            if idx is None:
+                idx = list(inputs.keys()).index(key)
+            sign = float(signs[idx]) if idx < len(signs) else 1.0
+            result = result + sign * arr
+    else:
+        for arr in inputs.values():
+            result = result + arr
     return {"out": result}
 
 
-def _product(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float) -> dict[str, np.ndarray]:
+def _product(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float, **kwargs) -> dict[str, np.ndarray]:
     result = np.ones_like(next(iter(inputs.values())))
     for arr in inputs.values():
         result = result * arr
     return {"out": result}
 
 
-def _saturation(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float) -> dict[str, np.ndarray]:
+def _saturation(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float, **kwargs) -> dict[str, np.ndarray]:
     lower = float(parameters.get("lower", -1.0))
     upper = float(parameters.get("upper", 1.0))
     return {"out": np.clip(inputs["in"], lower, upper)}
 
 
-def _dead_zone(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float) -> dict[str, np.ndarray]:
+def _dead_zone(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float, **kwargs) -> dict[str, np.ndarray]:
     deadband = float(parameters.get("deadband", 0.5))
     x = inputs["in"]
     out = np.where(
@@ -111,13 +126,13 @@ def _dead_zone(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: flo
 # Routing
 # ---------------------------------------------------------------------------
 
-def _mux(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float) -> dict[str, np.ndarray]:
+def _mux(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float, **kwargs) -> dict[str, np.ndarray]:
     # Concatenate all scalar inputs into a vector
     parts = [inputs[f"in{i}"] for i in range(len(inputs))]
     return {"out": np.concatenate(parts)}
 
 
-def _demux(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float) -> dict[str, np.ndarray]:
+def _demux(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float, **kwargs) -> dict[str, np.ndarray]:
     vec = inputs["in"]
     n = vec.shape[0]
     return {f"out{i}": vec[i : i + 1] for i in range(n)}
@@ -138,6 +153,7 @@ def _integrator_update(
     t: float,
     dt: float,
     state: dict[str, np.ndarray],
+    **kwargs,
 ) -> dict[str, np.ndarray]:
     x = state["x"] + inputs["in"] * dt
     return {"out": x.copy(), "x": x}
@@ -154,6 +170,7 @@ def _integrator_limited_update(
     t: float,
     dt: float,
     state: dict[str, np.ndarray],
+    **kwargs,
 ) -> dict[str, np.ndarray]:
     lower = float(parameters.get("lower", -1e30))
     upper = float(parameters.get("upper", 1e30))
@@ -173,6 +190,7 @@ def _unit_delay_update(
     t: float,
     dt: float,
     state: dict[str, np.ndarray],
+    **kwargs,
 ) -> dict[str, np.ndarray]:
     out = state["x"].copy()
     x = inputs["in"].copy()
@@ -197,6 +215,7 @@ def _pid_update(
     t: float,
     dt: float,
     state: dict[str, np.ndarray],
+    **kwargs,
 ) -> dict[str, np.ndarray]:
     kp = float(parameters.get("kp", 1.0))
     ki = float(parameters.get("ki", 0.0))
@@ -250,6 +269,7 @@ def _derivative_filtered_update(
     t: float,
     dt: float,
     state: dict[str, np.ndarray],
+    **kwargs,
 ) -> dict[str, np.ndarray]:
     time_constant = float(parameters.get("time_constant", 0.01))
     last_input = state["last_input"][0]
@@ -274,6 +294,20 @@ def _derivative_filtered_update(
         "last_output": np.array([output]),
         "last_t": np.array([t]),
     }
+
+
+# ---------------------------------------------------------------------------
+# MBS Interface (Exudyn bridge)
+# ---------------------------------------------------------------------------
+
+def _mbs_sensor(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float, **kwargs) -> dict[str, np.ndarray]:
+    value = float(parameters.get("_value", 0.0))
+    return {"out": np.array([value])}
+
+
+def _mbs_actuator(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float, **kwargs) -> dict[str, np.ndarray]:
+    # Pass-through so the bridge can read the output
+    return {"out": inputs["in"].copy()}
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +349,14 @@ BLOCK_REGISTRY: dict[str, BlockDef] = {
     "DerivativeFiltered": BlockDef(
         [PortSpec("in")], [PortSpec("out")],
         init_state=_derivative_filtered_init, update=_derivative_filtered_update,
+    ),
+    "MBSSensor": BlockDef(
+        [], [PortSpec("out")],
+        compute=_mbs_sensor,
+    ),
+    "MBSActuator": BlockDef(
+        [PortSpec("in")], [PortSpec("out")],
+        compute=_mbs_actuator,
     ),
 }
 

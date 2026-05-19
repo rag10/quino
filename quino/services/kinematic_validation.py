@@ -822,8 +822,8 @@ class KinematicValidator:
             return None
         if joint.endpoint_a.kind is JointEndpointKind.SLIDER or joint.endpoint_b.kind is JointEndpointKind.SLIDER:
             return None
-        negative = self._joint_metadata_angle(project, joint, "angle_limit_negative")
-        positive = self._joint_metadata_angle(project, joint, "angle_limit_positive")
+        negative = self._joint_metadata_angle(project, joint, "angle_limit_negative_deg")
+        positive = self._joint_metadata_angle(project, joint, "angle_limit_positive_deg")
         if negative is not None and negative >= 2.0 * math.pi - 1e-9:
             negative = None
         if positive is not None and positive >= 2.0 * math.pi - 1e-9:
@@ -833,11 +833,16 @@ class KinematicValidator:
         return negative, positive
 
     def _joint_metadata_angle(self, project: Project, joint: Joint, path: str) -> float | None:
-        expression = joint.metadata.values.get(path)
-        if not isinstance(expression, str) or not expression.strip():
-            return None
-        quantity = self._expression_service.evaluate_expression(expression, project.parameters)
-        return self._unit_service.convert(quantity, "rad")
+        value = joint.metadata.values.get(path)
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            quantity = self._expression_service.evaluate_expression(text, project.parameters)
+            return self._unit_service.convert(quantity, "rad")
+        if isinstance(value, (int, float)):
+            return math.radians(float(value))
+        return None
 
     def _reference_joint_angle(self, assembled, joint: Joint) -> float:
         if (

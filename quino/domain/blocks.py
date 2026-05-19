@@ -18,7 +18,7 @@ class PortSpec:
     shape: tuple[int, ...] = (1,)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class BlockInstance:
     """A single instance of a block inside a diagram."""
 

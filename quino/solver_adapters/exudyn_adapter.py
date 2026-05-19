@@ -228,6 +228,18 @@ class ExudynAdapter(SolverAdapter):
             assembled,
             initial_pose=_simulation_initial_pose(project),
         )
+        # Block diagram bridge (Fase 3)
+        bridge = None
+        if project.block_diagram is not None and project.block_diagram.instances:
+            from quino.blocks.exudyn_bridge import ExudynBlockBridge
+            bridge = ExudynBlockBridge(
+                project.block_diagram,
+                mbs,
+                item_interface,
+                exu,
+                node_numbers,
+                body_objects,
+            )
         joint_objects: dict[str, int] = {}
         for joint in assembled.joints:
             joint_objects[joint.id] = self._create_joint(mbs, item_interface, assembled, body_objects, node_numbers, ground_object, joint)
@@ -262,6 +274,8 @@ class ExudynAdapter(SolverAdapter):
             self._create_load(mbs, item_interface, project, assembled, body_objects, node_numbers, load, exu)
         for spring in assembled.springs:
             self._create_spring(mbs, item_interface, project, body_objects, node_numbers, ground_object, spring, exu)
+        if bridge is not None:
+            bridge.add_actuator_loads()
         reaction_info = self._reaction_joint_info(assembled, joint_objects)
         time: list[float] = []
         frames: list[dict[str, float]] = []
@@ -302,7 +316,11 @@ class ExudynAdapter(SolverAdapter):
                         sensorNumbers=[],
                         sensorUserFunction=_cancel_sensor_fn,
                     ))
+                if bridge is not None:
+                    mbs.SetPreStepUserFunction(bridge.pre_step)
                 mbs.Assemble()
+                if bridge is not None:
+                    bridge.initialize(mbs)
                 with tempfile.TemporaryDirectory(prefix="quino_exudyn_") as temp_dir:
                     temp_dir_path = Path(temp_dir)
                     solution_path = temp_dir_path / "solution.txt"
@@ -383,6 +401,8 @@ class ExudynAdapter(SolverAdapter):
                 messages.append("Exudyn dynamic solve completed")
             elif solve_mode == "static":
                 mbs.Assemble()
+                if bridge is not None:
+                    bridge.initialize(mbs)
                 simulation_settings = exu.SimulationSettings()
                 simulation_settings.staticSolver.numberOfLoadSteps = 100
                 simulation_settings.solutionSettings.writeSolutionToFile = False
@@ -400,6 +420,8 @@ class ExudynAdapter(SolverAdapter):
                 raise ValueError(f"Unsupported Exudyn solve mode: {solve_mode}")
         else:
             mbs.Assemble()
+            if bridge is not None:
+                bridge.initialize(mbs)
             time = [0.0]
             frames = [self._collect_final_state(mbs, exu, assembled, node_numbers)]
             if project:

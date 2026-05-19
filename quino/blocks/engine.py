@@ -16,16 +16,17 @@ class BlockEngine:
     state for memoryful blocks (integrators, delays, PID, etc.).
     """
 
-    def __init__(self, compiled: CompiledDiagram) -> None:
+    def __init__(self, compiled: CompiledDiagram, context: Any = None) -> None:
         self._compiled = compiled
+        self._context = context
         self._states: dict[str, dict[str, np.ndarray]] = {}
         self._buffers: dict[str, dict[str, np.ndarray]] = {}
         self._init_states()
 
     @classmethod
-    def from_diagram(cls, diagram: BlockDiagram) -> "BlockEngine":
+    def from_diagram(cls, diagram: BlockDiagram, context: Any = None) -> "BlockEngine":
         compiled = compile_diagram(diagram)
-        return cls(compiled)
+        return cls(compiled, context)
 
     def _init_states(self) -> None:
         for instance_id, instance in self._compiled.source.instances.items():
@@ -58,10 +59,10 @@ class BlockEngine:
 
             # Execute
             if block_def.compute is not None:
-                outputs = block_def.compute(inputs, instance.parameters, t)
+                outputs = block_def.compute(inputs, instance.parameters, t, context=self._context)
             elif block_def.update is not None:
                 state = self._states[instance_id]
-                outputs = block_def.update(inputs, instance.parameters, t, dt, state)
+                outputs = block_def.update(inputs, instance.parameters, t, dt, state, context=self._context)
                 # Update persistent state (keys that are not output ports)
                 out_keys = {p.name for p in block_def.output_specs}
                 for key, val in outputs.items():

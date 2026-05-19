@@ -371,6 +371,9 @@ class ApplicationService:
     def create_ground_anchor(self, name: str, x: str, y: str) -> tuple[str, str]:
         return self.bodies.create_ground_anchor(name, x, y)
 
+    def create_free_ground(self, name: str, x: str, y: str) -> tuple[str, str]:
+        return self.bodies.create_free_ground(name, x, y)
+
     def get_marker_deletion_consequence(self, marker_id: str) -> str:
         return self.bodies.get_marker_deletion_consequence(marker_id)
 
@@ -648,6 +651,12 @@ class ApplicationService:
 
     def joint_angular_limit_values(self, joint: Joint) -> tuple[float | None, float | None]:
         return self.joints.joint_angular_limit_values(joint)
+
+    def joint_angular_limit_expression(self, joint: Joint, path: str) -> str | None:
+        return self.joints.joint_angular_limit_expression(joint, path)
+
+    def joint_angular_limit_value(self, joint: Joint, path: str, unit: str = "deg") -> float | None:
+        return self.joints.joint_angular_limit_value(joint, path, unit)
 
     # --- Sketch helper back-compat shims --------------------------------------
     # The following methods used to live on ApplicationService and are referenced
