@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from quino.domain.blocks import BlockDiagram, BlockInstance, Connection, PortSpec
 from quino.domain.model import (
     Body,
     BodyPose,
@@ -92,6 +93,8 @@ class JsonMapper:
             result["poses"] = [self._pose_to_dict(pose) for pose in project.poses]
         if project.simulation_initial_pose_id is not None:
             result["simulation_initial_pose_id"] = project.simulation_initial_pose_id
+        if project.block_diagram is not None and project.block_diagram.instances:
+            result["block_diagram"] = self._block_diagram_to_dict(project.block_diagram)
         return result
 
     def load(self, data: dict) -> Project:
@@ -127,6 +130,7 @@ class JsonMapper:
             ),
             view_state=ViewState(**data.get("view_state", {})),
             metadata=Metadata(project_block.get("metadata", {})),
+            block_diagram=self._block_diagram_from_dict(data.get("block_diagram")),
         )
 
     def save_file(self, project: Project, path: str | Path) -> None:
@@ -661,3 +665,63 @@ class JsonMapper:
             point_b_id=data["point_b_id"],
             **common,
         )
+
+    # ------------------------------------------------------------------
+    # Block diagram serialization (Paso 2.7)
+    # ------------------------------------------------------------------
+
+    def _block_diagram_to_dict(self, diagram: BlockDiagram) -> dict:
+        return {
+            "instances": {
+                instance_id: {
+                    "block_type": instance.block_type,
+                    "parameters": instance.parameters,
+                    "input_ports": [
+                        {"name": p.name, "shape": p.shape} for p in instance.input_ports
+                    ],
+                    "output_ports": [
+                        {"name": p.name, "shape": p.shape} for p in instance.output_ports
+                    ],
+                    "position": instance.position,
+                }
+                for instance_id, instance in diagram.instances.items()
+            },
+            "connections": [
+                {
+                    "src_instance": c.src_instance,
+                    "src_port": c.src_port,
+                    "dst_instance": c.dst_instance,
+                    "dst_port": c.dst_port,
+                }
+                for c in diagram.connections
+            ],
+        }
+
+    def _block_diagram_from_dict(self, data: dict | None) -> BlockDiagram | None:
+        if data is None:
+            return None
+        instances = {
+            instance_id: BlockInstance(
+                instance_id=instance_id,
+                block_type=item["block_type"],
+                parameters=item.get("parameters", {}),
+                input_ports=[
+                    PortSpec(p["name"], tuple(p["shape"])) for p in item.get("input_ports", [])
+                ],
+                output_ports=[
+                    PortSpec(p["name"], tuple(p["shape"])) for p in item.get("output_ports", [])
+                ],
+                position=tuple(item.get("position", [0.0, 0.0])),
+            )
+            for instance_id, item in data.get("instances", {}).items()
+        }
+        connections = [
+            Connection(
+                src_instance=c["src_instance"],
+                src_port=c["src_port"],
+                dst_instance=c["dst_instance"],
+                dst_port=c["dst_port"],
+            )
+            for c in data.get("connections", [])
+        ]
+        return BlockDiagram(instances=instances, connections=connections)

@@ -389,6 +389,7 @@ class Project:
     metadata: Metadata = field(default_factory=Metadata)
     sensor_outputs: dict[str, SensorOutput] = field(default_factory=dict)
     reaction_outputs: dict[str, ReactionOutput] = field(default_factory=dict)
+    block_diagram: "BlockDiagram | None" = None
 
 
 @dataclass(slots=True)
