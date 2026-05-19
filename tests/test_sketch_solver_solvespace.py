@@ -438,3 +438,70 @@ def test_lock_overrides_fix_constraint_semantics():
     x2, y2 = result.positions[p2]
     dist = ((x2 - 0.0) ** 2 + (y2 - 0.0) ** 2) ** 0.5
     assert abs(dist - 10.0) < 1e-4
+
+
+def test_tangent_line_to_circle_makes_line_touch_circle():
+    """Recta tangente a circulo: la distancia del centro a la recta = radio."""
+    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc.new_project("T")
+    svc.create_sketch("S")
+    # Recta de (0,0) a (10,0), inicialmente alejada del circulo.
+    p1 = svc.create_sketch_point("0 mm", "0 mm", "P1")
+    p2 = svc.create_sketch_point("10 mm", "0 mm", "P2")
+    line = svc.create_sketch_line_segment(p1, p2, "L")
+    # Circulo centro (5, 8) radio 3 - separado de la recta por dist=8.
+    center = svc.create_sketch_point("5 mm", "8 mm", "C")
+    circle = svc.create_sketch_circle(center, "3 mm", "Circ")
+    svc.create_sketch_constraint("fix", [p1])
+    svc.create_sketch_constraint("fix", [p2])
+    svc.create_sketch_constraint("fix", [center])
+    svc.create_sketch_constraint(
+        "tangent", [p1, p2], value="1", entity_references=[circle]
+    )
+    result = _make_backend().solve(svc.project)
+    assert result.success, result.message
+    # El radio del circulo debe haberse ajustado a 8 (distancia del centro a la recta)
+    assert circle in result.radius_updates
+    assert abs(result.radius_updates[circle] - 8.0) < 1e-3
+
+
+def test_tangent_circle_to_circle_external():
+    """Dos circulos tangentes externos: distancia entre centros = r1 + r2."""
+    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc.new_project("T")
+    svc.create_sketch("S")
+    c1 = svc.create_sketch_point("0 mm", "0 mm", "C1")
+    c2 = svc.create_sketch_point("20 mm", "0 mm", "C2")
+    circ1 = svc.create_sketch_circle(c1, "5 mm", "Circ1")
+    circ2 = svc.create_sketch_circle(c2, "3 mm", "Circ2")
+    svc.create_sketch_constraint("fix", [c1])
+    svc.create_sketch_constraint("fix", [c2])
+    svc.create_sketch_constraint(
+        "tangent", [], value="1", entity_references=[circ1, circ2]
+    )
+    result = _make_backend().solve(svc.project)
+    assert result.success, result.message
+    r1 = result.radius_updates.get(circ1, 5.0)
+    r2 = result.radius_updates.get(circ2, 3.0)
+    assert abs((r1 + r2) - 20.0) < 1e-3
+
+
+def test_tangent_circle_to_circle_internal():
+    """Dos circulos tangentes internos: distancia entre centros = |r1 - r2|."""
+    svc = ApplicationService(sketch_solver_backend="solvespace")
+    svc.new_project("T")
+    svc.create_sketch("S")
+    c1 = svc.create_sketch_point("0 mm", "0 mm", "C1")
+    c2 = svc.create_sketch_point("5 mm", "0 mm", "C2")
+    circ1 = svc.create_sketch_circle(c1, "10 mm", "Circ1")
+    circ2 = svc.create_sketch_circle(c2, "3 mm", "Circ2")
+    svc.create_sketch_constraint("fix", [c1])
+    svc.create_sketch_constraint("fix", [c2])
+    svc.create_sketch_constraint(
+        "tangent", [], value="-1", entity_references=[circ1, circ2]
+    )
+    result = _make_backend().solve(svc.project)
+    assert result.success, result.message
+    r1 = result.radius_updates.get(circ1, 10.0)
+    r2 = result.radius_updates.get(circ2, 3.0)
+    assert abs(abs(r1 - r2) - 5.0) < 1e-3
