@@ -1035,38 +1035,6 @@ def test_collinear_constraint_accepts_two_segments() -> None:
 
 
 
-def test_tangent_constraint_creates_helper_point_on_line_and_curve() -> None:
-    app = make_app()
-    app.new_project("SketchTangentHelper")
-
-    line_a = app.create_sketch_point("-10 mm", "0 mm", "L1")
-    line_b = app.create_sketch_point("10 mm", "0 mm", "L2")
-    app.create_sketch_line_segment(line_a, line_b, "Line1")
-    center = app.create_sketch_point("0 mm", "10 mm", "O")
-    circle_id = app.create_sketch_circle(center, "5 mm", "C1")
-
-    before_points = {entity.id for entity in app.project.sketch.points()}
-    app.create_sketch_constraint(
-        "tangent",
-        [line_a, line_b],
-        value="1",
-        name="Tan1",
-        entity_references=[circle_id],
-    )
-
-    after_points = {entity.id for entity in app.project.sketch.points()}
-    helper_ids = after_points - before_points
-    assert len(helper_ids) == 1
-    helper = app._find_sketch_point(next(iter(helper_ids)))
-    assert helper.construction is True
-    helper_constraints = [
-        constraint for constraint in app.project.sketch.constraints.values()
-        if helper.id in constraint.references and constraint.type.value == "coincident"
-    ]
-    assert len(helper_constraints) == 2
-
-
-
 
 
 def test_update_slider_geometry_is_atomic() -> None:

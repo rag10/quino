@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import math
 import re
 
@@ -42,8 +41,6 @@ class SketchCommands:
     def __init__(self, ctx: ServiceContext, solver: SketchSolver) -> None:
         self._ctx = ctx
         self._solver = solver
-        self._solve_cache: tuple[str, SketchSolveResult] | None = None
-
     @property
     def _project(self) -> Project:
         project = self._ctx.project_provider()
@@ -54,8 +51,7 @@ class SketchCommands:
     # --- internal state hooks (called from ApplicationService) ---------------
 
     def invalidate_cache(self) -> None:
-        """Drop the cached solver result. Called from facade's _snapshot."""
-        self._solve_cache = None
+        """No-op: solve cache removed. Kept for API compatibility."""
 
     # --- public sketch API ---------------------------------------------------
 
@@ -446,8 +442,6 @@ class SketchCommands:
         self._validate_sketch_constraint_name(constraint.name)
         self._ctx.snapshot()
         sketch.constraints[constraint.id] = constraint
-        if constraint_enum is SketchConstraintType.TANGENT:
-            self._create_tangent_helper_geometry(constraint, sketch, project)
         locked_refs = (
             set()
             if constraint_enum is SketchConstraintType.COINCIDENT and normalized_entity_refs
@@ -840,60 +834,6 @@ class SketchCommands:
                 if constraint_type is SketchConstraintType.TANGENT and not isinstance(entity, (SketchCircle, SketchArc)):
                     raise ValueError("Tangent constraint requires a circle or arc entity reference")
 
-    def _create_tangent_helper_geometry(self, constraint: SketchConstraint, sketch: Sketch, project: Project) -> None:
-        if len(constraint.references) != 2 or len(constraint.entity_references) != 1:
-            return
-        line_entity = self._find_line_entity_by_points(constraint.references, sketch)
-        if line_entity is None:
-            return
-        curve_entity = self._find_sketch_entity(constraint.entity_references[0])
-        if not isinstance(curve_entity, (SketchCircle, SketchArc)):
-            return
-        center = self._find_sketch_point(curve_entity.center_point_id)
-        line_a = self._find_sketch_point(constraint.references[0])
-        line_b = self._find_sketch_point(constraint.references[1])
-        cx = self._evaluate_sketch_expression(center.x, project.parameters)
-        cy = self._evaluate_sketch_expression(center.y, project.parameters)
-        ax = self._evaluate_sketch_expression(line_a.x, project.parameters)
-        ay = self._evaluate_sketch_expression(line_a.y, project.parameters)
-        bx = self._evaluate_sketch_expression(line_b.x, project.parameters)
-        by = self._evaluate_sketch_expression(line_b.y, project.parameters)
-        dx = bx - ax
-        dy = by - ay
-        denom = dx * dx + dy * dy
-        if denom <= 1e-12:
-            tx, ty = cx, cy
-        else:
-            t = ((cx - ax) * dx + (cy - ay) * dy) / denom
-            tx = ax + t * dx
-            ty = ay + t * dy
-        helper = SketchPoint(
-            id=self._ctx.ids.new("skpt"),
-            name=self._next_sketch_name("TangentPoint"),
-            type=SketchEntityType.POINT,
-            x=Expression(self._mm_expression(tx)),
-            y=Expression(self._mm_expression(ty)),
-            visible=True,
-            construction=True,
-        )
-        sketch.entities[helper.id] = helper
-        line_constraint = SketchConstraint(
-            id=self._ctx.ids.new("skcon"),
-            name=self._next_sketch_constraint_name("Coincident"),
-            type=SketchConstraintType.COINCIDENT,
-            references=[helper.id],
-            entity_references=[line_entity.id],
-        )
-        sketch.constraints[line_constraint.id] = line_constraint
-        curve_constraint = SketchConstraint(
-            id=self._ctx.ids.new("skcon"),
-            name=self._next_sketch_constraint_name("Coincident"),
-            type=SketchConstraintType.COINCIDENT,
-            references=[helper.id],
-            entity_references=[curve_entity.id],
-        )
-        sketch.constraints[curve_constraint.id] = curve_constraint
-
     def _find_line_entity_by_points(
         self,
         point_ids: list[str],
@@ -990,19 +930,6 @@ class SketchCommands:
             sum(point[1] for point in points) / len(points),
         )
 
-    def _sketch_signature(self, sketch: Sketch) -> str:
-        data = ""
-        for point in sketch.points():
-            data += f"{point.id}:{point.x.text}:{point.y.text};"
-        for entity in sketch.entities.values():
-            data += f"{entity.id}:{entity.type.value};"
-            if isinstance(entity, SketchCircle):
-                data += f"radius:{entity.radius.text};"
-        for constraint in sketch.constraints.values():
-            val_expr = constraint.value.expression if constraint.value is not None else ""
-            data += f"{constraint.id}:{constraint.type.value}:{','.join(constraint.references)}:{','.join(constraint.entity_references)}:{val_expr};"
-        return hashlib.md5(data.encode()).hexdigest()
-
     def _apply_sketch_constraints(
         self,
         locked_point_ids: set[str],
@@ -1015,12 +942,7 @@ class SketchCommands:
         if not project.sketch.constraints:
             project.sketch.solve_error = None
             return SketchSolveResult(True, {}, 0, 0.0, None)
-        sig = self._sketch_signature(project.sketch)
-        if self._solve_cache is not None and self._solve_cache[0] == sig:
-            result = self._solve_cache[1]
-        else:
-            result = self._solver.solve(project, locked_point_ids=locked_point_ids)
-            self._solve_cache = (sig, result)
+        result = self._solver.solve(project, locked_point_ids=locked_point_ids)
         # Persist bad_constraint_ids on the domain so the canvas can highlight them.
         project.sketch.bad_constraint_ids = list(result.bad_constraints)
         if result.success:
