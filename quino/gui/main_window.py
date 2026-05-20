@@ -41,6 +41,7 @@ from quino.domain.model import (
 )
 from quino.gui.canvas import CanvasMode, MechanismCanvas
 from quino.gui.panels.poses_panel import PosesPanel
+from quino.gui.panels.workflow_tree_panel import WorkflowTreePanel
 from quino.pose.geometry import assembled_reference_mechanism, marker_world_position, pose_to_state_overlay
 from quino.pose.kinematics import _pose_at_angle, build_drag_initial_pose, get_drag_driver, has_ground_revolute
 from quino.pose.model import PoseConstraint, PoseSolveResult, PoseSolveSettings
@@ -139,7 +140,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tree_delegate.visibility_toggled.connect(self._on_tree_visibility_toggled)
         self.tree.currentItemChanged.connect(self._on_tree_selection_changed)
         self.tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
-        splitter.addWidget(self.tree)
+
+        self._left_column = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        self._left_column.setChildrenCollapsible(False)
+        self.workflow_panel = WorkflowTreePanel(self.app_service)
+        self.workflow_panel.working_context_changed.connect(self._on_working_context_changed)
+        self.workflow_panel.run_analysis_requested.connect(self._on_run_analysis_requested)
+        self.workflow_panel.pose_selected.connect(self._on_workflow_pose_selected)
+        self._left_column.addWidget(self.workflow_panel)
+        self._left_column.addWidget(self.tree)
+        self._left_column.setSizes([180, 180])
+        splitter.addWidget(self._left_column)
 
         center_panel = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.canvas = MechanismCanvas(self.app_service)
@@ -346,12 +357,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._right_panel_tabs = right_panel
         self._poses_panel_index = right_panel.addTab(self.poses_panel, "Poses")
 
-        from quino.gui.panels.workspace_panel import WorkspacePanel
-        self.workspace_panel = WorkspacePanel(self.app_service)
-        self.workspace_panel.run_study_requested.connect(self._on_run_study_requested)
-        self._workspace_panel_index = right_panel.addTab(self.workspace_panel, "Workspace")
-
-        splitter.setSizes([260, 720, 440])
+        splitter.setSizes([280, 720, 440])
         self.tree.setMinimumWidth(200)
         right_panel.setMinimumWidth(320)
         self.setCentralWidget(central)
@@ -1097,8 +1103,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._populate_inspector()
         if hasattr(self, "poses_panel"):
             self.poses_panel.refresh()
-        if hasattr(self, "workspace_panel"):
-            self.workspace_panel.refresh()
+        if hasattr(self, "workflow_panel"):
+            self.workflow_panel.refresh()
         self.action_toggle_sketch_visible.setChecked(project.sketch.visible if project.sketch is not None else False)
         self.action_toggle_sensors.setChecked(project.view_state.show_sensors)
         self.canvas.set_show_sensors(project.view_state.show_sensors)
@@ -1108,18 +1114,23 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _refresh_block_editor(self) -> None:
         project = self.app_service.project
+        self._block_editor.set_project(project)
         if project is None:
             self._block_editor.set_diagram(None)
             return
-        if project.block_diagram is None:
-            project.block_diagram = BlockDiagram()
-        self._block_editor.set_diagram(project.block_diagram)
+        if project.model.control_graph is None:
+            project.model.control_graph = BlockDiagram()
+        self._block_editor.set_diagram(project.model.control_graph)
 
     def _on_block_diagram_changed(self) -> None:
         project = self.app_service.project
         if project is not None:
-            project.block_diagram = self._block_editor.diagram()
+            project.model.control_graph = self._block_editor.diagram()
             self.app_service._snapshot()
+            if project.workspace is not None:
+                from quino.services.workspace_invalidation import invalidate_on_model_change
+
+                invalidate_on_model_change(project)
 
     def _on_block_validation_error(self, message: str) -> None:
         self.statusBar().showMessage(f"Block diagram: {message}", 5000)
@@ -1177,10 +1188,35 @@ class MainWindow(QtWidgets.QMainWindow):
                 project_dir=project_dir,
             )
             self._mark_project_dirty()
-            if hasattr(self, "workspace_panel"):
-                self.workspace_panel.refresh()
+            if hasattr(self, "workflow_panel"):
+                self.workflow_panel.refresh()
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self, "Run Study Failed", str(exc))
+
+    def _on_run_analysis_requested(self, analysis_id: str) -> None:
+        project_dir = self._current_project_path.parent if self._current_project_path else None
+        try:
+            self.app_service.workspace.run_analysis(
+                analysis_id,
+                self.app_service.simulation_runner,
+                project_dir=project_dir,
+            )
+            self._mark_project_dirty()
+            if hasattr(self, "workflow_panel"):
+                self.workflow_panel.refresh()
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(self, "Run Analysis Failed", str(exc))
+
+    def _on_working_context_changed(self) -> None:
+        project = self.app_service.project
+        if project is not None:
+            self._populate_tree(project)
+        if hasattr(self, "workflow_panel"):
+            self.workflow_panel.refresh()
+        self.canvas.update()
+
+    def _on_workflow_pose_selected(self, pose_id: str) -> None:
+        pass  # future: set simulation initial pose
 
     def _update_window_title(self) -> None:
         project = self.app_service.project
