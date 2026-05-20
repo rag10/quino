@@ -48,6 +48,8 @@ from quino.services.sketch_solver import SketchSolver
 from quino.simulation.runner import SimulationRunner
 from quino.solver_adapters.exudyn_adapter import ExudynAdapter
 from quino.solver_adapters.exudyn_pose_adapter import ExudynPoseAdapter
+from quino.services.workspace_composition import compose_project as _compose_project
+from quino.domain.workspace import Study, StudyConfig, StudyMask
 
 
 class ApplicationService:
@@ -153,6 +155,28 @@ class ApplicationService:
     def save_project(self, path: str) -> None:
         project = self._require_project()
         self.json_mapper.save_file(project, path)
+
+    @property
+    def display_project(self):
+        """The effective project for UI display: composed if a case is active, else base."""
+        if self.project is None:
+            return None
+        ws = self.project.workspace
+        if ws is None or ws.active_case_id is None:
+            return self.project
+        case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
+        if case is None:
+            return self.project
+        _dummy_study = Study(
+            id="__display__",
+            name="",
+            config=StudyConfig(),
+            mask=StudyMask(),
+        )
+        try:
+            return _compose_project(self.project, _dummy_study, case)
+        except Exception:
+            return self.project
 
     def create_reference_pose(self, name: str = "Reference") -> Pose:
         return self.poses.create_reference_pose(name)
