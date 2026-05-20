@@ -49,7 +49,6 @@ from quino.simulation.runner import SimulationRunner
 from quino.solver_adapters.exudyn_adapter import ExudynAdapter
 from quino.solver_adapters.exudyn_pose_adapter import ExudynPoseAdapter
 from quino.services.workspace_composition import compose_project as _compose_project
-from quino.domain.workspace import Study, StudyConfig, StudyMask
 
 
 class ApplicationService:
@@ -167,14 +166,8 @@ class ApplicationService:
         case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
         if case is None:
             return self.project
-        _dummy_study = Study(
-            id="__display__",
-            name="",
-            config=StudyConfig(),
-            mask=StudyMask(),
-        )
         try:
-            return _compose_project(self.project, _dummy_study, case)
+            return _compose_project(self.project, case=case)
         except Exception:
             return self.project
 

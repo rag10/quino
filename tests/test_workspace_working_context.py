@@ -1,5 +1,7 @@
 import pytest
 from quino.application.service import ApplicationService
+from quino.domain.workspace import ScalarValue
+from quino.domain.inputs import PropertyValueInput
 
 
 @pytest.fixture
@@ -60,11 +62,6 @@ def test_set_selected_analysis(svc_with_workspace):
     assert svc.project.workspace.selected_analysis_id == analysis.id
 
 
-from quino.domain.model import Model
-from quino.domain.workspace import ScalarValue
-from quino.domain.inputs import MarkerInput, PropertyValueInput
-
-
 def test_display_project_no_case_returns_base(svc_with_workspace):
     svc, baseline, case = svc_with_workspace
     assert svc.display_project is svc.project
@@ -79,8 +76,8 @@ def test_display_project_with_case_composes_override(svc_with_workspace):
     # Give the case an override for the body's mass
     case.invariant_values[f"bodies/{body.id}/mass"] = ScalarValue(value=5.0, unit="kg")
     svc.set_working_context(case_id=case.id)
-    dp = svc.display_project
-    composed_body = next(b for b in dp.model.bodies if b.id == body.id)
+    composed = svc.display_project
+    composed_body = next(b for b in composed.model.bodies if b.id == body.id)
     # composed body's mass expression should reflect 5 kg
     assert "5" in composed_body.mass.expression
     # Base project should be unchanged
