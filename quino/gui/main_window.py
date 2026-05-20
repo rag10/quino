@@ -162,6 +162,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.poseMarkerDragged.connect(self._on_canvas_pose_marker_drag)
         self.canvas.poseMarkerPicked.connect(self._advance_pose_pick)
         self.canvas.set_edit_guard(self._prepare_for_model_edit)
+        self.canvas.set_structural_edit_guard(self._check_structural_edit_allowed)
         self.action_fit_view.triggered.connect(self.canvas.fit_view)
         self._canvas_stack = QtWidgets.QWidget()
         canvas_stack_layout = QtWidgets.QGridLayout(self._canvas_stack)
@@ -1752,9 +1753,27 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_show_trajectories.setChecked(True)
             self.canvas.set_show_trajectories(True)
 
+    def _check_structural_edit_allowed(self) -> bool:
+        """Return True if structural model edits are allowed. Shows warning when case is active."""
+        project = self.app_service.project
+        if project is None:
+            return True
+        ws = project.workspace
+        if ws is None or ws.active_case_id is None:
+            return True
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Edit Baseline Model",
+            "Adding or removing model elements modifies the baseline model and affects all cases.\n\nContinue?",
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+        )
+        return reply == QtWidgets.QMessageBox.StandardButton.Yes
+
     def _prepare_for_model_edit(self) -> bool:
         if self._playback_timer.isActive():
             self._append_message("Editing is only available at t=0")
+            return False
+        if not self._check_structural_edit_allowed():
             return False
         if not self._has_simulation_frames():
             return True

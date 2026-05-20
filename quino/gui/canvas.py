@@ -292,6 +292,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._pan_last_screen: QtCore.QPointF | None = None
         self._pending_joint_creation: dict[str, str | int | None] | None = None
         self._edit_guard: Callable[[], bool] | None = None
+        self._structural_edit_guard: Callable[[], bool] | None = None
         self._trajectories: list[list[tuple[float, float]]] = []
         self._show_trajectories: bool = True
         self._snap_preview_world: tuple[float, float] | None = None
@@ -717,6 +718,10 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def set_edit_guard(self, guard: Callable[[], bool] | None) -> None:
         self._edit_guard = guard
+
+    def set_structural_edit_guard(self, guard: Callable[[], bool] | None) -> None:
+        """Set a callback invoked before structural mutations that bypass _require_editing (e.g. context menu delete/connect)."""
+        self._structural_edit_guard: Callable[[], bool] | None = guard
 
     def inject_entity_selection(self, entity_id: str) -> None:
         """Process a tree-selection as if the user had clicked the entity on the canvas."""
@@ -1835,6 +1840,8 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._edit_driver_law_dialog(driver_id)
             return
         if chosen is delete_action:
+            if self._structural_edit_guard is not None and not self._structural_edit_guard():
+                return
             target_id = (
                 marker.entity_id
                 if marker is not None
@@ -1877,6 +1884,8 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._add_load_dialog(marker.entity_id)
             return
         if chosen in slider_actions and marker is not None:
+            if self._structural_edit_guard is not None and not self._structural_edit_guard():
+                return
             details = self._request_ground_or_slider_joint("SliderJoint")
             if details is None:
                 return
