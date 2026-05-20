@@ -52,6 +52,16 @@ from quino.gui.widgets.inspector_widget import InspectorPropertyWidget
 from quino.gui.blocks import BlockEditorWidget
 
 
+def _changed_entity_ids_for_case(case) -> set[str]:
+    """Return entity ids that have overrides in case.invariant_values."""
+    ids = set()
+    for path in case.invariant_values:
+        parts = path.split("/")
+        if len(parts) >= 2:
+            ids.add(parts[1])
+    return ids
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, app_service: ApplicationService | None = None) -> None:
         super().__init__()
@@ -1100,6 +1110,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_timeline_controls()
         self._apply_current_frame()
         self._populate_tree(project)
+        self._apply_case_delta_highlights()
         self._populate_parameters(project)
         self._populate_inspector()
         if hasattr(self, "poses_panel"):
@@ -1213,6 +1224,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if project is None:
             return
         self._populate_tree(project)
+        self._apply_case_delta_highlights()
         if hasattr(self, "workflow_panel"):
             self.workflow_panel.refresh()
         self._apply_current_frame()
@@ -2060,6 +2072,41 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.tree.setCurrentItem(item)
 
         self.tree.blockSignals(False)
+
+    def _apply_case_delta_highlights(self) -> None:
+        """Highlight model tree items with blue foreground for entities that have overrides in the active case."""
+        # First, clear all foreground overrides on entity items
+        it = QtWidgets.QTreeWidgetItemIterator(self.tree)
+        while it.value():
+            item = it.value()
+            item.setForeground(0, QtGui.QBrush())
+            it += 1
+
+        project = self.app_service.project
+        if project is None or project.workspace is None:
+            return
+        ws = project.workspace
+        if ws.active_case_id is None:
+            return
+        case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
+        if case is None or not case.invariant_values:
+            return
+
+        changed_ids = _changed_entity_ids_for_case(case)
+        highlight = QtGui.QBrush(QtGui.QColor("#2255aa"))
+        it = QtWidgets.QTreeWidgetItemIterator(self.tree)
+        while it.value():
+            item = it.value()
+            data = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+            if data is not None:
+                entity_id: str | None = None
+                if isinstance(data, (tuple, list)) and len(data) > 1:
+                    entity_id = data[1]
+                elif isinstance(data, str):
+                    entity_id = data
+                if entity_id and entity_id in changed_ids:
+                    item.setForeground(0, highlight)
+            it += 1
 
     def _collect_expanded_tree_keys(self) -> set[str]:
         keys: set[str] = set()
