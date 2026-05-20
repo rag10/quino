@@ -346,6 +346,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._right_panel_tabs = right_panel
         self._poses_panel_index = right_panel.addTab(self.poses_panel, "Poses")
 
+        from quino.gui.panels.workspace_panel import WorkspacePanel
+        self.workspace_panel = WorkspacePanel(self.app_service)
+        self.workspace_panel.run_study_requested.connect(self._on_run_study_requested)
+        self._workspace_panel_index = right_panel.addTab(self.workspace_panel, "Workspace")
+
         splitter.setSizes([260, 720, 440])
         self.tree.setMinimumWidth(200)
         right_panel.setMinimumWidth(320)
@@ -1092,6 +1097,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._populate_inspector()
         if hasattr(self, "poses_panel"):
             self.poses_panel.refresh()
+        if hasattr(self, "workspace_panel"):
+            self.workspace_panel.refresh()
         self.action_toggle_sketch_visible.setChecked(project.sketch.visible if project.sketch is not None else False)
         self.action_toggle_sensors.setChecked(project.view_state.show_sensors)
         self.canvas.set_show_sensors(project.view_state.show_sensors)
@@ -1160,6 +1167,20 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_poses_panel_mutated(self) -> None:
         self._mark_project_dirty()
+
+    def _on_run_study_requested(self, study_id: str) -> None:
+        project_dir = self._current_project_path.parent if self._current_project_path else None
+        try:
+            self.app_service.workspace.run_study(
+                study_id,
+                self.app_service.simulation_runner,
+                project_dir=project_dir,
+            )
+            self._mark_project_dirty()
+            if hasattr(self, "workspace_panel"):
+                self.workspace_panel.refresh()
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(self, "Run Study Failed", str(exc))
 
     def _update_window_title(self) -> None:
         project = self.app_service.project

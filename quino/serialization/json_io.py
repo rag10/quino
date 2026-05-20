@@ -4,6 +4,23 @@ import json
 from pathlib import Path
 
 from quino.domain.blocks import BlockDiagram, BlockInstance, Connection, PortSpec
+from quino.domain.workspace import (
+    Baseline,
+    Case,
+    CaseGroup,
+    MetricDefinition,
+    ResultRef,
+    Run,
+    RunEntry,
+    ScalarValue,
+    Study,
+    StudyConfig,
+    StudyMask,
+    StudyOverlay,
+    SweepParameter,
+    Tolerance,
+    Workspace,
+)
 from quino.domain.model import (
     Body,
     BodyPose,
@@ -95,6 +112,8 @@ class JsonMapper:
             result["simulation_initial_pose_id"] = project.simulation_initial_pose_id
         if project.block_diagram is not None and project.block_diagram.instances:
             result["block_diagram"] = self._block_diagram_to_dict(project.block_diagram)
+        if project.workspace is not None and not project.workspace.is_empty():
+            result["workspace"] = self._workspace_to_dict(project.workspace)
         return result
 
     def load(self, data: dict) -> Project:
@@ -131,6 +150,7 @@ class JsonMapper:
             view_state=ViewState(**data.get("view_state", {})),
             metadata=Metadata(project_block.get("metadata", {})),
             block_diagram=self._block_diagram_from_dict(data.get("block_diagram")),
+            workspace=self._workspace_from_dict(data.get("workspace")),
         )
 
     def save_file(self, project: Project, path: str | Path) -> None:
@@ -725,3 +745,298 @@ class JsonMapper:
             for c in data.get("connections", [])
         ]
         return BlockDiagram(instances=instances, connections=connections)
+
+    # ------------------------------------------------------------------
+    # Workspace serialization
+    # ------------------------------------------------------------------
+
+    def _workspace_to_dict(self, workspace: Workspace) -> dict:
+        return {
+            "baselines": [self._baseline_to_dict(b) for b in workspace.baselines],
+            "cases": [self._case_to_dict(c) for c in workspace.cases],
+            "case_groups": [self._case_group_to_dict(cg) for cg in workspace.case_groups],
+            "studies": [self._study_to_dict(s) for s in workspace.studies],
+            "runs": [self._run_to_dict(r) for r in workspace.runs],
+            "next_sequence": workspace.next_sequence,
+        }
+
+    def _workspace_from_dict(self, data: dict | None) -> Workspace | None:
+        if data is None:
+            return None
+        return Workspace(
+            baselines=[self._baseline_from_dict(b) for b in data.get("baselines", [])],
+            cases=[self._case_from_dict(c) for c in data.get("cases", [])],
+            case_groups=[self._case_group_from_dict(cg) for cg in data.get("case_groups", [])],
+            studies=[self._study_from_dict(s) for s in data.get("studies", [])],
+            runs=[self._run_from_dict(r) for r in data.get("runs", [])],
+            next_sequence=data.get("next_sequence", 1),
+        )
+
+    def _scalar_value_to_dict(self, value: ScalarValue) -> dict:
+        return {"value": value.value, "unit": value.unit}
+
+    def _scalar_value_from_dict(self, data: dict) -> ScalarValue:
+        return ScalarValue(value=float(data["value"]), unit=data.get("unit", ""))
+
+    def _tolerance_to_dict(self, tolerance: Tolerance) -> dict:
+        result: dict = {"metric_key": tolerance.metric_key}
+        if tolerance.absolute is not None:
+            result["absolute"] = tolerance.absolute
+        if tolerance.relative is not None:
+            result["relative"] = tolerance.relative
+        return result
+
+    def _tolerance_from_dict(self, data: dict) -> Tolerance:
+        return Tolerance(
+            metric_key=data["metric_key"],
+            absolute=data.get("absolute"),
+            relative=data.get("relative"),
+        )
+
+    def _metric_definition_to_dict(self, metric: MetricDefinition) -> dict:
+        return {
+            "key": metric.key,
+            "name": metric.name,
+            "extractor": metric.extractor,
+            "unit": metric.unit,
+        }
+
+    def _metric_definition_from_dict(self, data: dict) -> MetricDefinition:
+        return MetricDefinition(
+            key=data["key"],
+            name=data["name"],
+            extractor=data["extractor"],
+            unit=data.get("unit", ""),
+        )
+
+    def _baseline_to_dict(self, baseline: Baseline) -> dict:
+        return {
+            "id": baseline.id,
+            "name": baseline.name,
+            "description": baseline.description,
+            "tolerances": {
+                k: self._tolerance_to_dict(v) for k, v in baseline.tolerances.items()
+            },
+            "metrics": {
+                k: self._metric_definition_to_dict(v) for k, v in baseline.metrics.items()
+            },
+        }
+
+    def _baseline_from_dict(self, data: dict) -> Baseline:
+        return Baseline(
+            id=data["id"],
+            name=data["name"],
+            description=data.get("description", ""),
+            tolerances={
+                k: self._tolerance_from_dict(v)
+                for k, v in data.get("tolerances", {}).items()
+            },
+            metrics={
+                k: self._metric_definition_from_dict(v)
+                for k, v in data.get("metrics", {}).items()
+            },
+        )
+
+    def _case_to_dict(self, case: Case) -> dict:
+        return {
+            "id": case.id,
+            "name": case.name,
+            "baseline_id": case.baseline_id,
+            "invariant_values": {
+                k: self._scalar_value_to_dict(v) for k, v in case.invariant_values.items()
+            },
+            "metadata": case.metadata,
+        }
+
+    def _case_from_dict(self, data: dict) -> Case:
+        return Case(
+            id=data["id"],
+            name=data["name"],
+            baseline_id=data.get("baseline_id"),
+            invariant_values={
+                k: self._scalar_value_from_dict(v)
+                for k, v in data.get("invariant_values", {}).items()
+            },
+            metadata=data.get("metadata", {}),
+        )
+
+    def _sweep_parameter_to_dict(self, sp: SweepParameter) -> dict:
+        return {
+            "parameter_path": sp.parameter_path,
+            "values": [self._scalar_value_to_dict(v) for v in sp.values],
+        }
+
+    def _sweep_parameter_from_dict(self, data: dict) -> SweepParameter:
+        return SweepParameter(
+            parameter_path=data["parameter_path"],
+            values=[
+                self._scalar_value_from_dict(v) for v in data.get("values", [])
+            ],
+        )
+
+    def _case_group_to_dict(self, cg: CaseGroup) -> dict:
+        return {
+            "id": cg.id,
+            "name": cg.name,
+            "baseline_id": cg.baseline_id,
+            "sweep_parameters": [
+                self._sweep_parameter_to_dict(sp) for sp in cg.sweep_parameters
+            ],
+            "generated_case_ids": cg.generated_case_ids,
+        }
+
+    def _case_group_from_dict(self, data: dict) -> CaseGroup:
+        return CaseGroup(
+            id=data["id"],
+            name=data["name"],
+            baseline_id=data.get("baseline_id", ""),
+            sweep_parameters=[
+                self._sweep_parameter_from_dict(sp)
+                for sp in data.get("sweep_parameters", [])
+            ],
+            generated_case_ids=data.get("generated_case_ids", []),
+        )
+
+    def _study_config_to_dict(self, config: StudyConfig) -> dict:
+        return {
+            "duration": config.duration,
+            "steps": config.steps,
+            "translation_driver_mode": config.translation_driver_mode,
+            "solver_settings": config.solver_settings,
+        }
+
+    def _study_config_from_dict(self, data: dict) -> StudyConfig:
+        return StudyConfig(
+            duration=data.get("duration", 1.0),
+            steps=data.get("steps", 100),
+            translation_driver_mode=data.get("translation_driver_mode", "constraint"),
+            solver_settings=data.get("solver_settings", {}),
+        )
+
+    def _study_mask_to_dict(self, mask: StudyMask) -> dict:
+        return {
+            "include_cases": mask.include_cases,
+            "exclude_cases": mask.exclude_cases,
+            "include_baseline": mask.include_baseline,
+        }
+
+    def _study_mask_from_dict(self, data: dict) -> StudyMask:
+        return StudyMask(
+            include_cases=data.get("include_cases"),
+            exclude_cases=data.get("exclude_cases"),
+            include_baseline=data.get("include_baseline", True),
+        )
+
+    def _study_overlay_to_dict(self, overlay: StudyOverlay | None) -> dict | None:
+        if overlay is None:
+            return None
+        result: dict = {
+            "parameter_overrides": {
+                k: self._scalar_value_to_dict(v)
+                for k, v in overlay.parameter_overrides.items()
+            },
+        }
+        if overlay.block_diagram_overlay is not None:
+            result["block_diagram_overlay"] = self._block_diagram_to_dict(
+                overlay.block_diagram_overlay
+            )
+        return result
+
+    def _study_overlay_from_dict(self, data: dict | None) -> StudyOverlay | None:
+        if data is None:
+            return None
+        return StudyOverlay(
+            parameter_overrides={
+                k: self._scalar_value_from_dict(v)
+                for k, v in data.get("parameter_overrides", {}).items()
+            },
+            block_diagram_overlay=self._block_diagram_from_dict(
+                data.get("block_diagram_overlay")
+            ),
+        )
+
+    def _study_to_dict(self, study: Study) -> dict:
+        result: dict = {
+            "id": study.id,
+            "name": study.name,
+            "study_type": study.study_type,
+            "config": self._study_config_to_dict(study.config),
+            "variable_values": {
+                k: self._scalar_value_to_dict(v) for k, v in study.variable_values.items()
+            },
+            "mask": self._study_mask_to_dict(study.mask),
+        }
+        if study.overlay is not None:
+            result["overlay"] = self._study_overlay_to_dict(study.overlay)
+        return result
+
+    def _study_from_dict(self, data: dict) -> Study:
+        return Study(
+            id=data["id"],
+            name=data["name"],
+            study_type=data.get("study_type", "dynamic"),
+            config=self._study_config_from_dict(data.get("config", {})),
+            variable_values={
+                k: self._scalar_value_from_dict(v)
+                for k, v in data.get("variable_values", {}).items()
+            },
+            mask=self._study_mask_from_dict(data.get("mask", {})),
+            overlay=self._study_overlay_from_dict(data.get("overlay")),
+        )
+
+    def _result_ref_to_dict(self, ref: ResultRef) -> dict:
+        return {
+            "run_entry_id": ref.run_entry_id,
+            "artifact_path": ref.artifact_path,
+            "checksum": ref.checksum,
+        }
+
+    def _result_ref_from_dict(self, data: dict) -> ResultRef:
+        return ResultRef(
+            run_entry_id=data["run_entry_id"],
+            artifact_path=data["artifact_path"],
+            checksum=data["checksum"],
+        )
+
+    def _run_entry_to_dict(self, entry: RunEntry) -> dict:
+        result: dict = {
+            "id": entry.id,
+            "scope": entry.scope,
+            "case_id": entry.case_id,
+            "status": entry.status,
+            "metrics": entry.metrics,
+            "error_message": entry.error_message,
+        }
+        if entry.result_ref is not None:
+            result["result_ref"] = self._result_ref_to_dict(entry.result_ref)
+        return result
+
+    def _run_entry_from_dict(self, data: dict) -> RunEntry:
+        ref_data = data.get("result_ref")
+        return RunEntry(
+            id=data["id"],
+            scope=data["scope"],
+            case_id=data.get("case_id"),
+            status=data.get("status", "not_run"),
+            result_ref=self._result_ref_from_dict(ref_data) if ref_data else None,
+            metrics=data.get("metrics", {}),
+            error_message=data.get("error_message", ""),
+        )
+
+    def _run_to_dict(self, run: Run) -> dict:
+        return {
+            "id": run.id,
+            "study_id": run.study_id,
+            "created_at": run.created_at,
+            "status": run.status,
+            "entries": [self._run_entry_to_dict(e) for e in run.entries],
+        }
+
+    def _run_from_dict(self, data: dict) -> Run:
+        return Run(
+            id=data["id"],
+            study_id=data["study_id"],
+            created_at=data["created_at"],
+            status=data.get("status", "not_run"),
+            entries=[self._run_entry_from_dict(e) for e in data.get("entries", [])],
+        )

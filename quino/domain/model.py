@@ -390,6 +390,7 @@ class Project:
     sensor_outputs: dict[str, SensorOutput] = field(default_factory=dict)
     reaction_outputs: dict[str, ReactionOutput] = field(default_factory=dict)
     block_diagram: "BlockDiagram | None" = None
+    workspace: "Workspace | None" = None
 
 
 @dataclass(slots=True)

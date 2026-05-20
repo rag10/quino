@@ -35,6 +35,7 @@ from quino.application.commands.sketch_commands import SketchCommands
 from quino.application.commands.body_commands import BodyCommands
 from quino.application.commands.joint_commands import JointCommands
 from quino.application.commands.entity_commands import EntityCommands
+from quino.application.commands.workspace_commands import WorkspaceCommands
 from quino.serialization.json_io import JsonMapper
 from quino.pose.model import PoseConstraint, PoseSolveResult, PoseSolveSettings
 from quino.pose.runner import PoseRunner
@@ -110,6 +111,7 @@ class ApplicationService:
             parameters=self.parameters,
             poses=self.poses,
         )
+        self.workspace = WorkspaceCommands(self._service_context)
         # Rewire context callables to their canonical implementations
         self._service_context.find_entity = self.entities._find_entity
         self._service_context.sync_all_special_com_markers = self.bodies.sync_all_special_com_markers
