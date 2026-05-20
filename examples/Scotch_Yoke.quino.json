@@ -1,211 +1,12 @@
 {
   "schema_version": "0.1.0",
   "project": {
-    "id": "proj_001",
-    "name": "Slider Crank with Sketch",
+    "id": "proj_scotchyoke",
+    "name": "Scotch Yoke",
     "metadata": {}
   },
   "parameters": [],
-  "sketch": {
-    "id": "sketch_001",
-    "name": "Main Sketch",
-    "visible": true,
-    "style": {
-      "color": "#9aa0a6",
-      "visible": true,
-      "line_width": 1.0,
-      "marker_size": 4.0
-    },
-    "entities": {
-      "skpt_001": {
-        "id": "skpt_001",
-        "name": "A_sk",
-        "type": "point",
-        "visible": true,
-        "construction": false,
-        "selectable": true,
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {},
-        "x": {
-          "text": "0 mm",
-          "unit": "mm"
-        },
-        "y": {
-          "text": "0 mm",
-          "unit": "mm"
-        }
-      },
-      "skpt_002": {
-        "id": "skpt_002",
-        "name": "B_sk",
-        "type": "point",
-        "visible": true,
-        "construction": false,
-        "selectable": true,
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {},
-        "x": {
-          "text": "50 mm",
-          "unit": "mm"
-        },
-        "y": {
-          "text": "0 mm",
-          "unit": "mm"
-        }
-      },
-      "skpt_003": {
-        "id": "skpt_003",
-        "name": "P_sk",
-        "type": "point",
-        "visible": true,
-        "construction": false,
-        "selectable": true,
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {},
-        "x": {
-          "text": "150 mm",
-          "unit": "mm"
-        },
-        "y": {
-          "text": "0 mm",
-          "unit": "mm"
-        }
-      },
-      "skline_001": {
-        "id": "skline_001",
-        "name": "CrankSeg",
-        "type": "line_segment",
-        "visible": true,
-        "construction": false,
-        "selectable": true,
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {},
-        "start_point_id": "skpt_001",
-        "end_point_id": "skpt_002"
-      },
-      "skline_002": {
-        "id": "skline_002",
-        "name": "RodSeg",
-        "type": "line_segment",
-        "visible": true,
-        "construction": false,
-        "selectable": true,
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {},
-        "start_point_id": "skpt_002",
-        "end_point_id": "skpt_003"
-      },
-      "skinf_001": {
-        "id": "skinf_001",
-        "name": "GuideAxis",
-        "type": "infinite_line",
-        "visible": true,
-        "construction": false,
-        "selectable": true,
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {},
-        "point_a_id": "skpt_001",
-        "point_b_id": "skpt_003"
-      }
-    },
-    "constraints": {
-      "skcon_001": {
-        "id": "skcon_001",
-        "name": "FixA",
-        "type": "fix",
-        "references": [
-          "skpt_001"
-        ],
-        "value": null,
-        "entity_references": [],
-        "enabled": true,
-        "driving": true,
-        "metadata": {}
-      },
-      "skcon_002": {
-        "id": "skcon_002",
-        "name": "HGuide",
-        "type": "horizontal",
-        "references": [
-          "skpt_001",
-          "skpt_003"
-        ],
-        "value": null,
-        "entity_references": [],
-        "enabled": true,
-        "driving": true,
-        "metadata": {}
-      },
-      "skcon_003": {
-        "id": "skcon_003",
-        "name": "CrankLen",
-        "type": "distance",
-        "references": [
-          "skpt_001",
-          "skpt_002"
-        ],
-        "value": {
-          "expression": "50 mm",
-          "unit": "mm",
-          "expected_dimension": "length"
-        },
-        "entity_references": [],
-        "enabled": true,
-        "driving": true,
-        "metadata": {}
-      },
-      "skcon_004": {
-        "id": "skcon_004",
-        "name": "RodLen",
-        "type": "distance",
-        "references": [
-          "skpt_002",
-          "skpt_003"
-        ],
-        "value": {
-          "expression": "100 mm",
-          "unit": "mm",
-          "expected_dimension": "length"
-        },
-        "entity_references": [],
-        "enabled": true,
-        "driving": true,
-        "metadata": {}
-      }
-    },
-    "variables": {},
-    "metadata": {}
-  },
+  "sketch": null,
   "model": {
     "bodies": [
       {
@@ -214,8 +15,8 @@
         "type": "bar",
         "markers": [
           {
-            "id": "marker_001",
-            "name": "A",
+            "id": "m_A",
+            "name": "Pivot",
             "type": "structural",
             "x": {
               "expression": "0 mm",
@@ -237,11 +38,11 @@
             "metadata": {}
           },
           {
-            "id": "marker_002",
-            "name": "B",
+            "id": "m_B",
+            "name": "Pin",
             "type": "structural",
             "x": {
-              "expression": "50 mm",
+              "expression": "60 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -260,11 +61,11 @@
             "metadata": {}
           },
           {
-            "id": "marker_003",
+            "id": "m_c",
             "name": "CoM",
             "type": "com",
             "x": {
-              "expression": "25 mm",
+              "expression": "30 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -273,7 +74,7 @@
               "unit": "mm",
               "expected_dimension": "length"
             },
-            "visible": false,
+            "visible": true,
             "style": {
               "color": "#000000",
               "visible": true,
@@ -284,14 +85,17 @@
           }
         ],
         "edge_order": [
-          "marker_001",
-          "marker_002"
+          "m_A",
+          "m_B"
         ],
         "closed_shape": false,
-        "mass": null,
-        "inertia": null,
+        "mass": {
+          "expression": "0.3 kg",
+          "unit": "kg",
+          "expected_dimension": "mass"
+        },
         "style": {
-          "color": "#000000",
+          "color": "#2266cc",
           "visible": true,
           "line_width": 2.0,
           "marker_size": 6.0
@@ -300,15 +104,15 @@
       },
       {
         "id": "body_002",
-        "name": "Rod",
+        "name": "Yoke",
         "type": "bar",
         "markers": [
           {
-            "id": "marker_004",
-            "name": "B",
+            "id": "m_L",
+            "name": "Left",
             "type": "structural",
             "x": {
-              "expression": "50 mm",
+              "expression": "-80 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -327,11 +131,11 @@
             "metadata": {}
           },
           {
-            "id": "marker_005",
-            "name": "P",
+            "id": "m_R",
+            "name": "Right",
             "type": "structural",
             "x": {
-              "expression": "150 mm",
+              "expression": "80 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -350,11 +154,34 @@
             "metadata": {}
           },
           {
-            "id": "marker_006",
+            "id": "m_S",
+            "name": "Slot",
+            "type": "structural",
+            "x": {
+              "expression": "60 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "y": {
+              "expression": "0 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "visible": true,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "m_ycm",
             "name": "CoM",
             "type": "com",
             "x": {
-              "expression": "100 mm",
+              "expression": "0 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -363,7 +190,7 @@
               "unit": "mm",
               "expected_dimension": "length"
             },
-            "visible": false,
+            "visible": true,
             "style": {
               "color": "#000000",
               "visible": true,
@@ -374,14 +201,17 @@
           }
         ],
         "edge_order": [
-          "marker_004",
-          "marker_005"
+          "m_L",
+          "m_R"
         ],
         "closed_shape": false,
-        "mass": null,
-        "inertia": null,
+        "mass": {
+          "expression": "0.8 kg",
+          "unit": "kg",
+          "expected_dimension": "mass"
+        },
         "style": {
-          "color": "#000000",
+          "color": "#cc4422",
           "visible": true,
           "line_width": 2.0,
           "marker_size": 6.0
@@ -391,10 +221,10 @@
     ],
     "sliders": [
       {
-        "id": "slider_001",
-        "name": "Guide",
+        "id": "sl_horiz",
+        "name": "HorizontalRail",
         "origin_x": {
-          "expression": "150 mm",
+          "expression": "0 mm",
           "unit": "mm",
           "expected_dimension": "length"
         },
@@ -408,34 +238,70 @@
           "unit": "deg",
           "expected_dimension": "angle"
         },
+        "style": {
+          "color": "#888888",
+          "visible": true,
+          "line_width": 1.5,
+          "marker_size": 4.0
+        },
+        "metadata": {},
         "travel_min": {
-          "expression": "-60 mm",
+          "expression": "-80 mm",
           "unit": "mm",
           "expected_dimension": "length"
         },
         "travel_max": {
+          "expression": "80 mm",
+          "unit": "mm",
+          "expected_dimension": "length"
+        }
+      },
+      {
+        "id": "sl_vert",
+        "name": "VerticalSlot",
+        "origin_x": {
           "expression": "60 mm",
           "unit": "mm",
           "expected_dimension": "length"
         },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
+        "origin_y": {
+          "expression": "0 mm",
+          "unit": "mm",
+          "expected_dimension": "length"
         },
-        "metadata": {}
+        "angle": {
+          "expression": "90 deg",
+          "unit": "deg",
+          "expected_dimension": "angle"
+        },
+        "style": {
+          "color": "#888888",
+          "visible": true,
+          "line_width": 1.5,
+          "marker_size": 4.0
+        },
+        "metadata": {},
+        "travel_min": {
+          "expression": "-80 mm",
+          "unit": "mm",
+          "expected_dimension": "length"
+        },
+        "travel_max": {
+          "expression": "80 mm",
+          "unit": "mm",
+          "expected_dimension": "length"
+        }
       }
     ],
     "joints": [
       {
-        "id": "joint_001",
-        "name": "Ground_A",
+        "id": "j_pivot",
+        "name": "CrankPivot",
         "type": "revolute",
         "endpoint_a": {
           "kind": "marker",
           "body_id": "body_001",
-          "marker_id": "marker_001"
+          "marker_id": "m_A"
         },
         "endpoint_b": {
           "kind": "ground"
@@ -449,18 +315,17 @@
         "metadata": {}
       },
       {
-        "id": "joint_002",
-        "name": "Joint_B",
+        "id": "j_yoke_L",
+        "name": "YokeRail_L",
         "type": "revolute",
         "endpoint_a": {
           "kind": "marker",
-          "body_id": "body_001",
-          "marker_id": "marker_002"
+          "body_id": "body_002",
+          "marker_id": "m_L"
         },
         "endpoint_b": {
-          "kind": "marker",
-          "body_id": "body_002",
-          "marker_id": "marker_004"
+          "kind": "slider",
+          "slider_id": "sl_horiz"
         },
         "style": {
           "color": "#000000",
@@ -471,17 +336,59 @@
         "metadata": {}
       },
       {
-        "id": "joint_003",
-        "name": "Slider_P",
+        "id": "j_yoke_R",
+        "name": "YokeRail_R",
         "type": "revolute",
         "endpoint_a": {
           "kind": "marker",
           "body_id": "body_002",
-          "marker_id": "marker_005"
+          "marker_id": "m_R"
         },
         "endpoint_b": {
           "kind": "slider",
-          "slider_id": "slider_001"
+          "slider_id": "sl_horiz"
+        },
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {}
+      },
+      {
+        "id": "j_pin",
+        "name": "PinInSlot",
+        "type": "revolute",
+        "endpoint_a": {
+          "kind": "marker",
+          "body_id": "body_001",
+          "marker_id": "m_B"
+        },
+        "endpoint_b": {
+          "kind": "slider",
+          "slider_id": "sl_vert"
+        },
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {}
+      },
+      {
+        "id": "j_slot",
+        "name": "SlotOnYoke",
+        "type": "revolute",
+        "endpoint_a": {
+          "kind": "marker",
+          "body_id": "body_002",
+          "marker_id": "m_S"
+        },
+        "endpoint_b": {
+          "kind": "slider",
+          "slider_id": "sl_vert"
         },
         "style": {
           "color": "#000000",
@@ -494,10 +401,10 @@
     ],
     "drivers": [
       {
-        "id": "driver_001",
+        "id": "drv_001",
         "name": "CrankDrive",
         "type": "rotation",
-        "target_joint_id": "joint_001",
+        "target_joint_id": "j_pivot",
         "law": {
           "expression": "360 deg * t / 1 s",
           "unit": "deg",
@@ -506,29 +413,39 @@
         "metadata": {}
       }
     ],
+    "loads": [],
     "sensors": [
       {
-        "id": "sensor_001",
-        "name": "PistonSensor",
+        "id": "sen_001",
+        "name": "YokePosition",
         "type": "point",
         "marker_ids": [
-          "marker_005"
+          "m_ycm"
+        ],
+        "metadata": {}
+      },
+      {
+        "id": "sen_002",
+        "name": "PinPosition",
+        "type": "point",
+        "marker_ids": [
+          "m_B"
         ],
         "metadata": {}
       }
     ],
-    "loads": [],
-    "springs": []
+    "springs": [],
+    "gravity": null
   },
   "view_state": {
-    "zoom": 1.0,
+    "zoom": 2.5,
     "pan_x": 0.0,
-    "pan_y": 0.0,
+    "pan_y": 80.0,
     "show_grid": true,
+    "show_sensors": true,
     "show_markers": true,
     "show_com": false,
-    "show_sliders": true,
-    "show_sensors": true
+    "show_sliders": true
   },
   "workspace": {
     "baselines": [

@@ -98,7 +98,7 @@
         "style": {
           "color": "#000000",
           "visible": true,
-          "line_width": 1.0,
+          "line_width": 2.0,
           "marker_size": 6.0
         },
         "metadata": {}
@@ -162,7 +162,6 @@
       }
     ],
     "gravity": {
-      "enabled": true,
       "magnitude": 9.81,
       "direction_x": 0.0,
       "direction_y": -1.0
@@ -175,6 +174,39 @@
     "show_grid": true,
     "show_markers": true,
     "show_com": false,
-    "show_sliders": true
+    "show_sliders": true,
+    "show_sensors": true
+  },
+  "workspace": {
+    "baselines": [
+      {
+        "id": "baseline_001",
+        "name": "Baseline",
+        "description": "",
+        "source_run_id": null,
+        "model_snapshot_id": null,
+        "model_hash": null,
+        "invariant_parameter_keys": [],
+        "approval_status": null,
+        "approved_run_id": null,
+        "tolerances": {},
+        "metrics": {},
+        "metadata": {}
+      }
+    ],
+    "active_baseline_id": "baseline_001",
+    "active_case_id": null,
+    "selected_pose_id": null,
+    "selected_analysis_id": null,
+    "cases": [],
+    "poses": [],
+    "analyses": [],
+    "case_groups": [],
+    "studies": [],
+    "runs": [],
+    "parameter_catalog": {},
+    "model_snapshots": {},
+    "promotion_history": [],
+    "next_sequence": 2
   }
 }

@@ -311,5 +311,37 @@
         "dst_port": "in"
       }
     ]
+  },
+  "workspace": {
+    "baselines": [
+      {
+        "id": "baseline_001",
+        "name": "Baseline",
+        "description": "",
+        "source_run_id": null,
+        "model_snapshot_id": null,
+        "model_hash": null,
+        "invariant_parameter_keys": [],
+        "approval_status": null,
+        "approved_run_id": null,
+        "tolerances": {},
+        "metrics": {},
+        "metadata": {}
+      }
+    ],
+    "active_baseline_id": "baseline_001",
+    "active_case_id": null,
+    "selected_pose_id": null,
+    "selected_analysis_id": null,
+    "cases": [],
+    "poses": [],
+    "analyses": [],
+    "case_groups": [],
+    "studies": [],
+    "runs": [],
+    "parameter_catalog": {},
+    "model_snapshots": {},
+    "promotion_history": [],
+    "next_sequence": 2
   }
 }

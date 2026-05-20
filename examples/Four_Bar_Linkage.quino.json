@@ -1,8 +1,8 @@
 {
   "schema_version": "0.1.0",
   "project": {
-    "id": "proj_001",
-    "name": "Double Pendulum",
+    "id": "proj_fourbar",
+    "name": "Four-Bar Linkage",
     "metadata": {}
   },
   "parameters": [],
@@ -11,11 +11,11 @@
     "bodies": [
       {
         "id": "body_001",
-        "name": "Arm1",
+        "name": "Crank",
         "type": "bar",
         "markers": [
           {
-            "id": "marker_001",
+            "id": "m_A",
             "name": "A",
             "type": "structural",
             "x": {
@@ -38,16 +38,16 @@
             "metadata": {}
           },
           {
-            "id": "marker_002",
+            "id": "m_B",
             "name": "B",
             "type": "structural",
             "x": {
-              "expression": "70.71 mm",
+              "expression": "50 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
             "y": {
-              "expression": "70.71 mm",
+              "expression": "0 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -61,16 +61,16 @@
             "metadata": {}
           },
           {
-            "id": "marker_003",
+            "id": "m_c1",
             "name": "CoM",
             "type": "com",
             "x": {
-              "expression": "35.355 mm",
+              "expression": "25 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
             "y": {
-              "expression": "35.355 mm",
+              "expression": "0 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -85,18 +85,17 @@
           }
         ],
         "edge_order": [
-          "marker_001",
-          "marker_002"
+          "m_A",
+          "m_B"
         ],
         "closed_shape": false,
         "mass": {
-          "expression": "1 kg",
+          "expression": "0.5 kg",
           "unit": "kg",
           "expected_dimension": "mass"
         },
-        "inertia": null,
         "style": {
-          "color": "#000000",
+          "color": "#2266cc",
           "visible": true,
           "line_width": 2.0,
           "marker_size": 6.0
@@ -105,20 +104,20 @@
       },
       {
         "id": "body_002",
-        "name": "Arm2",
+        "name": "Coupler",
         "type": "bar",
         "markers": [
           {
-            "id": "marker_004",
+            "id": "m_B2",
             "name": "B",
             "type": "structural",
             "x": {
-              "expression": "70.71 mm",
+              "expression": "50 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
             "y": {
-              "expression": "70.71 mm",
+              "expression": "0 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -132,16 +131,16 @@
             "metadata": {}
           },
           {
-            "id": "marker_005",
+            "id": "m_C",
             "name": "C",
             "type": "structural",
             "x": {
-              "expression": "141.42 mm",
+              "expression": "180 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
             "y": {
-              "expression": "141.42 mm",
+              "expression": "60 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -155,16 +154,16 @@
             "metadata": {}
           },
           {
-            "id": "marker_006",
+            "id": "m_c2",
             "name": "CoM",
             "type": "com",
             "x": {
-              "expression": "106.065 mm",
+              "expression": "115 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
             "y": {
-              "expression": "106.065 mm",
+              "expression": "30 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -179,18 +178,110 @@
           }
         ],
         "edge_order": [
-          "marker_004",
-          "marker_005"
+          "m_B2",
+          "m_C"
         ],
         "closed_shape": false,
         "mass": {
-          "expression": "0.5 kg",
+          "expression": "1.0 kg",
           "unit": "kg",
           "expected_dimension": "mass"
         },
-        "inertia": null,
         "style": {
-          "color": "#000000",
+          "color": "#22aa44",
+          "visible": true,
+          "line_width": 2.0,
+          "marker_size": 6.0
+        },
+        "metadata": {}
+      },
+      {
+        "id": "body_003",
+        "name": "Follower",
+        "type": "bar",
+        "markers": [
+          {
+            "id": "m_C2",
+            "name": "C",
+            "type": "structural",
+            "x": {
+              "expression": "180 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "y": {
+              "expression": "60 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "visible": true,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "m_D",
+            "name": "D",
+            "type": "structural",
+            "x": {
+              "expression": "200 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "y": {
+              "expression": "0 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "visible": true,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "m_c3",
+            "name": "CoM",
+            "type": "com",
+            "x": {
+              "expression": "190 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "y": {
+              "expression": "30 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "visible": true,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          }
+        ],
+        "edge_order": [
+          "m_C2",
+          "m_D"
+        ],
+        "closed_shape": false,
+        "mass": {
+          "expression": "0.7 kg",
+          "unit": "kg",
+          "expected_dimension": "mass"
+        },
+        "style": {
+          "color": "#cc4422",
           "visible": true,
           "line_width": 2.0,
           "marker_size": 6.0
@@ -201,13 +292,13 @@
     "sliders": [],
     "joints": [
       {
-        "id": "joint_001",
-        "name": "Ground_A",
+        "id": "j_O2",
+        "name": "Ground_O2",
         "type": "revolute",
         "endpoint_a": {
           "kind": "marker",
           "body_id": "body_001",
-          "marker_id": "marker_001"
+          "marker_id": "m_A"
         },
         "endpoint_b": {
           "kind": "ground"
@@ -221,18 +312,60 @@
         "metadata": {}
       },
       {
-        "id": "joint_002",
+        "id": "j_B",
         "name": "Joint_B",
         "type": "revolute",
         "endpoint_a": {
           "kind": "marker",
           "body_id": "body_001",
-          "marker_id": "marker_002"
+          "marker_id": "m_B"
         },
         "endpoint_b": {
           "kind": "marker",
           "body_id": "body_002",
-          "marker_id": "marker_004"
+          "marker_id": "m_B2"
+        },
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {}
+      },
+      {
+        "id": "j_C",
+        "name": "Joint_C",
+        "type": "revolute",
+        "endpoint_a": {
+          "kind": "marker",
+          "body_id": "body_002",
+          "marker_id": "m_C"
+        },
+        "endpoint_b": {
+          "kind": "marker",
+          "body_id": "body_003",
+          "marker_id": "m_C2"
+        },
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {}
+      },
+      {
+        "id": "j_O4",
+        "name": "Ground_O4",
+        "type": "revolute",
+        "endpoint_a": {
+          "kind": "marker",
+          "body_id": "body_003",
+          "marker_id": "m_D"
+        },
+        "endpoint_b": {
+          "kind": "ground"
         },
         "style": {
           "color": "#000000",
@@ -243,25 +376,54 @@
         "metadata": {}
       }
     ],
-    "drivers": [],
-    "sensors": [],
-    "gravity": {
-      "magnitude": 9.81,
-      "direction_x": 0.0,
-      "direction_y": -1.0
-    },
+    "drivers": [
+      {
+        "id": "drv_001",
+        "name": "CrankDrive",
+        "type": "rotation",
+        "target_joint_id": "j_O2",
+        "law": {
+          "expression": "360 deg * t / 1 s",
+          "unit": "deg",
+          "expected_dimension": "angle"
+        },
+        "metadata": {}
+      }
+    ],
     "loads": [],
-    "springs": []
+    "sensors": [
+      {
+        "id": "sen_001",
+        "name": "CouplerMid",
+        "type": "point",
+        "marker_ids": [
+          "m_c2"
+        ],
+        "metadata": {}
+      },
+      {
+        "id": "sen_002",
+        "name": "FollowerAngle",
+        "type": "angle_vertical",
+        "marker_ids": [
+          "m_C2",
+          "m_D"
+        ],
+        "metadata": {}
+      }
+    ],
+    "springs": [],
+    "gravity": null
   },
   "view_state": {
-    "zoom": 1.0,
-    "pan_x": 0.0,
-    "pan_y": 0.0,
+    "zoom": 2.0,
+    "pan_x": 100.0,
+    "pan_y": 80.0,
     "show_grid": true,
+    "show_sensors": true,
     "show_markers": true,
     "show_com": false,
-    "show_sliders": true,
-    "show_sensors": true
+    "show_sliders": true
   },
   "workspace": {
     "baselines": [
