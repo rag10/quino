@@ -24,12 +24,14 @@ def panel_with_workspace():
 
 def test_panel_creates(panel_with_workspace):
     panel, *_ = panel_with_workspace
-    assert panel is not None
+    assert panel._tree.columnCount() == 1
 
 
 def test_badge_shows_working(panel_with_workspace):
     panel, svc, baseline, case = panel_with_workspace
-    assert "Working" in panel._badge.text()
+    svc.set_working_context(baseline_id=baseline.id)
+    panel._update_badge()
+    assert panel._badge.text() == "Working: Baseline 1"
 
 
 def test_tree_has_baseline_node(panel_with_workspace):
