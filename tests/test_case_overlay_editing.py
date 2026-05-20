@@ -50,6 +50,28 @@ def test_overlay_edit_is_undoable(svc_with_case):
     assert path not in restored_case.invariant_values
 
 
+def test_driver_law_edit_with_case_active_writes_to_overlay(svc_with_case):
+    svc, body, baseline, case = svc_with_case
+    # Connect a marker of the body to ground as a revolute joint, then create a driver
+    marker = body.markers[0]
+    joint_id = svc.connect_marker_to_ground(marker.id, joint_type="revolute", name="J1")
+    driver_id = svc.create_driver("D1", "rotation", joint_id, "0 deg", "deg")
+    driver = next(d for d in svc.project.model.drivers if d.id == driver_id)
+
+    # While case is active, editing the driver law should write to the overlay
+    svc.update_property(driver.id, "law", PropertyValueInput(kind="expression", value="45 deg"))
+
+    # Base model driver law should be unchanged ("0 deg")
+    base_driver = next(d for d in svc.project.model.drivers if d.id == driver_id)
+    assert "0" in base_driver.law.expression
+
+    # Case overlay should have the new law value evaluated at t=0
+    path = f"drivers/{driver_id}/law"
+    assert path in case.invariant_values
+    assert case.invariant_values[path].value == pytest.approx(45.0)
+    assert case.invariant_values[path].unit == "deg"
+
+
 def test_display_project_reflects_overlay(svc_with_case):
     svc, body, baseline, case = svc_with_case
     # Set a mass on the base body first so compose_project can resolve it

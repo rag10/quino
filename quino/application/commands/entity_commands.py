@@ -235,7 +235,7 @@ class EntityCommands:
             return f"springs/{entity.id}/{property_path}"
         if isinstance(entity, Load):
             return f"loads/{entity.id}/{property_path}"
-        return f"unknown/{entity.id}/{property_path}"
+        raise TypeError(f"Entity type {type(entity).__name__} does not support overlay")
 
     # ------------------------------------------------------------------
     # Style update
@@ -436,11 +436,18 @@ class EntityCommands:
                 unit=entity.law.unit,
                 expected_dimension=entity.law.expected_dimension,
             )
-            self._ctx.expressions.evaluate_property(
+            evaluated = self._ctx.expressions.evaluate_property(
                 law,
                 self._project.parameters,
                 variables={"t": self._ctx.units.quantity(0.0, "s")},
             )
+            _case = self._ctx.get_active_case()
+            if _case is not None:
+                _path = f"drivers/{entity.id}/law"
+                float_val = float(evaluated.value)
+                self._ctx.snapshot()
+                _case.invariant_values[_path] = _WsScalarValue(value=float_val, unit=law.unit)
+                return
             self._ctx.snapshot()
             entity.law = law
             return
@@ -451,14 +458,11 @@ class EntityCommands:
         # the case overlay instead of mutating the base model.
         case = self._ctx.get_active_case()
         if case is not None and isinstance(entity, (Body, Driver, Spring, Load)):
-            try:
-                float_val = float(
-                    self._ctx.expressions.evaluate_property(
-                        scalar, self._project.parameters
-                    ).value
-                )
-            except Exception:
-                float_val = 0.0
+            float_val = float(
+                self._ctx.expressions.evaluate_property(
+                    scalar, self._project.parameters
+                ).value
+            )
             path = self._entity_overlay_path(entity, property_path)
             self._ctx.snapshot()
             case.invariant_values[path] = _WsScalarValue(value=float_val, unit=scalar.unit)
