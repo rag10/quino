@@ -1132,7 +1132,7 @@ def test_mode_selector_is_overlaid_on_canvas() -> None:
     qt_app.processEvents()
 
     assert window._mode_model_btn.parentWidget().objectName() == "modeSelectorOverlay"
-    assert window._mode_model_btn.parentWidget().parentWidget() is window._canvas_stack
+    assert window._mode_model_btn.parentWidget().parentWidget() is window._center_stack
     assert window._mode_model_btn.parentWidget().pos() == QtCore.QPoint(12, 12)
 
     window.close()

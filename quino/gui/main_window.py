@@ -152,12 +152,6 @@ class MainWindow(QtWidgets.QMainWindow):
         canvas_stack_layout.setContentsMargins(0, 0, 0, 0)
         canvas_stack_layout.setSpacing(0)
         canvas_stack_layout.addWidget(self.canvas, 0, 0)
-        self._mode_selector_widget.setParent(self._canvas_stack)
-        self._mode_selector_widget.adjustSize()
-        self._mode_selector_widget.setFixedSize(self._mode_selector_widget.sizeHint())
-        self._mode_selector_widget.move(12, 12)
-        self._mode_selector_widget.raise_()
-
         self._block_editor = BlockEditorWidget()
         self._block_editor.diagramChanged.connect(self._on_block_diagram_changed)
         self._block_editor._scene.validationError.connect(self._on_block_validation_error)
@@ -165,6 +159,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._center_stack = QtWidgets.QStackedWidget()
         self._center_stack.addWidget(self._canvas_stack)
         self._center_stack.addWidget(self._block_editor)
+
+        self._mode_selector_widget.setParent(self._center_stack)
+        self._mode_selector_widget.adjustSize()
+        self._mode_selector_widget.setFixedSize(self._mode_selector_widget.sizeHint())
+        self._mode_selector_widget.move(12, 12)
+        self._mode_selector_widget.raise_()
 
         center_panel.addWidget(self._center_stack)
 
