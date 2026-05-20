@@ -1,0 +1,315 @@
+{
+  "schema_version": "0.1.0",
+  "project": {
+    "id": "proj_001",
+    "name": "Controlled Mass PID",
+    "metadata": {}
+  },
+  "parameters": [],
+  "sketch": null,
+  "model": {
+    "bodies": [
+      {
+        "id": "body_001",
+        "name": "Mass",
+        "type": "point_mass",
+        "markers": [
+          {
+            "id": "marker_001",
+            "name": "P",
+            "type": "structural",
+            "x": {
+              "expression": "0 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "y": {
+              "expression": "0 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "visible": true,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "marker_002",
+            "name": "CoM",
+            "type": "com",
+            "x": {
+              "expression": "0 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "y": {
+              "expression": "0 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "visible": true,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          }
+        ],
+        "edge_order": [
+          "marker_001"
+        ],
+        "closed_shape": true,
+        "mass": {
+          "expression": "1 kg",
+          "unit": "kg",
+          "expected_dimension": "mass"
+        },
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {}
+      }
+    ],
+    "sliders": [
+      {
+        "id": "slider_001",
+        "name": "Guide",
+        "origin_x": {
+          "expression": "0 mm",
+          "unit": "mm",
+          "expected_dimension": "length"
+        },
+        "origin_y": {
+          "expression": "0 mm",
+          "unit": "mm",
+          "expected_dimension": "length"
+        },
+        "angle": {
+          "expression": "0 deg",
+          "unit": "deg",
+          "expected_dimension": "angle"
+        },
+        "travel_min": null,
+        "travel_max": null,
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {}
+      }
+    ],
+    "joints": [
+      {
+        "id": "joint_001",
+        "name": "SliderJoint",
+        "type": "revolute",
+        "endpoint_a": {
+          "kind": "marker",
+          "body_id": "body_001",
+          "marker_id": "marker_001"
+        },
+        "endpoint_b": {
+          "kind": "slider",
+          "slider_id": "slider_001"
+        },
+        "style": {
+          "color": "#000000",
+          "visible": true,
+          "line_width": 1.0,
+          "marker_size": 6.0
+        },
+        "metadata": {}
+      }
+    ],
+    "drivers": [],
+    "loads": [],
+    "sensors": [],
+    "springs": [],
+    "gravity": null
+  },
+  "view_state": {
+    "zoom": 1.0,
+    "pan_x": 0.0,
+    "pan_y": 0.0,
+    "show_grid": true,
+    "show_sensors": true,
+    "show_markers": true,
+    "show_com": false,
+    "show_sliders": true
+  },
+  "block_diagram": {
+    "instances": {
+      "sensor": {
+        "block_type": "MBSSensor",
+        "parameters": {
+          "body_id": "body_001",
+          "variable": "Position",
+          "component": "x"
+        },
+        "input_ports": [],
+        "output_ports": [
+          {
+            "name": "out",
+            "shape": [
+              1
+            ]
+          }
+        ],
+        "position": [
+          0.0,
+          0.0
+        ]
+      },
+      "ref": {
+        "block_type": "Constant",
+        "parameters": {
+          "value": 0.1
+        },
+        "input_ports": [],
+        "output_ports": [
+          {
+            "name": "out",
+            "shape": [
+              1
+            ]
+          }
+        ],
+        "position": [
+          0.0,
+          0.0
+        ]
+      },
+      "err": {
+        "block_type": "Adder",
+        "parameters": {
+          "signs": [
+            1,
+            -1
+          ]
+        },
+        "input_ports": [
+          {
+            "name": "in0",
+            "shape": [
+              1
+            ]
+          },
+          {
+            "name": "in1",
+            "shape": [
+              1
+            ]
+          }
+        ],
+        "output_ports": [
+          {
+            "name": "out",
+            "shape": [
+              1
+            ]
+          }
+        ],
+        "position": [
+          0.0,
+          0.0
+        ]
+      },
+      "pid": {
+        "block_type": "PID",
+        "parameters": {
+          "kp": 20.0,
+          "ki": 2.0,
+          "kd": 4.0
+        },
+        "input_ports": [
+          {
+            "name": "error",
+            "shape": [
+              1
+            ]
+          }
+        ],
+        "output_ports": [
+          {
+            "name": "out",
+            "shape": [
+              1
+            ]
+          }
+        ],
+        "position": [
+          0.0,
+          0.0
+        ]
+      },
+      "act": {
+        "block_type": "MBSActuator",
+        "parameters": {
+          "body_id": "body_001",
+          "direction": [
+            1.0,
+            0.0,
+            0.0
+          ]
+        },
+        "input_ports": [
+          {
+            "name": "in",
+            "shape": [
+              1
+            ]
+          }
+        ],
+        "output_ports": [
+          {
+            "name": "out",
+            "shape": [
+              1
+            ]
+          }
+        ],
+        "position": [
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "connections": [
+      {
+        "src_instance": "ref",
+        "src_port": "out",
+        "dst_instance": "err",
+        "dst_port": "in0"
+      },
+      {
+        "src_instance": "sensor",
+        "src_port": "out",
+        "dst_instance": "err",
+        "dst_port": "in1"
+      },
+      {
+        "src_instance": "err",
+        "src_port": "out",
+        "dst_instance": "pid",
+        "dst_port": "error"
+      },
+      {
+        "src_instance": "pid",
+        "src_port": "out",
+        "dst_instance": "act",
+        "dst_port": "in"
+      }
+    ]
+  }
+}
