@@ -141,16 +141,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tree.currentItemChanged.connect(self._on_tree_selection_changed)
         self.tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
 
-        self._left_column = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
-        self._left_column.setChildrenCollapsible(False)
+        self.left_column = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        self.left_column.setChildrenCollapsible(False)
         self.workflow_panel = WorkflowTreePanel(self.app_service)
         self.workflow_panel.working_context_changed.connect(self._on_working_context_changed)
         self.workflow_panel.run_analysis_requested.connect(self._on_run_analysis_requested)
         self.workflow_panel.pose_selected.connect(self._on_workflow_pose_selected)
-        self._left_column.addWidget(self.workflow_panel)
-        self._left_column.addWidget(self.tree)
-        self._left_column.setSizes([180, 180])
-        splitter.addWidget(self._left_column)
+        self.left_column.addWidget(self.workflow_panel)
+        self.left_column.addWidget(self.tree)
+        self.left_column.setSizes([180, 180])
+        splitter.addWidget(self.left_column)
 
         center_panel = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.canvas = MechanismCanvas(self.app_service)
@@ -1209,10 +1209,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_working_context_changed(self) -> None:
         project = self.app_service.project
-        if project is not None:
-            self._populate_tree(project)
+        if project is None:
+            return
+        self._populate_tree(project)
         if hasattr(self, "workflow_panel"):
             self.workflow_panel.refresh()
+        self._apply_current_frame()
         self.canvas.update()
 
     def _on_workflow_pose_selected(self, pose_id: str) -> None:
