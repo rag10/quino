@@ -13,6 +13,7 @@ from quino.application.example_registry import ExampleEntry, ExampleRegistry
 from quino.application.service import ApplicationService
 from quino.domain.inputs import PropertyValueInput
 from quino.domain.types import DriverType, JointEndpointKind, MarkerType
+from quino.domain.blocks import BlockDiagram
 from quino.domain.model import (
     Body,
     Driver,
@@ -47,6 +48,7 @@ from quino.services.expressions import DimensionMismatchError
 from quino.simulation.sensor_expressions import safe_sensor_var, sensor_channel_keys
 from quino.viewer.plot_window import PlotWindow
 from quino.gui.widgets.inspector_widget import InspectorPropertyWidget
+from quino.gui.blocks import BlockEditorWidget
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -156,7 +158,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self._mode_selector_widget.move(12, 12)
         self._mode_selector_widget.raise_()
 
-        center_panel.addWidget(self._canvas_stack)
+        self._block_editor = BlockEditorWidget()
+        self._block_editor.diagramChanged.connect(self._on_block_diagram_changed)
+        self._block_editor._scene.validationError.connect(self._on_block_validation_error)
+
+        self._center_stack = QtWidgets.QStackedWidget()
+        self._center_stack.addWidget(self._canvas_stack)
+        self._center_stack.addWidget(self._block_editor)
+
+        center_panel.addWidget(self._center_stack)
 
         self._playback_widget = QtWidgets.QWidget()
         playback_layout = QtWidgets.QVBoxLayout(self._playback_widget)
@@ -754,16 +764,28 @@ class MainWindow(QtWidgets.QMainWindow):
         self._mode_sim_btn.setCheckable(True)
         self._mode_sim_btn.setFixedSize(70, 32)
         self._mode_sim_btn.setStyleSheet(
-            "QToolButton { border: 1px solid #ccc; border-top-right-radius: 14px; border-bottom-right-radius: 14px; background: #f0f0f0; color: #666; font-weight: bold; font-size: 11px; }"
+            "QToolButton { border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; border-left: none; border-right: none; background: #f0f0f0; color: #666; font-weight: bold; font-size: 11px; }"
             "QToolButton:checked { background: #31556f; color: white; border-color: #31556f; }"
             "QToolButton:hover:!checked { background: #e0e0e0; }"
         )
         self._mode_sim_btn.clicked.connect(lambda: self._set_app_mode("sim"))
 
+        self._mode_blocks_btn = QtWidgets.QToolButton()
+        self._mode_blocks_btn.setText("Blocks")
+        self._mode_blocks_btn.setCheckable(True)
+        self._mode_blocks_btn.setFixedSize(70, 32)
+        self._mode_blocks_btn.setStyleSheet(
+            "QToolButton { border: 1px solid #ccc; border-top-right-radius: 14px; border-bottom-right-radius: 14px; background: #f0f0f0; color: #666; font-weight: bold; font-size: 11px; }"
+            "QToolButton:checked { background: #31556f; color: white; border-color: #31556f; }"
+            "QToolButton:hover:!checked { background: #e0e0e0; }"
+        )
+        self._mode_blocks_btn.clicked.connect(lambda: self._set_app_mode("blocks"))
+
         layout.addWidget(self._mode_sketch_btn)
         layout.addWidget(self._mode_model_btn)
         layout.addWidget(self._mode_pose_btn)
         layout.addWidget(self._mode_sim_btn)
+        layout.addWidget(self._mode_blocks_btn)
         return container
 
     def _build_common_toolbar(self) -> None:
@@ -950,24 +972,42 @@ class MainWindow(QtWidgets.QMainWindow):
             self._mode_model_btn.setChecked(False)
             self._mode_pose_btn.setChecked(False)
             self._mode_sim_btn.setChecked(True)
+            self._mode_blocks_btn.setChecked(False)
             self._sketch_toolbar.setVisible(False)
             self._model_toolbar.setVisible(False)
             self._pose_toolbar.setVisible(False)
             self._sim_toolbar.setVisible(True)
             self._playback_widget.setVisible(True)
+            self._center_stack.setCurrentIndex(0)
             is_exudyn = self.app_service.simulation_runner.backend_name() == "exudyn"
             self.action_export_script.setEnabled(is_exudyn)
+            self.refresh_all()
+        elif mode == "blocks":
+            self._mode_sketch_btn.setChecked(False)
+            self._mode_model_btn.setChecked(False)
+            self._mode_pose_btn.setChecked(False)
+            self._mode_sim_btn.setChecked(False)
+            self._mode_blocks_btn.setChecked(True)
+            self._sketch_toolbar.setVisible(False)
+            self._model_toolbar.setVisible(False)
+            self._pose_toolbar.setVisible(False)
+            self._sim_toolbar.setVisible(False)
+            self._playback_widget.setVisible(False)
+            self._center_stack.setCurrentIndex(1)
+            self._refresh_block_editor()
             self.refresh_all()
         else:
             self._mode_sketch_btn.setChecked(False)
             self._mode_model_btn.setChecked(True)
             self._mode_pose_btn.setChecked(False)
             self._mode_sim_btn.setChecked(False)
+            self._mode_blocks_btn.setChecked(False)
             self._sketch_toolbar.setVisible(False)
             self._model_toolbar.setVisible(True)
             self._pose_toolbar.setVisible(False)
             self._sim_toolbar.setVisible(False)
             self._playback_widget.setVisible(False)
+            self._center_stack.setCurrentIndex(0)
             if self._has_simulation_frames():
                 self._rewind_simulation_to_start()
             self.refresh_all()
@@ -999,6 +1039,24 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.set_selection(self._selected_entity_id)
         self._update_interaction_state()
         self._update_status_message()
+
+    def _refresh_block_editor(self) -> None:
+        project = self.app_service.project
+        if project is None:
+            self._block_editor.set_diagram(None)
+            return
+        if project.block_diagram is None:
+            project.block_diagram = BlockDiagram()
+        self._block_editor.set_diagram(project.block_diagram)
+
+    def _on_block_diagram_changed(self) -> None:
+        project = self.app_service.project
+        if project is not None:
+            project.block_diagram = self._block_editor.diagram()
+            self.app_service._snapshot()
+
+    def _on_block_validation_error(self, message: str) -> None:
+        self.statusBar().showMessage(f"Block diagram: {message}", 5000)
 
     def _ensure_pose_session(self) -> None:
         project = self.app_service.project
