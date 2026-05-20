@@ -890,3 +890,14 @@ class ApplicationService:
     def update_spring_property(self, spring_id: str, property_path: str, value: "PropertyValueInput") -> None:
         self.forces.update_spring_property(spring_id, property_path, value)
 
+    # ------------------------------------------------------------------ workspace
+
+    def set_working_context(self, *, case_id: str | None = None, baseline_id: str | None = None) -> None:
+        self.workspace.set_working_context(case_id=case_id, baseline_id=baseline_id)
+
+    def set_selected_pose(self, pose_id: str | None) -> None:
+        self.workspace.set_selected_pose(pose_id)
+
+    def set_selected_analysis(self, analysis_id: str | None) -> None:
+        self.workspace.set_selected_analysis(analysis_id)
+

@@ -1,0 +1,60 @@
+import pytest
+from quino.application.service import ApplicationService
+
+
+@pytest.fixture
+def svc_with_workspace():
+    svc = ApplicationService()
+    svc.new_project("test")
+    baseline = svc.workspace.create_baseline("Baseline 1")
+    case = svc.workspace.create_case("Case 1", baseline_id=baseline.id)
+    return svc, baseline, case
+
+
+def test_set_working_context_case(svc_with_workspace):
+    svc, baseline, case = svc_with_workspace
+    svc.set_working_context(case_id=case.id)
+    ws = svc.project.workspace
+    assert ws.active_case_id == case.id
+    assert ws.active_baseline_id is None
+
+
+def test_set_working_context_baseline(svc_with_workspace):
+    svc, baseline, case = svc_with_workspace
+    svc.set_working_context(case_id=case.id)
+    svc.set_working_context(baseline_id=baseline.id)
+    ws = svc.project.workspace
+    assert ws.active_case_id is None
+    assert ws.active_baseline_id == baseline.id
+
+
+def test_set_working_context_clears_invalid_pose(svc_with_workspace):
+    svc, baseline, case = svc_with_workspace
+    pose_b = svc.workspace.create_pose("PoseB", baseline_id=baseline.id)
+    svc.workspace.set_selected_pose(pose_b.id)
+    # Switch to case — pose belongs to baseline, should be cleared
+    svc.set_working_context(case_id=case.id)
+    ws = svc.project.workspace
+    assert ws.selected_pose_id is None
+
+
+def test_set_working_context_is_undoable(svc_with_workspace):
+    svc, baseline, case = svc_with_workspace
+    svc.set_working_context(case_id=case.id)
+    svc.undo()
+    ws = svc.project.workspace
+    assert ws.active_case_id is None
+
+
+def test_set_selected_pose(svc_with_workspace):
+    svc, baseline, case = svc_with_workspace
+    pose = svc.workspace.create_pose("P1", case_id=case.id)
+    svc.workspace.set_selected_pose(pose.id)
+    assert svc.project.workspace.selected_pose_id == pose.id
+
+
+def test_set_selected_analysis(svc_with_workspace):
+    svc, baseline, case = svc_with_workspace
+    analysis = svc.workspace.create_analysis("A1", case_id=case.id)
+    svc.workspace.set_selected_analysis(analysis.id)
+    assert svc.project.workspace.selected_analysis_id == analysis.id
