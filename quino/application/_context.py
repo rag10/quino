@@ -34,3 +34,11 @@ class ServiceContext:
     connect_marker_to_ground: Callable[..., str]
     joints_for_marker: Callable[[str], list]
     translate_direct_joint_counterparts: Callable[..., set]
+
+    def get_active_case(self):
+        """Return the active Case if one is set, otherwise None."""
+        project = self.project_provider()
+        ws = project.workspace if project is not None else None
+        if ws is None or ws.active_case_id is None:
+            return None
+        return next((c for c in ws.cases if c.id == ws.active_case_id), None)

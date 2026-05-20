@@ -19,6 +19,7 @@ from quino.domain.model import (
     Driver,
     GravityLoad,
     Joint,
+    Load,
     Marker,
     Parameter,
     Project,
@@ -35,6 +36,7 @@ from quino.domain.model import (
     Spring,
 )
 from quino.domain.types import BodyType, Dimension, MarkerType
+from quino.domain.workspace import ScalarValue as _WsScalarValue
 
 
 class EntityCommands:
@@ -219,6 +221,21 @@ class EntityCommands:
                 scalar, self._project.parameters
             ).value
             entity.com_marker().visible = value != 0
+
+    # ------------------------------------------------------------------
+    # Case overlay helpers
+    # ------------------------------------------------------------------
+
+    def _entity_overlay_path(self, entity: object, property_path: str) -> str:
+        if isinstance(entity, Body):
+            return f"bodies/{entity.id}/{property_path}"
+        if isinstance(entity, Driver):
+            return f"drivers/{entity.id}/{property_path}"
+        if isinstance(entity, Spring):
+            return f"springs/{entity.id}/{property_path}"
+        if isinstance(entity, Load):
+            return f"loads/{entity.id}/{property_path}"
+        return f"unknown/{entity.id}/{property_path}"
 
     # ------------------------------------------------------------------
     # Style update
@@ -430,6 +447,22 @@ class EntityCommands:
         if value.kind != "expression" or not isinstance(value.value, str):
             raise ValueError("Scalar properties require an expression value")
         scalar = self._build_validated_scalar_property(entity, property_path, value.value)
+        # If a case is active and the entity is a case-overridable type, route to
+        # the case overlay instead of mutating the base model.
+        case = self._ctx.get_active_case()
+        if case is not None and isinstance(entity, (Body, Driver, Spring, Load)):
+            try:
+                float_val = float(
+                    self._ctx.expressions.evaluate_property(
+                        scalar, self._project.parameters
+                    ).value
+                )
+            except Exception:
+                float_val = 0.0
+            path = self._entity_overlay_path(entity, property_path)
+            self._ctx.snapshot()
+            case.invariant_values[path] = _WsScalarValue(value=float_val, unit=scalar.unit)
+            return
         self._ctx.snapshot()
         self._assign_scalar_property(entity, property_path, scalar)
 
