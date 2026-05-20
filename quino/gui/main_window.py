@@ -3911,6 +3911,22 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.inspector.add_property(label, path, value, kind, evaluated, enabled)
             self.inspector.layout.addStretch()
 
+            # --- inject baseline hints for case-overridden properties ---
+            project = self.app_service.project
+            if project is not None and project.workspace is not None:
+                ws = project.workspace
+                if ws.active_case_id and self._selected_entity_id:
+                    case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
+                    if case:
+                        for iv_path, scalar in case.invariant_values.items():
+                            parts = iv_path.split("/")
+                            # paths look like: category/entity_id/prop
+                            if len(parts) >= 3 and parts[1] == self._selected_entity_id:
+                                prop_path = parts[2]
+                                unit = scalar.unit
+                                hint = f"Baseline: {scalar.value:.4g} {unit}".strip()
+                                self.inspector.set_property_hint(prop_path, hint)
+
             # --- markers section for Body/Bar (consolidated with reordering) ---
             if isinstance(entity, Body) and entity.markers:
                 visible_markers = [m for m in entity.markers if m.visible or m.type.value != "com"]

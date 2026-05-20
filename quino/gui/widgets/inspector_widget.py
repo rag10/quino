@@ -85,6 +85,12 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
 
     def add_property(self, label: str, path: str, value: str, kind: str, evaluated: str, enabled: bool = True):
         """Add a single property row to the form."""
+        # Outer container supports an optional hint label below the row
+        outer_widget = QtWidgets.QWidget()
+        outer_layout = QtWidgets.QVBoxLayout(outer_widget)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
         row_widget = QtWidgets.QWidget()
         row_layout = QtWidgets.QHBoxLayout(row_widget)
         row_layout.setContentsMargins(0, 0, 0, 0)
@@ -100,8 +106,10 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
         input_widget = self._create_input_widget(path, value, kind, evaluated, enabled)
         row_layout.addWidget(input_widget, stretch=1)
 
-        # Store for later reference
-        self._row_widgets[path] = row_widget
+        outer_layout.addWidget(row_widget)
+
+        # Store for later reference (outer_widget allows hint injection)
+        self._row_widgets[path] = outer_widget
         self._compat_rows.append({
             "label": label,
             "path": path,
@@ -112,7 +120,35 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
             "editor": self._extract_editor(input_widget),
             "widget": input_widget,
         })
-        self.layout.addWidget(row_widget)
+        self.layout.addWidget(outer_widget)
+
+    def set_property_hint(self, path: str, hint: str) -> None:
+        """Add a small gray hint label below the property row for the given path.
+
+        Typically used to show the baseline value when a case override is active.
+        If the path is not found, this is a no-op.
+        """
+        outer_widget = self._row_widgets.get(path)
+        if outer_widget is None:
+            return
+        outer_layout = outer_widget.layout()
+        if outer_layout is None:
+            return
+        # Remove any existing hint labels (avoid duplicates on re-populate)
+        for i in reversed(range(outer_layout.count())):
+            item = outer_layout.itemAt(i)
+            if item and isinstance(item.widget(), QtWidgets.QLabel):
+                lbl = item.widget()
+                if lbl.property("is_baseline_hint"):
+                    outer_layout.removeWidget(lbl)
+                    lbl.deleteLater()
+        hint_label = QtWidgets.QLabel(hint)
+        hint_label.setProperty("is_baseline_hint", True)
+        hint_label.setStyleSheet(
+            "color: #888888; font-size: 8pt; margin-left: 108px; margin-top: 0px;"
+        )
+        hint_label.setWordWrap(False)
+        outer_layout.addWidget(hint_label)
 
     def rowCount(self) -> int:
         return len(self._compat_rows)
