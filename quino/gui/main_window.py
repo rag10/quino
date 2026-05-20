@@ -472,6 +472,26 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_preferences.triggered.connect(self._show_preferences_dialog)
         self.action_preferences.setToolTip("Open preferences dialog")
 
+        self.action_mode_sketch = QtGui.QAction("Sketch", self)
+        self.action_mode_sketch.triggered.connect(lambda: self._set_app_mode("sketch"))
+        self.action_mode_sketch.setCheckable(True)
+
+        self.action_mode_model = QtGui.QAction("Model", self)
+        self.action_mode_model.triggered.connect(lambda: self._set_app_mode("model"))
+        self.action_mode_model.setCheckable(True)
+
+        self.action_mode_pose = QtGui.QAction("Pose", self)
+        self.action_mode_pose.triggered.connect(lambda: self._set_app_mode("pose"))
+        self.action_mode_pose.setCheckable(True)
+
+        self.action_mode_sim = QtGui.QAction("Sim", self)
+        self.action_mode_sim.triggered.connect(lambda: self._set_app_mode("sim"))
+        self.action_mode_sim.setCheckable(True)
+
+        self.action_mode_blocks = QtGui.QAction("Blocks", self)
+        self.action_mode_blocks.triggered.connect(lambda: self._set_app_mode("blocks"))
+        self.action_mode_blocks.setCheckable(True)
+
         self.action_delete = QtGui.QAction(get_icon("delete", color_danger), "Delete", self)
         self.action_delete.setShortcut(QtGui.QKeySequence.StandardKey.Delete)
         self.action_delete.triggered.connect(self.delete_selected_entity)
@@ -658,6 +678,13 @@ class MainWindow(QtWidgets.QMainWindow):
         edit_menu.addAction(self.action_delete)
         edit_menu.addSeparator()
         edit_menu.addAction(self.action_preferences)
+
+        mode_menu = menubar.addMenu("&Mode")
+        mode_menu.addAction(self.action_mode_sketch)
+        mode_menu.addAction(self.action_mode_model)
+        mode_menu.addAction(self.action_mode_pose)
+        mode_menu.addAction(self.action_mode_sim)
+        mode_menu.addAction(self.action_mode_blocks)
 
         examples_menu = menubar.addMenu("E&xamples")
         self._build_examples_menu(examples_menu)
