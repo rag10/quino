@@ -53,7 +53,7 @@ class WorkspacePanel(QtWidgets.QWidget):
         self._tree = QtWidgets.QTreeWidget()
         self._tree.setHeaderHidden(True)
         self._tree.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
-        self._tree.itemChanged.connect(self._on_item_changed)
+        self._tree.currentItemChanged.connect(self._on_current_item_changed)
         self._tree.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
         self._tree.customContextMenuRequested.connect(self._on_context_menu)
         outer.addWidget(self._tree, stretch=1)
@@ -70,62 +70,63 @@ class WorkspacePanel(QtWidgets.QWidget):
         self._tree.clear()
         self._item_map.clear()
         project = self.app_service.project
-        if project is None or project.workspace is None or project.workspace.is_empty():
+        if project is None:
             item = QtWidgets.QTreeWidgetItem(self._tree)
-            item.setText(0, "No workspace items")
+            item.setText(0, "No project loaded")
             item.setFlags(item.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
+            self._update_toolbar_state()
             return
+
+        # Ensure workspace exists so user can always create items
+        if project.workspace is None:
+            project.workspace = self.app_service.workspace._ensure_workspace()
 
         ws = project.workspace
 
-        # Baselines
-        if ws.baselines:
-            baseline_root = QtWidgets.QTreeWidgetItem(self._tree, ["Baselines"])
-            baseline_root.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("root", "baselines"))
-            for baseline in ws.baselines:
-                item = QtWidgets.QTreeWidgetItem(baseline_root, [baseline.name])
-                item.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("baseline", baseline.id))
-                self._item_map[baseline.id] = item
+        # Baselines root (always visible)
+        baseline_root = QtWidgets.QTreeWidgetItem(self._tree, ["Baselines"])
+        baseline_root.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("root", "baselines"))
+        for baseline in ws.baselines:
+            item = QtWidgets.QTreeWidgetItem(baseline_root, [baseline.name])
+            item.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("baseline", baseline.id))
+            self._item_map[baseline.id] = item
 
-        # Cases
-        if ws.cases:
-            case_root = QtWidgets.QTreeWidgetItem(self._tree, ["Cases"])
-            case_root.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("root", "cases"))
-            for case in ws.cases:
-                item = QtWidgets.QTreeWidgetItem(case_root, [case.name])
-                item.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("case", case.id))
-                self._item_map[case.id] = item
+        # Cases root (always visible)
+        case_root = QtWidgets.QTreeWidgetItem(self._tree, ["Cases"])
+        case_root.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("root", "cases"))
+        for case in ws.cases:
+            item = QtWidgets.QTreeWidgetItem(case_root, [case.name])
+            item.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("case", case.id))
+            self._item_map[case.id] = item
 
-        # Case Groups
-        if ws.case_groups:
-            cg_root = QtWidgets.QTreeWidgetItem(self._tree, ["Case Groups"])
-            cg_root.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("root", "case_groups"))
-            for cg in ws.case_groups:
-                item = QtWidgets.QTreeWidgetItem(cg_root, [cg.name])
-                item.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("case_group", cg.id))
-                self._item_map[cg.id] = item
+        # Case Groups root (always visible)
+        cg_root = QtWidgets.QTreeWidgetItem(self._tree, ["Case Groups"])
+        cg_root.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("root", "case_groups"))
+        for cg in ws.case_groups:
+            item = QtWidgets.QTreeWidgetItem(cg_root, [cg.name])
+            item.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("case_group", cg.id))
+            self._item_map[cg.id] = item
 
-        # Studies
-        if ws.studies:
-            study_root = QtWidgets.QTreeWidgetItem(self._tree, ["Studies"])
-            study_root.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("root", "studies"))
-            for study in ws.studies:
-                study_item = QtWidgets.QTreeWidgetItem(study_root, [study.name])
-                study_item.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("study", study.id))
-                self._item_map[study.id] = study_item
+        # Studies root (always visible)
+        study_root = QtWidgets.QTreeWidgetItem(self._tree, ["Studies"])
+        study_root.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("root", "studies"))
+        for study in ws.studies:
+            study_item = QtWidgets.QTreeWidgetItem(study_root, [study.name])
+            study_item.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("study", study.id))
+            self._item_map[study.id] = study_item
 
-                # Runs under study
-                study_runs = [r for r in ws.runs if r.study_id == study.id]
-                for run in study_runs:
-                    run_item = QtWidgets.QTreeWidgetItem(study_item, [f"Run {run.id} ({run.status})"])
-                    run_item.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("run", run.id))
-                    self._item_map[run.id] = run_item
-                    for entry in run.entries:
-                        label = f"{entry.scope}: {entry.status}"
-                        if entry.case_id:
-                            label = f"Case {entry.case_id}: {entry.status}"
-                        entry_item = QtWidgets.QTreeWidgetItem(run_item, [label])
-                        entry_item.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("entry", entry.id))
+            # Runs under study
+            study_runs = [r for r in ws.runs if r.study_id == study.id]
+            for run in study_runs:
+                run_item = QtWidgets.QTreeWidgetItem(study_item, [f"Run {run.id} ({run.status})"])
+                run_item.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("run", run.id))
+                self._item_map[run.id] = run_item
+                for entry in run.entries:
+                    label = f"{entry.scope}: {entry.status}"
+                    if entry.case_id:
+                        label = f"Case {entry.case_id}: {entry.status}"
+                    entry_item = QtWidgets.QTreeWidgetItem(run_item, [label])
+                    entry_item.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("entry", entry.id))
 
         self._tree.expandAll()
         self._update_toolbar_state()
@@ -136,9 +137,19 @@ class WorkspacePanel(QtWidgets.QWidget):
 
     def _on_new(self) -> None:
         selected = self._selected_item()
-        if selected is None:
-            return
-        kind, _ = selected.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        kind = ""
+        if selected is not None:
+            kind, _ = selected.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        # If nothing selected or a root selected, show a generic new dialog
+        if not kind or kind == "root":
+            options = ["Baseline", "Case", "Study"]
+            choice, ok = QtWidgets.QInputDialog.getItem(
+                self, "New Workspace Item", "Type:", options, 0, False
+            )
+            if not ok:
+                return
+            kind_map = {"Baseline": "baselines", "Case": "cases", "Study": "studies"}
+            kind = kind_map.get(choice, choice.lower())
         if kind in ("root", "baselines", "baseline"):
             name, ok = QtWidgets.QInputDialog.getText(self, "New Baseline", "Name:")
             if ok and name:
@@ -203,7 +214,7 @@ class WorkspacePanel(QtWidgets.QWidget):
         if kind == "study":
             self.run_study_requested.emit(obj_id)
 
-    def _on_item_changed(self) -> None:
+    def _on_current_item_changed(self) -> None:
         self._update_toolbar_state()
 
     def _update_toolbar_state(self) -> None:
