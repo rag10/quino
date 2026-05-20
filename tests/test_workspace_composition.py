@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from quino import ApplicationService, MarkerInput
-from quino.domain.workspace import Case, ScalarValue, Study, StudyOverlay
+from quino.domain.workspace import Case, ScalarValue, Study, StudyOverlay, Workspace
 from quino.services.workspace_composition import compose_project, _apply_parameter_override
 
 
@@ -173,3 +173,52 @@ def test_apply_parameter_override_block_diagram() -> None:
     composed = compose_project(base, study, case)
     assert composed.block_diagram.instances["pid_001"].parameters["kp"] == 5.0
     assert composed.block_diagram.instances["pid_001"].parameters["ki"] == 0.1
+
+
+def test_apply_parameter_override_model_control_graph() -> None:
+    from quino.domain.blocks import BlockDiagram, BlockInstance
+
+    app = ApplicationService()
+    base = app.new_project("Base")
+    base.model.control_graph = BlockDiagram(
+        instances={"pid_001": BlockInstance(instance_id="pid_001", block_type="PID", parameters={"kp": 1.0, "ki": 0.1})},
+        connections=[],
+    )
+
+    study = Study(id="s1", name="Study")
+    case = Case(
+        id="c1",
+        name="Case1",
+        invariant_values={"model/control_graph/instances/pid_001/parameters/kp": ScalarValue(7.0, "")},
+    )
+
+    composed = compose_project(base, study, case)
+    assert composed.model.control_graph is not None
+    assert composed.model.control_graph.instances["pid_001"].parameters["kp"] == 7.0
+
+
+def test_compose_project_applies_parent_case_chain_accumulatively() -> None:
+    app = ApplicationService()
+    base = app.new_project("Base")
+    p1 = app.create_parameter("L1", "120 mm", "mm")
+    p2 = app.create_parameter("L2", "80 mm", "mm")
+    base.workspace = Workspace()
+    parent = Case(
+        id="case_parent",
+        name="Parent",
+        baseline_id="baseline_001",
+        invariant_values={f"parameters/{p1}": ScalarValue(200.0, "mm")},
+    )
+    child = Case(
+        id="case_child",
+        name="Child",
+        baseline_id="baseline_001",
+        parent_case_id=parent.id,
+        invariant_values={f"parameters/{p2}": ScalarValue(150.0, "mm")},
+    )
+    base.workspace.cases.extend([parent, child])
+
+    composed = compose_project(base, Study(id="s1", name="Study"), child)
+
+    assert composed.parameters[0].expression == "200 mm"
+    assert composed.parameters[1].expression == "150 mm"

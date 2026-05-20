@@ -251,7 +251,7 @@
       {
         "id": "baseline_001",
         "name": "Baseline",
-        "description": "",
+        "description": "Spring-mass system (1 kg block, k=0.1 N/mm)",
         "source_run_id": null,
         "model_snapshot_id": null,
         "model_hash": null,
@@ -267,8 +267,59 @@
     "active_case_id": null,
     "selected_pose_id": null,
     "selected_analysis_id": null,
-    "cases": [],
-    "poses": [],
+    "cases": [
+      {
+        "id": "case_001",
+        "name": "Heavy Block",
+        "baseline_id": "baseline_001",
+        "parent_case_id": null,
+        "model_snapshot_id": null,
+        "invariant_values": {
+          "bodies/body_001/mass": {"value": 3.0, "unit": "kg"}
+        },
+        "metadata": {}
+      },
+      {
+        "id": "case_002",
+        "name": "Light Block",
+        "baseline_id": "baseline_001",
+        "parent_case_id": null,
+        "model_snapshot_id": null,
+        "invariant_values": {
+          "bodies/body_001/mass": {"value": 0.25, "unit": "kg"}
+        },
+        "metadata": {}
+      }
+    ],
+    "poses": [
+      {
+        "id": "wpose_001",
+        "name": "Rest position (default)",
+        "baseline_id": "baseline_001",
+        "case_id": null,
+        "project_pose_id": null,
+        "is_default": true,
+        "metadata": {}
+      },
+      {
+        "id": "wpose_002",
+        "name": "Rest position (default)",
+        "baseline_id": "baseline_001",
+        "case_id": "case_001",
+        "project_pose_id": null,
+        "is_default": true,
+        "metadata": {}
+      },
+      {
+        "id": "wpose_003",
+        "name": "Rest position (default)",
+        "baseline_id": "baseline_001",
+        "case_id": "case_002",
+        "project_pose_id": null,
+        "is_default": true,
+        "metadata": {}
+      }
+    ],
     "analyses": [],
     "case_groups": [],
     "studies": [],
@@ -276,6 +327,6 @@
     "parameter_catalog": {},
     "model_snapshots": {},
     "promotion_history": [],
-    "next_sequence": 2
+    "next_sequence": 4
   }
 }

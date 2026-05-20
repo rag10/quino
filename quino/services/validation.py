@@ -16,7 +16,8 @@ from quino.domain.model import (
     ValidationReport,
 )
 from quino.domain.sketch_constraints import CONSTRAINT_SPECS
-from quino.domain.types import MarkerType, SketchConstraintType, SpringEndpointKind, SpringType
+from quino.domain.types import DriverType, MarkerType, SketchConstraintType, SpringEndpointKind, SpringType
+from quino.simulation.sensor_expressions import sensor_channel_keys
 
 
 class ValidationService:
@@ -29,6 +30,7 @@ class ValidationService:
         self._validate_driver_references(project.model, report)
         self._validate_driver_duplicates(project.model, report)
         self._validate_springs(project.model, report)
+        self._validate_control_graph(project, report)
         self._validate_sketch(project, report)
         return report
 
@@ -157,6 +159,250 @@ class ValidationService:
                 report.messages.append(ValidationMessage("error", "spring_missing_law", f"Actuator '{spring.name}' has no law expression", spring.id))
             if not is_actuator and spring.metadata.values.get("stiffness", 0.0) == 0.0 and spring.metadata.values.get("damping", 0.0) == 0.0:
                 report.messages.append(ValidationMessage("warning", "spring_zero_properties", f"Spring '{spring.name}' has zero stiffness and damping", spring.id))
+
+    def _validate_control_graph(self, project: Project, report: ValidationReport) -> None:
+        diagram = project.model.control_graph
+        if diagram is None:
+            return
+
+        sensors_by_id = {sensor.id: sensor for sensor in project.model.sensors}
+        loads_by_id = {load.id: load for load in project.model.loads}
+        springs_by_id = {spring.id: spring for spring in project.model.springs}
+        drivers_by_id = {driver.id: driver for driver in project.model.drivers}
+        body_ids = {body.id for body in project.model.bodies}
+
+        for instance in diagram.instances.values():
+            params = instance.parameters
+            sensor_id = params.get("sensor_id")
+            if instance.block_type in {"ModelSensor", "MBSSensor"} and "sensor_id" in params:
+                if not isinstance(sensor_id, str) or not sensor_id:
+                    report.messages.append(
+                        ValidationMessage(
+                            "warning",
+                            "missing_block_reference",
+                            f"Block '{instance.instance_id}' is missing a sensor reference",
+                            instance.instance_id,
+                        )
+                    )
+                elif sensor_id not in sensors_by_id:
+                    report.messages.append(
+                        ValidationMessage(
+                            "error",
+                            "broken_block_reference",
+                            f"Block '{instance.instance_id}' references an unknown sensor",
+                            instance.instance_id,
+                        )
+                    )
+                else:
+                    self._validate_sensor_block_channel(instance, sensors_by_id[sensor_id], report)
+
+            load_id = params.get("load_id")
+            if instance.block_type in {"LoadCommand", "MBSActuator"} and "load_id" in params:
+                self._validate_load_command(instance, report)
+                if not isinstance(load_id, str) or not load_id:
+                    report.messages.append(
+                        ValidationMessage(
+                            "warning",
+                            "missing_block_reference",
+                            f"Block '{instance.instance_id}' is missing a load reference",
+                            instance.instance_id,
+                        )
+                    )
+                elif load_id not in loads_by_id:
+                    report.messages.append(
+                        ValidationMessage(
+                            "error",
+                            "broken_block_reference",
+                            f"Block '{instance.instance_id}' references an unknown load",
+                            instance.instance_id,
+                        )
+                    )
+
+            spring_id = params.get("spring_id")
+            if instance.block_type in {"SpringCommand", "MBSActuator"} and "spring_id" in params:
+                if not isinstance(spring_id, str) or not spring_id:
+                    report.messages.append(
+                        ValidationMessage(
+                            "warning",
+                            "missing_block_reference",
+                            f"Block '{instance.instance_id}' is missing a spring reference",
+                            instance.instance_id,
+                        )
+                    )
+                elif spring_id not in springs_by_id:
+                    report.messages.append(
+                        ValidationMessage(
+                            "error",
+                            "broken_block_reference",
+                            f"Block '{instance.instance_id}' references an unknown spring",
+                            instance.instance_id,
+                        )
+                    )
+
+            driver_id = params.get("driver_id")
+            if instance.block_type in {"DriverCommand", "MBSActuator"} and "driver_id" in params:
+                if not isinstance(driver_id, str) or not driver_id:
+                    report.messages.append(
+                        ValidationMessage(
+                            "warning",
+                            "missing_block_reference",
+                            f"Block '{instance.instance_id}' is missing a driver reference",
+                            instance.instance_id,
+                        )
+                    )
+                elif driver_id not in drivers_by_id:
+                    report.messages.append(
+                        ValidationMessage(
+                            "error",
+                            "broken_block_reference",
+                            f"Block '{instance.instance_id}' references an unknown driver",
+                            instance.instance_id,
+                        )
+                    )
+
+            body_id = params.get("body_id")
+            if instance.block_type in {"MBSSensor", "MBSActuator"} and isinstance(body_id, str) and body_id:
+                if body_id not in body_ids:
+                    report.messages.append(
+                        ValidationMessage(
+                            "error",
+                            "broken_block_reference",
+                            f"Legacy block '{instance.instance_id}' references an unknown body",
+                            instance.instance_id,
+                        )
+                    )
+
+        for connection in diagram.connections:
+            src = diagram.instances.get(connection.src_instance)
+            dst = diagram.instances.get(connection.dst_instance)
+            if src is None or dst is None:
+                continue
+            self._validate_control_graph_connection(
+                src,
+                dst,
+                sensors_by_id=sensors_by_id,
+                springs_by_id=springs_by_id,
+                drivers_by_id=drivers_by_id,
+                report=report,
+            )
+
+    def _validate_sensor_block_channel(self, instance, sensor, report: ValidationReport) -> None:
+        if "channel" not in instance.parameters:
+            return
+        channel = instance.parameters.get("channel")
+        if not isinstance(channel, str) or not channel:
+            report.messages.append(
+                ValidationMessage(
+                    "warning",
+                    "missing_block_parameter",
+                    f"Block '{instance.instance_id}' is missing a sensor channel",
+                    instance.instance_id,
+                )
+            )
+            return
+        allowed = {name for name, _unit in sensor_channel_keys(sensor)}
+        if channel not in allowed:
+            report.messages.append(
+                ValidationMessage(
+                    "error",
+                    "invalid_block_parameter",
+                    f"Block '{instance.instance_id}' uses unsupported channel '{channel}'",
+                    instance.instance_id,
+                )
+            )
+
+    def _validate_load_command(self, instance, report: ValidationReport) -> None:
+        component = instance.parameters.get("component")
+        if component is None:
+            return
+        if component not in {"fx", "fy"}:
+            report.messages.append(
+                ValidationMessage(
+                    "error",
+                    "invalid_block_parameter",
+                    f"Block '{instance.instance_id}' uses unsupported load component '{component}'",
+                    instance.instance_id,
+                )
+            )
+
+    def _validate_control_graph_connection(
+        self,
+        src,
+        dst,
+        *,
+        sensors_by_id: dict[str, object],
+        springs_by_id: dict[str, object],
+        drivers_by_id: dict[str, object],
+        report: ValidationReport,
+    ) -> None:
+        src_family = self._block_output_family(src, sensors_by_id)
+        dst_family = self._block_input_family(dst, springs_by_id, drivers_by_id)
+        if src_family is None or dst_family is None:
+            return
+        if src_family == dst_family:
+            return
+        allowed_pairs = {
+            ("length", "length"),
+            ("angle", "angle"),
+            ("force", "force"),
+            ("torque", "torque"),
+        }
+        if (src_family, dst_family) not in allowed_pairs:
+            report.messages.append(
+                ValidationMessage(
+                    "warning",
+                    "block_connection_mismatch",
+                    f"Connection {src.instance_id} -> {dst.instance_id} mixes {src_family} with {dst_family}",
+                    dst.instance_id,
+                )
+            )
+
+    def _block_output_family(self, instance, sensors_by_id: dict[str, object]) -> str | None:
+        if instance.block_type in {"ModelSensor", "MBSSensor"}:
+            sensor_id = instance.parameters.get("sensor_id")
+            channel = instance.parameters.get("channel")
+            if isinstance(sensor_id, str) and sensor_id in sensors_by_id and isinstance(channel, str):
+                return self._sensor_channel_family(sensors_by_id[sensor_id], channel)
+        return None
+
+    def _block_input_family(
+        self,
+        instance,
+        springs_by_id: dict[str, object],
+        drivers_by_id: dict[str, object],
+    ) -> str | None:
+        if instance.block_type in {"LoadCommand", "MBSActuator"} and instance.parameters.get("load_id"):
+            return "force"
+        if instance.block_type in {"SpringCommand", "MBSActuator"} and instance.parameters.get("spring_id"):
+            spring_id = instance.parameters.get("spring_id")
+            spring = springs_by_id.get(spring_id)
+            if spring is None:
+                return None
+            if spring.spring_type in {SpringType.ROTATIONAL_SPRING, SpringType.ROTATIONAL_ACTUATOR}:
+                return "torque"
+            return "force"
+        if instance.block_type in {"DriverCommand", "MBSActuator"} and instance.parameters.get("driver_id"):
+            driver_id = instance.parameters.get("driver_id")
+            driver = drivers_by_id.get(driver_id)
+            if driver is None:
+                return None
+            if driver.type is DriverType.ROTATION:
+                return "angle"
+            if driver.type is DriverType.TRANSLATION:
+                return "length"
+        return None
+
+    def _sensor_channel_family(self, sensor, channel: str) -> str | None:
+        for name, unit in sensor_channel_keys(sensor):
+            if name != channel:
+                continue
+            if unit in {"mm", "m"}:
+                return "length"
+            if unit in {"deg", "rad"}:
+                return "angle"
+            if unit in {"mm/s", "m/s"}:
+                return "velocity"
+        return None
 
     def _validate_sketch(self, project: Project, report: ValidationReport) -> None:
         sketch = project.sketch

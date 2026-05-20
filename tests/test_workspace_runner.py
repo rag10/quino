@@ -6,12 +6,13 @@ from typing import Any
 import pytest
 
 from quino.domain.model import Project, SimulationResult
-from quino.domain.workspace import Baseline, Case, MetricDefinition, Study, StudyConfig, Workspace
+from quino.domain.workspace import Analysis, Baseline, Case, MetricDefinition, ResultRef, Run, RunEntry, Study, StudyConfig, Workspace, WorkspacePose
 from quino.services.workspace_runner import (
     _derive_run_status,
     _evaluate_metric_extractor,
     _extract_metrics,
     _resolve_cases_for_study,
+    run_analysis,
     run_study,
 )
 
@@ -21,11 +22,15 @@ class FakeAdapter:
 
     def __init__(self, result: SimulationResult | None = None) -> None:
         self._result = result
+        self.calls = 0
+        self.last_pose_id = None
 
     def is_available(self) -> bool:
         return True
 
     def run(self, project: Project, **kwargs: Any) -> SimulationResult:
+        self.calls += 1
+        self.last_pose_id = project.simulation_initial_pose_id
         if self._result is not None:
             return self._result
         return SimulationResult(
@@ -37,7 +42,8 @@ class FakeAdapter:
 
 def _make_fake_runner(result: SimulationResult | None = None):
     from quino.simulation.runner import SimulationRunner
-    return SimulationRunner(FakeAdapter(result))
+    adapter = FakeAdapter(result)
+    return SimulationRunner(adapter), adapter
 
 
 def test_run_study_with_baseline_and_cases(tmp_path: Path) -> None:
@@ -57,7 +63,7 @@ def test_run_study_with_baseline_and_cases(tmp_path: Path) -> None:
         ],
     )
 
-    runner = _make_fake_runner()
+    runner, _adapter = _make_fake_runner()
     run = run_study(project, "s1", runner, project_dir=tmp_path)
 
     assert run.study_id == "s1"
@@ -86,7 +92,7 @@ def test_run_study_skips_baseline_when_masked() -> None:
         ],
     )
 
-    runner = _make_fake_runner()
+    runner, _adapter = _make_fake_runner()
     run = run_study(project, "s1", runner)
 
     assert len(run.entries) == 1
@@ -101,7 +107,7 @@ def test_run_study_failed_entry() -> None:
     )
 
     failed_result = SimulationResult(success=False, error="Solver diverged")
-    runner = _make_fake_runner(failed_result)
+    runner, _adapter = _make_fake_runner(failed_result)
     run = run_study(project, "s1", runner)
 
     assert run.status == "failed"
@@ -202,10 +208,127 @@ def test_run_study_saves_artifact(tmp_path: Path) -> None:
         studies=[Study(id="s1", name="Study1", config=StudyConfig(duration=1.0, steps=10))],
     )
 
-    runner = _make_fake_runner()
+    runner, _adapter = _make_fake_runner()
     run = run_study(project, "s1", runner, project_dir=tmp_path)
 
     assert run.entries[0].result_ref is not None
     artifact = tmp_path / run.entries[0].result_ref.artifact_path
     assert artifact.exists()
     assert run.entries[0].result_ref.checksum.startswith("sha256:")
+
+
+def test_run_study_reuses_previous_ok_entry_when_fingerprint_matches() -> None:
+    project = Project(id="p1", name="Test", schema_version="0.2.0")
+    project.workspace = Workspace(
+        active_baseline_id="b1",
+        baselines=[Baseline(id="b1", name="Ref")],
+        studies=[Study(id="s1", name="Study1", config=StudyConfig(duration=1.0, steps=10))],
+        runs=[
+            Run(
+                id="r0",
+                study_id="s1",
+                created_at="2026-05-19T10:00:00Z",
+                status="completed",
+                entries=[
+                    RunEntry(
+                        id="e0",
+                        scope="baseline",
+                        baseline_id="b1",
+                        status="ok",
+                        fingerprint="",
+                        result_ref=ResultRef(
+                            run_entry_id="e0",
+                            artifact_path="artifacts/run_old/e0/result.json",
+                            checksum="sha256:old",
+                        ),
+                        metrics={"final_x": 1.0},
+                    )
+                ],
+            )
+        ],
+    )
+
+    runner, adapter = _make_fake_runner()
+    previous_entry = project.workspace.runs[0].entries[0]
+    from quino.services.workspace_runner import _compute_entry_fingerprint
+
+    previous_entry.fingerprint = _compute_entry_fingerprint(project, project.workspace.studies[0])
+    run = run_study(project, "s1", runner)
+
+    assert adapter.calls == 0
+    assert run.entries[0].status == "ok"
+    assert run.entries[0].result_ref is not None
+    assert run.entries[0].result_ref.artifact_path == "artifacts/run_old/e0/result.json"
+
+
+def test_run_analysis_uses_workspace_pose_and_case(tmp_path: Path) -> None:
+    project = Project(id="p1", name="Test", schema_version="0.2.0")
+    project.workspace = Workspace(
+        baselines=[Baseline(id="b1", name="Ref")],
+        cases=[Case(id="c1", name="Case1", baseline_id="b1")],
+        poses=[WorkspacePose(id="wp1", name="Pose 1", case_id="c1", project_pose_id="pose_model_001")],
+        analyses=[
+            Analysis(
+                id="a1",
+                name="Dyn",
+                analysis_type="dynamic",
+                case_id="c1",
+                baseline_id="b1",
+                workspace_pose_id="wp1",
+                config=StudyConfig(duration=1.0, steps=10),
+            )
+        ],
+    )
+
+    runner, adapter = _make_fake_runner()
+    run = run_analysis(project, "a1", runner, project_dir=tmp_path)
+
+    assert run.analysis_id == "a1"
+    assert run.study_id is None
+    assert len(run.entries) == 1
+    assert run.entries[0].case_id == "c1"
+    assert adapter.last_pose_id == "pose_model_001"
+
+
+def test_run_analysis_reuses_previous_ok_entry_when_fingerprint_matches() -> None:
+    project = Project(id="p1", name="Test", schema_version="0.2.0")
+    project.workspace = Workspace(
+        baselines=[Baseline(id="b1", name="Ref")],
+        analyses=[Analysis(id="a1", name="Dyn", baseline_id="b1", config=StudyConfig(duration=1.0, steps=10))],
+        runs=[
+            Run(
+                id="r0",
+                study_id=None,
+                analysis_id="a1",
+                created_at="2026-05-19T10:00:00Z",
+                status="completed",
+                entries=[
+                    RunEntry(
+                        id="e0",
+                        scope="baseline",
+                        baseline_id="b1",
+                        status="ok",
+                        fingerprint="",
+                        result_ref=ResultRef(
+                            run_entry_id="e0",
+                            artifact_path="artifacts/run_old/e0/result.json",
+                            checksum="sha256:old",
+                        ),
+                        metrics={"final_x": 1.0},
+                    )
+                ],
+            )
+        ],
+    )
+
+    from quino.services.workspace_runner import _compute_entry_fingerprint
+
+    synthetic_study = Study(id="analysis::a1", name="Dyn", study_type="dynamic", config=StudyConfig(duration=1.0, steps=10))
+    project.workspace.runs[0].entries[0].fingerprint = _compute_entry_fingerprint(project, synthetic_study)
+    runner, adapter = _make_fake_runner()
+
+    run = run_analysis(project, "a1", runner)
+
+    assert adapter.calls == 0
+    assert run.entries[0].result_ref is not None
+    assert run.entries[0].result_ref.artifact_path == "artifacts/run_old/e0/result.json"

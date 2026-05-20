@@ -13,6 +13,7 @@ from quino import (
     PropertyValueInput,
     SliderInput,
 )
+from quino.domain.blocks import BlockDiagram, BlockInstance, Connection, PortSpec
 from quino.domain.model import SimulationResult, SketchLineSegment
 from quino.domain.types import Dimension
 from quino.simulation.assembler import MechanismAssembler
@@ -432,6 +433,96 @@ def test_validate_model_reports_duplicate_marker_names() -> None:
     duplicate.name = body.structural_markers()[1].name
     report = app.validate_model()
     assert any(message.code == "duplicate_marker_name" for message in report.messages)
+
+
+def test_validate_model_reports_broken_control_graph_references() -> None:
+    app = make_app()
+    app.project.model.control_graph = BlockDiagram(
+        instances={
+            "sensor_block": BlockInstance(
+                instance_id="sensor_block",
+                block_type="ModelSensor",
+                parameters={"sensor_id": "missing_sensor", "channel": "y"},
+                output_ports=[PortSpec("out")],
+            ),
+            "load_block": BlockInstance(
+                instance_id="load_block",
+                block_type="LoadCommand",
+                parameters={"load_id": "missing_load"},
+                input_ports=[PortSpec("in")],
+                output_ports=[PortSpec("out")],
+            ),
+            "driver_block": BlockInstance(
+                instance_id="driver_block",
+                block_type="DriverCommand",
+                parameters={"driver_id": "missing_driver"},
+                input_ports=[PortSpec("in")],
+                output_ports=[PortSpec("out")],
+            ),
+        }
+    )
+
+    report = app.validate_model()
+
+    broken = [message for message in report.messages if message.code == "broken_block_reference"]
+    assert len(broken) >= 3
+
+
+def test_validate_model_reports_missing_and_invalid_control_graph_parameters() -> None:
+    app = make_app()
+    app.project.model.control_graph = BlockDiagram(
+        instances={
+            "sensor_block": BlockInstance(
+                instance_id="sensor_block",
+                block_type="ModelSensor",
+                parameters={"sensor_id": "", "channel": ""},
+                output_ports=[PortSpec("out")],
+            ),
+            "load_block": BlockInstance(
+                instance_id="load_block",
+                block_type="LoadCommand",
+                parameters={"load_id": "", "component": "mz"},
+                input_ports=[PortSpec("in")],
+                output_ports=[PortSpec("out")],
+            ),
+        }
+    )
+
+    report = app.validate_model()
+
+    assert any(message.code == "missing_block_reference" for message in report.messages)
+    assert any(message.code == "invalid_block_parameter" for message in report.messages)
+
+
+def test_validate_model_reports_semantic_block_connection_mismatch() -> None:
+    app = make_app()
+    body_id = app.create_body("Body", [MarkerInput("0 mm", "0 mm", "P")])
+    marker_id = next(marker.id for marker in app._find_body(body_id).markers if marker.name == "P")
+    sensor_id = app.create_sensor("Probe", "point", [marker_id])
+    joint_id = app.connect_marker_to_ground(marker_id, name="Ground_P")
+    driver_id = app.create_driver("Drive", DriverType.ROTATION.value, joint_id, "0 deg", "deg")
+    app.project.model.control_graph = BlockDiagram(
+        instances={
+            "sensor_block": BlockInstance(
+                instance_id="sensor_block",
+                block_type="ModelSensor",
+                parameters={"sensor_id": sensor_id, "channel": "y"},
+                output_ports=[PortSpec("out")],
+            ),
+            "driver_block": BlockInstance(
+                instance_id="driver_block",
+                block_type="DriverCommand",
+                parameters={"driver_id": driver_id},
+                input_ports=[PortSpec("in")],
+                output_ports=[PortSpec("out")],
+            ),
+        },
+        connections=[Connection("sensor_block", "out", "driver_block", "in")],
+    )
+
+    report = app.validate_model()
+
+    assert any(message.code == "block_connection_mismatch" for message in report.messages)
 
 
 def test_create_joint_via_core_api() -> None:

@@ -360,6 +360,7 @@ class Model:
     sensors: list[Sensor] = field(default_factory=list)
     springs: list[Spring] = field(default_factory=list)
     gravity: GravityLoad | None = None
+    control_graph: "BlockDiagram | None" = None
 
 
 @dataclass(slots=True)
@@ -389,8 +390,16 @@ class Project:
     metadata: Metadata = field(default_factory=Metadata)
     sensor_outputs: dict[str, SensorOutput] = field(default_factory=dict)
     reaction_outputs: dict[str, ReactionOutput] = field(default_factory=dict)
-    block_diagram: "BlockDiagram | None" = None
     workspace: "Workspace | None" = None
+
+    @property
+    def block_diagram(self) -> "BlockDiagram | None":
+        """Backward-compatible proxy for the model-level control graph."""
+        return self.model.control_graph
+
+    @block_diagram.setter
+    def block_diagram(self, value: "BlockDiagram | None") -> None:
+        self.model.control_graph = value
 
 
 @dataclass(slots=True)

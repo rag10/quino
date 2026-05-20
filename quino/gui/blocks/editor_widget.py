@@ -20,6 +20,7 @@ class BlockEditorWidget(QtWidgets.QWidget):
         super().__init__(parent)
         self._setup_ui()
         self._diagram: BlockDiagram | None = None
+        self._project = None
 
     def _setup_ui(self) -> None:
         layout = QtWidgets.QHBoxLayout(self)
@@ -56,6 +57,10 @@ class BlockEditorWidget(QtWidgets.QWidget):
         else:
             self._scene.set_diagram(BlockDiagram())
         self._inspector._clear_form()
+
+    def set_project(self, project) -> None:
+        self._project = project
+        self._inspector.set_project(project)
 
     def diagram(self) -> BlockDiagram | None:
         self._scene.sync_to_diagram()

@@ -482,6 +482,23 @@ BLOCK_REGISTRY: dict[str, BlockDef] = {
         [PortSpec("in")], [PortSpec("out")],
         compute=_mbs_actuator,
     ),
+    # Model semantic interface
+    "ModelSensor": BlockDef(
+        [], [PortSpec("out")],
+        compute=_mbs_sensor,
+    ),
+    "LoadCommand": BlockDef(
+        [PortSpec("in")], [PortSpec("out")],
+        compute=_mbs_actuator,
+    ),
+    "SpringCommand": BlockDef(
+        [PortSpec("in")], [PortSpec("out")],
+        compute=_mbs_actuator,
+    ),
+    "DriverCommand": BlockDef(
+        [PortSpec("in")], [PortSpec("out")],
+        compute=_mbs_actuator,
+    ),
 }
 
 

@@ -7,6 +7,20 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from quino.blocks.library import BLOCK_REGISTRY
 
 
+def palette_categories() -> dict[str, list[str]]:
+    return {
+        "Sources": ["Constant", "Step", "Ramp", "Sine"],
+        "Math": ["Gain", "Adder", "Product", "Saturation", "DeadZone"],
+        "Routing": ["Mux", "Demux"],
+        "Stateful": ["Integrator", "IntegratorLimited", "UnitDelay"],
+        "Control": ["PID", "DerivativeFiltered"],
+        "Electrical": ["Resistor", "Inductor", "Capacitor", "DCMotor"],
+        "Hydraulic": ["HydraulicPump", "HydraulicOrifice", "HydraulicChamber"],
+        "Model Interface": ["ModelSensor", "LoadCommand", "SpringCommand", "DriverCommand"],
+        "Legacy MBS Interface": ["MBSSensor", "MBSActuator"],
+    }
+
+
 class BlockPalette(QtWidgets.QTreeWidget):
     """Tree widget listing available block types by category."""
 
@@ -20,17 +34,7 @@ class BlockPalette(QtWidgets.QTreeWidget):
         self._populate()
 
     def _populate(self) -> None:
-        categories = {
-            "Sources": ["Constant", "Step", "Ramp", "Sine"],
-            "Math": ["Gain", "Adder", "Product", "Saturation", "DeadZone"],
-            "Routing": ["Mux", "Demux"],
-            "Stateful": ["Integrator", "IntegratorLimited", "UnitDelay"],
-            "Control": ["PID", "DerivativeFiltered"],
-            "Electrical": ["Resistor", "Inductor", "Capacitor", "DCMotor"],
-            "Hydraulic": ["HydraulicPump", "HydraulicOrifice", "HydraulicChamber"],
-            "MBS Interface": ["MBSSensor", "MBSActuator"],
-        }
-        for cat_name, block_names in categories.items():
+        for cat_name, block_names in palette_categories().items():
             cat_item = QtWidgets.QTreeWidgetItem([cat_name])
             cat_item.setFlags(cat_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsDragEnabled)
             for name in block_names:

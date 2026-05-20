@@ -134,6 +134,7 @@ class ApplicationService:
             view_state=ViewState(),
             metadata=Metadata(),
         )
+        self.workspace.create_baseline(name)
         self._undo_stack.clear()
         self._redo_stack.clear()
         self.poses.clear_current()
@@ -149,7 +150,18 @@ class ApplicationService:
         if self.project is not None and self.project.sketch is not None:
             self.project.sketch.solve_error = None
             self.sketch._apply_sketch_constraints(set())
+        self._ensure_baseline()
         return self.project
+
+    def _ensure_baseline(self) -> None:
+        """Guarantee the workspace always has at least one baseline."""
+        if self.project is None:
+            return
+        ws = self.project.workspace
+        if ws is None or not ws.baselines:
+            self.workspace.create_baseline(self.project.name)
+        elif ws.active_baseline_id is None:
+            ws.active_baseline_id = ws.baselines[0].id
 
     def save_project(self, path: str) -> None:
         project = self._require_project()

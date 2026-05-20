@@ -17,6 +17,9 @@ from quino import (
     SliderInput,
 )
 from quino.application.examples import build_slider_crank_example
+from quino.domain.model import Project
+from quino.domain.types import Dimension
+from quino.simulation.assembler import AssembledDriver, AssembledSpring, AssembledSpringEndpoint
 from quino.solver_adapters.exudyn_adapter import ExudynAdapter
 
 
@@ -180,6 +183,14 @@ class _FakeSystemContainer:
         return self.mbs
 
 
+class _FakeBridge:
+    def __init__(self, values: dict[str, float]):
+        self.values = values
+
+    def command_value(self, target_id: str) -> float | None:
+        return self.values.get(target_id)
+
+
 def test_simulation_returns_structured_result_even_without_exudyn() -> None:
     app = ApplicationService()
     app.new_project("Demo")
@@ -198,6 +209,59 @@ def test_simulation_returns_structured_result_even_without_exudyn() -> None:
     assert result.messages
     assert result.frames
     assert result.time
+
+
+def test_driver_value_can_come_from_control_graph_command() -> None:
+    app = ApplicationService()
+    adapter = app.simulation_runner.adapter
+    project = Project(id="p1", name="P1", schema_version="test")
+    driver = AssembledDriver(
+        driver_id="driver_001",
+        name="Drive",
+        driver_type=DriverType.TRANSLATION.value,
+        target_joint_id="joint_001",
+        law_expression="0 mm",
+        unit="mm",
+        expected_dimension=Dimension.LENGTH.value,
+    )
+
+    value = adapter._evaluate_driver_value(
+        project,
+        driver,
+        Dimension.LENGTH,
+        0.0,
+        bridge=_FakeBridge({"driver_001": 25.0}),
+    )
+
+    assert value == pytest.approx(0.025)
+
+
+def test_spring_law_can_come_from_control_graph_command() -> None:
+    app = ApplicationService()
+    adapter = app.simulation_runner.adapter
+    project = Project(id="p1", name="P1", schema_version="test")
+    spring = AssembledSpring(
+        spring_id="spring_001",
+        name="Actuator",
+        spring_type="linear_actuator",
+        endpoint_a=AssembledSpringEndpoint("ground", None, None, 0.0, 0.0, 0.0, 0.0),
+        endpoint_b=AssembledSpringEndpoint("ground", None, None, 0.0, 0.0, 0.0, 0.0),
+        stiffness=0.0,
+        damping=0.0,
+        rest_value=0.0,
+        law_expression="0 N",
+        law_unit="N",
+        law_dimension=Dimension.FORCE.value,
+    )
+
+    law_fn = adapter._make_spring_law_fn(
+        project,
+        spring,
+        "N",
+        bridge=_FakeBridge({"spring_001": 12.5}),
+    )
+
+    assert law_fn(None, 0.0, 0, 0.0, 0.0, 0.0, 0.0, 0.0) == pytest.approx(12.5)
 
 
 def test_four_bar_assembles_as_rigid_bodies_and_revolute_joints() -> None:

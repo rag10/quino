@@ -430,7 +430,7 @@
       {
         "id": "baseline_001",
         "name": "Baseline",
-        "description": "",
+        "description": "Grashof four-bar linkage (crank 50 mm, coupler 130 mm, follower 20 mm)",
         "source_run_id": null,
         "model_snapshot_id": null,
         "model_hash": null,
@@ -446,8 +446,61 @@
     "active_case_id": null,
     "selected_pose_id": null,
     "selected_analysis_id": null,
-    "cases": [],
-    "poses": [],
+    "cases": [
+      {
+        "id": "case_001",
+        "name": "Heavy Coupler",
+        "baseline_id": "baseline_001",
+        "parent_case_id": null,
+        "model_snapshot_id": null,
+        "invariant_values": {
+          "bodies/body_002/mass": {"value": 2.5, "unit": "kg"}
+        },
+        "metadata": {}
+      },
+      {
+        "id": "case_002",
+        "name": "Light Linkage",
+        "baseline_id": "baseline_001",
+        "parent_case_id": null,
+        "model_snapshot_id": null,
+        "invariant_values": {
+          "bodies/body_001/mass": {"value": 0.1, "unit": "kg"},
+          "bodies/body_002/mass": {"value": 0.2, "unit": "kg"},
+          "bodies/body_003/mass": {"value": 0.15, "unit": "kg"}
+        },
+        "metadata": {}
+      }
+    ],
+    "poses": [
+      {
+        "id": "wpose_001",
+        "name": "Crank at 0° (default)",
+        "baseline_id": "baseline_001",
+        "case_id": null,
+        "project_pose_id": null,
+        "is_default": true,
+        "metadata": {}
+      },
+      {
+        "id": "wpose_002",
+        "name": "Crank at 0° (default)",
+        "baseline_id": "baseline_001",
+        "case_id": "case_001",
+        "project_pose_id": null,
+        "is_default": true,
+        "metadata": {}
+      },
+      {
+        "id": "wpose_003",
+        "name": "Crank at 0° (default)",
+        "baseline_id": "baseline_001",
+        "case_id": "case_002",
+        "project_pose_id": null,
+        "is_default": true,
+        "metadata": {}
+      }
+    ],
     "analyses": [],
     "case_groups": [],
     "studies": [],
@@ -455,6 +508,6 @@
     "parameter_catalog": {},
     "model_snapshots": {},
     "promotion_history": [],
-    "next_sequence": 2
+    "next_sequence": 4
   }
 }

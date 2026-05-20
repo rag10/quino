@@ -5,10 +5,13 @@ from pathlib import Path
 
 from quino.domain.blocks import BlockDiagram, BlockInstance, Connection, PortSpec
 from quino.domain.workspace import (
+    Analysis,
+    ArtifactRef,
     Baseline,
     Case,
     CaseGroup,
     MetricDefinition,
+    ParameterDescriptor,
     ResultRef,
     Run,
     RunEntry,
@@ -20,6 +23,7 @@ from quino.domain.workspace import (
     SweepParameter,
     Tolerance,
     Workspace,
+    WorkspacePose,
 )
 from quino.domain.model import (
     Body,
@@ -93,6 +97,9 @@ class JsonMapper:
                     "direction_x": project.model.gravity.direction_x,
                     "direction_y": project.model.gravity.direction_y,
                 } if project.model.gravity is not None else None,
+                "control_graph": self._block_diagram_to_dict(project.model.control_graph)
+                if project.model.control_graph is not None and project.model.control_graph.instances
+                else None,
             },
             "view_state": {
                 "zoom": project.view_state.zoom,
@@ -110,7 +117,7 @@ class JsonMapper:
             result["poses"] = [self._pose_to_dict(pose) for pose in project.poses]
         if project.simulation_initial_pose_id is not None:
             result["simulation_initial_pose_id"] = project.simulation_initial_pose_id
-        if project.block_diagram is not None and project.block_diagram.instances:
+        if project.model.control_graph is None and project.block_diagram is not None and project.block_diagram.instances:
             result["block_diagram"] = self._block_diagram_to_dict(project.block_diagram)
         if project.workspace is not None and not project.workspace.is_empty():
             result["workspace"] = self._workspace_to_dict(project.workspace)
@@ -146,10 +153,11 @@ class JsonMapper:
                 sensors=[self._sensor_from_dict(item) for item in model_block.get("sensors", [])],
                 springs=[self._spring_from_dict(item) for item in model_block.get("springs", [])],
                 gravity=self._gravity_from_dict(model_block.get("gravity")),
+                control_graph=self._block_diagram_from_dict(model_block.get("control_graph"))
+                or self._block_diagram_from_dict(data.get("block_diagram")),
             ),
             view_state=ViewState(**data.get("view_state", {})),
             metadata=Metadata(project_block.get("metadata", {})),
-            block_diagram=self._block_diagram_from_dict(data.get("block_diagram")),
             workspace=self._workspace_from_dict(data.get("workspace")),
         )
 
@@ -753,10 +761,21 @@ class JsonMapper:
     def _workspace_to_dict(self, workspace: Workspace) -> dict:
         return {
             "baselines": [self._baseline_to_dict(b) for b in workspace.baselines],
+            "active_baseline_id": workspace.active_baseline_id,
+            "active_case_id": workspace.active_case_id,
+            "selected_pose_id": workspace.selected_pose_id,
+            "selected_analysis_id": workspace.selected_analysis_id,
             "cases": [self._case_to_dict(c) for c in workspace.cases],
+            "poses": [self._workspace_pose_to_dict(p) for p in workspace.poses],
+            "analyses": [self._analysis_to_dict(a) for a in workspace.analyses],
             "case_groups": [self._case_group_to_dict(cg) for cg in workspace.case_groups],
             "studies": [self._study_to_dict(s) for s in workspace.studies],
             "runs": [self._run_to_dict(r) for r in workspace.runs],
+            "parameter_catalog": {
+                k: self._parameter_descriptor_to_dict(v) for k, v in workspace.parameter_catalog.items()
+            },
+            "model_snapshots": dict(workspace.model_snapshots),
+            "promotion_history": list(workspace.promotion_history),
             "next_sequence": workspace.next_sequence,
         }
 
@@ -765,11 +784,47 @@ class JsonMapper:
             return None
         return Workspace(
             baselines=[self._baseline_from_dict(b) for b in data.get("baselines", [])],
+            active_baseline_id=data.get("active_baseline_id"),
+            active_case_id=data.get("active_case_id"),
+            selected_pose_id=data.get("selected_pose_id"),
+            selected_analysis_id=data.get("selected_analysis_id"),
             cases=[self._case_from_dict(c) for c in data.get("cases", [])],
+            poses=[self._workspace_pose_from_dict(p) for p in data.get("poses", [])],
+            analyses=[self._analysis_from_dict(a) for a in data.get("analyses", [])],
             case_groups=[self._case_group_from_dict(cg) for cg in data.get("case_groups", [])],
             studies=[self._study_from_dict(s) for s in data.get("studies", [])],
             runs=[self._run_from_dict(r) for r in data.get("runs", [])],
+            parameter_catalog={
+                k: self._parameter_descriptor_from_dict(v)
+                for k, v in data.get("parameter_catalog", {}).items()
+            },
+            model_snapshots=data.get("model_snapshots", {}),
+            promotion_history=data.get("promotion_history", []),
             next_sequence=data.get("next_sequence", 1),
+        )
+
+    def _parameter_descriptor_to_dict(self, descriptor: ParameterDescriptor) -> dict:
+        return {
+            "path": descriptor.path,
+            "tag": descriptor.tag,
+            "display_name": descriptor.display_name,
+            "unit": descriptor.unit,
+            "dimension": descriptor.dimension,
+            "default_value": descriptor.default_value,
+            "entity_id": descriptor.entity_id,
+            "property_name": descriptor.property_name,
+        }
+
+    def _parameter_descriptor_from_dict(self, data: dict) -> ParameterDescriptor:
+        return ParameterDescriptor(
+            path=data["path"],
+            tag=data.get("tag", "invariant"),
+            display_name=data.get("display_name", ""),
+            unit=data.get("unit", ""),
+            dimension=data.get("dimension", ""),
+            default_value=data.get("default_value"),
+            entity_id=data.get("entity_id"),
+            property_name=data.get("property_name"),
         )
 
     def _scalar_value_to_dict(self, value: ScalarValue) -> dict:
@@ -814,12 +869,19 @@ class JsonMapper:
             "id": baseline.id,
             "name": baseline.name,
             "description": baseline.description,
+            "source_run_id": baseline.source_run_id,
+            "model_snapshot_id": baseline.model_snapshot_id,
+            "model_hash": baseline.model_hash,
+            "invariant_parameter_keys": baseline.invariant_parameter_keys,
+            "approval_status": baseline.approval_status,
+            "approved_run_id": baseline.approved_run_id,
             "tolerances": {
                 k: self._tolerance_to_dict(v) for k, v in baseline.tolerances.items()
             },
             "metrics": {
                 k: self._metric_definition_to_dict(v) for k, v in baseline.metrics.items()
             },
+            "metadata": baseline.metadata,
         }
 
     def _baseline_from_dict(self, data: dict) -> Baseline:
@@ -827,6 +889,12 @@ class JsonMapper:
             id=data["id"],
             name=data["name"],
             description=data.get("description", ""),
+            source_run_id=data.get("source_run_id"),
+            model_snapshot_id=data.get("model_snapshot_id"),
+            model_hash=data.get("model_hash"),
+            invariant_parameter_keys=data.get("invariant_parameter_keys", []),
+            approval_status=data.get("approval_status"),
+            approved_run_id=data.get("approved_run_id"),
             tolerances={
                 k: self._tolerance_from_dict(v)
                 for k, v in data.get("tolerances", {}).items()
@@ -835,6 +903,7 @@ class JsonMapper:
                 k: self._metric_definition_from_dict(v)
                 for k, v in data.get("metrics", {}).items()
             },
+            metadata=data.get("metadata", {}),
         )
 
     def _case_to_dict(self, case: Case) -> dict:
@@ -842,6 +911,8 @@ class JsonMapper:
             "id": case.id,
             "name": case.name,
             "baseline_id": case.baseline_id,
+            "parent_case_id": case.parent_case_id,
+            "model_snapshot_id": case.model_snapshot_id,
             "invariant_values": {
                 k: self._scalar_value_to_dict(v) for k, v in case.invariant_values.items()
             },
@@ -853,10 +924,58 @@ class JsonMapper:
             id=data["id"],
             name=data["name"],
             baseline_id=data.get("baseline_id"),
+            parent_case_id=data.get("parent_case_id"),
+            model_snapshot_id=data.get("model_snapshot_id"),
             invariant_values={
                 k: self._scalar_value_from_dict(v)
                 for k, v in data.get("invariant_values", {}).items()
             },
+            metadata=data.get("metadata", {}),
+        )
+
+    def _workspace_pose_to_dict(self, pose: WorkspacePose) -> dict:
+        return {
+            "id": pose.id,
+            "name": pose.name,
+            "baseline_id": pose.baseline_id,
+            "case_id": pose.case_id,
+            "project_pose_id": pose.project_pose_id,
+            "is_default": pose.is_default,
+            "metadata": pose.metadata,
+        }
+
+    def _workspace_pose_from_dict(self, data: dict) -> WorkspacePose:
+        return WorkspacePose(
+            id=data["id"],
+            name=data["name"],
+            baseline_id=data.get("baseline_id"),
+            case_id=data.get("case_id"),
+            project_pose_id=data.get("project_pose_id"),
+            is_default=data.get("is_default", False),
+            metadata=data.get("metadata", {}),
+        )
+
+    def _analysis_to_dict(self, analysis: Analysis) -> dict:
+        return {
+            "id": analysis.id,
+            "name": analysis.name,
+            "analysis_type": analysis.analysis_type,
+            "baseline_id": analysis.baseline_id,
+            "case_id": analysis.case_id,
+            "workspace_pose_id": analysis.workspace_pose_id,
+            "config": self._study_config_to_dict(analysis.config),
+            "metadata": analysis.metadata,
+        }
+
+    def _analysis_from_dict(self, data: dict) -> Analysis:
+        return Analysis(
+            id=data["id"],
+            name=data["name"],
+            analysis_type=data.get("analysis_type", "dynamic"),
+            baseline_id=data.get("baseline_id"),
+            case_id=data.get("case_id"),
+            workspace_pose_id=data.get("workspace_pose_id"),
+            config=self._study_config_from_dict(data.get("config", {})),
             metadata=data.get("metadata", {}),
         )
 
@@ -998,12 +1117,35 @@ class JsonMapper:
             checksum=data["checksum"],
         )
 
+    def _artifact_ref_to_dict(self, ref: ArtifactRef) -> dict:
+        return {
+            "kind": ref.kind,
+            "path": ref.path,
+            "checksum": ref.checksum,
+            "metadata": ref.metadata,
+        }
+
+    def _artifact_ref_from_dict(self, data: dict) -> ArtifactRef:
+        return ArtifactRef(
+            kind=data["kind"],
+            path=data["path"],
+            checksum=data.get("checksum", ""),
+            metadata=data.get("metadata", {}),
+        )
+
     def _run_entry_to_dict(self, entry: RunEntry) -> dict:
         result: dict = {
             "id": entry.id,
             "scope": entry.scope,
+            "baseline_id": entry.baseline_id,
             "case_id": entry.case_id,
             "status": entry.status,
+            "fingerprint": entry.fingerprint,
+            "stale_reasons": entry.stale_reasons,
+            "started_at": entry.started_at,
+            "finished_at": entry.finished_at,
+            "updated_at": entry.updated_at,
+            "artifacts": [self._artifact_ref_to_dict(a) for a in entry.artifacts],
             "metrics": entry.metrics,
             "error_message": entry.error_message,
         }
@@ -1016,9 +1158,16 @@ class JsonMapper:
         return RunEntry(
             id=data["id"],
             scope=data["scope"],
+            baseline_id=data.get("baseline_id"),
             case_id=data.get("case_id"),
             status=data.get("status", "not_run"),
+            fingerprint=data.get("fingerprint", ""),
+            stale_reasons=data.get("stale_reasons", []),
+            started_at=data.get("started_at"),
+            finished_at=data.get("finished_at"),
+            updated_at=data.get("updated_at"),
             result_ref=self._result_ref_from_dict(ref_data) if ref_data else None,
+            artifacts=[self._artifact_ref_from_dict(a) for a in data.get("artifacts", [])],
             metrics=data.get("metrics", {}),
             error_message=data.get("error_message", ""),
         )
@@ -1028,6 +1177,7 @@ class JsonMapper:
             "id": run.id,
             "study_id": run.study_id,
             "created_at": run.created_at,
+            "analysis_id": run.analysis_id,
             "status": run.status,
             "entries": [self._run_entry_to_dict(e) for e in run.entries],
         }
@@ -1035,8 +1185,9 @@ class JsonMapper:
     def _run_from_dict(self, data: dict) -> Run:
         return Run(
             id=data["id"],
-            study_id=data["study_id"],
+            study_id=data.get("study_id"),
             created_at=data["created_at"],
+            analysis_id=data.get("analysis_id"),
             status=data.get("status", "not_run"),
             entries=[self._run_entry_from_dict(e) for e in data.get("entries", [])],
         )

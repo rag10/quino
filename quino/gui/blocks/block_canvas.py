@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any, Callable
 
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -11,6 +12,16 @@ from quino.blocks.library import BLOCK_REGISTRY, get_block_def
 from quino.domain.blocks import BlockDiagram, BlockInstance, Connection, PortSpec
 
 from .block_items import BlockItem, ConnectionItem, PortItem, CONNECTION_COLOR, CONNECTION_SELECTED_COLOR
+
+
+_BLOCK_DEFAULT_PARAMETERS: dict[str, dict[str, Any]] = {
+    "MBSSensor": {"body_id": "", "variable": "Position", "component": "y"},
+    "MBSActuator": {"body_id": "", "direction": [0.0, 1.0, 0.0]},
+    "ModelSensor": {"sensor_id": "", "channel": "y"},
+    "LoadCommand": {"load_id": "", "component": "fx"},
+    "SpringCommand": {"spring_id": ""},
+    "DriverCommand": {"driver_id": ""},
+}
 
 
 class BlockDiagramScene(QtWidgets.QGraphicsScene):
@@ -96,7 +107,7 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
                 dst_instance=conn_item.dst_port.parent_block.instance_id,
                 dst_port=conn_item.dst_port.port_name,
             ))
-        self._diagram.connections = conns
+        object.__setattr__(self._diagram, "connections", conns)
 
     def sync_to_diagram(self) -> None:
         self._sync_positions_to_diagram()
@@ -166,7 +177,10 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
         inst = BlockInstance(
             instance_id=instance_id,
             block_type=block_type,
-            parameters={"_position": [position.x(), position.y()]},
+            parameters={
+                **copy.deepcopy(_BLOCK_DEFAULT_PARAMETERS.get(block_type, {})),
+                "_position": [position.x(), position.y()],
+            },
             input_ports=[PortSpec(p.name, shape=p.shape) for p in block_def.input_specs],
             output_ports=[PortSpec(p.name, shape=p.shape) for p in block_def.output_specs],
         )

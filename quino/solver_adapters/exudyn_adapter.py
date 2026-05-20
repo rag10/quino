@@ -230,15 +230,17 @@ class ExudynAdapter(SolverAdapter):
         )
         # Block diagram bridge (Fase 3)
         bridge = None
-        if project.block_diagram is not None and project.block_diagram.instances:
+        if project.model.control_graph is not None and project.model.control_graph.instances:
             from quino.blocks.exudyn_bridge import ExudynBlockBridge
             bridge = ExudynBlockBridge(
-                project.block_diagram,
+                project.model.control_graph,
                 mbs,
                 item_interface,
                 exu,
                 node_numbers,
                 body_objects,
+                project=project,
+                assembled=assembled,
             )
         joint_objects: dict[str, int] = {}
         for joint in assembled.joints:
@@ -268,12 +270,23 @@ class ExudynAdapter(SolverAdapter):
                 node_numbers,
                 ground_object,
                 driver,
+                bridge=bridge,
                 translation_driver_mode=translation_driver_mode,
             )
         for load in assembled.loads:
             self._create_load(mbs, item_interface, project, assembled, body_objects, node_numbers, load, exu)
         for spring in assembled.springs:
-            self._create_spring(mbs, item_interface, project, body_objects, node_numbers, ground_object, spring, exu)
+            self._create_spring(
+                mbs,
+                item_interface,
+                project,
+                body_objects,
+                node_numbers,
+                ground_object,
+                spring,
+                exu,
+                bridge=bridge,
+            )
         if bridge is not None:
             bridge.add_actuator_loads()
         reaction_info = self._reaction_joint_info(assembled, joint_objects)
@@ -668,12 +681,17 @@ class ExudynAdapter(SolverAdapter):
         ground_object: int,
         spring: AssembledSpring,
         exu,
+        bridge=None,
     ) -> None:
         is_rotational = spring.spring_type in ("rotational_spring", "rotational_actuator")
         if is_rotational:
-            self._create_rotational_spring(mbs, item_interface, project, node_numbers, ground_object, spring)
+            self._create_rotational_spring(
+                mbs, item_interface, project, node_numbers, ground_object, spring, bridge=bridge
+            )
         else:
-            self._create_linear_spring(mbs, item_interface, project, body_objects, ground_object, spring, exu)
+            self._create_linear_spring(
+                mbs, item_interface, project, body_objects, ground_object, spring, exu, bridge=bridge
+            )
 
     def _linear_spring_marker(self, mbs, item_interface, body_objects: dict[str, int], ground_object: int, ep) -> int:
         if ep.kind == "ground":
@@ -690,7 +708,7 @@ class ExudynAdapter(SolverAdapter):
             )
         )
 
-    def _create_linear_spring(self, mbs, item_interface, project, body_objects, ground_object, spring: AssembledSpring, exu) -> None:
+    def _create_linear_spring(self, mbs, item_interface, project, body_objects, ground_object, spring: AssembledSpring, exu, bridge=None) -> None:
         m_a = mbs.AddMarker(
             item_interface.MarkerBodyPosition(
                 bodyNumber=ground_object if spring.endpoint_a.kind == "ground" else body_objects[spring.endpoint_a.body_id],
@@ -707,7 +725,7 @@ class ExudynAdapter(SolverAdapter):
         c = spring.damping * 1e3     # N·s/mm → N·s/m
         L0 = spring.rest_value * _MM_TO_M  # mm → m
         if spring.spring_type == "linear_actuator":
-            law_fn = self._make_spring_law_fn(project, spring, "N")  # already SI
+            law_fn = self._make_spring_law_fn(project, spring, "N", bridge=bridge)  # already SI
             mbs.AddObject(item_interface.ObjectConnectorSpringDamper(
                 name=spring.name, markerNumbers=[m_a, m_b],
                 stiffness=0.0, damping=0.0, referenceLength=0.0,
@@ -719,7 +737,7 @@ class ExudynAdapter(SolverAdapter):
                 stiffness=k, damping=c, referenceLength=L0,
             ))
 
-    def _create_rotational_spring(self, mbs, item_interface, project, node_numbers: dict[str, int], ground_object: int, spring: AssembledSpring) -> None:
+    def _create_rotational_spring(self, mbs, item_interface, project, node_numbers: dict[str, int], ground_object: int, spring: AssembledSpring, bridge=None) -> None:
         def _angle_marker(ep) -> int:
             if ep.kind == "ground":
                 gn = mbs.AddNode(item_interface.NodePointGround(referenceCoordinates=[0.0, 0.0, 0.0]))
@@ -732,7 +750,7 @@ class ExudynAdapter(SolverAdapter):
         c = spring.damping * 1e-3     # N·mm·s/rad → N·m·s/rad
         theta0 = spring.rest_value    # already in rad
         if spring.spring_type == "rotational_actuator":
-            law_fn = self._make_spring_law_fn(project, spring, "N*m")
+            law_fn = self._make_spring_law_fn(project, spring, "N*m", bridge=bridge)
             mbs.AddObject(item_interface.ObjectConnectorCoordinateSpringDamper(
                 name=spring.name, markerNumbers=[m_a, m_b],
                 stiffness=0.0, damping=0.0, offset=0.0,
@@ -744,9 +762,15 @@ class ExudynAdapter(SolverAdapter):
                 stiffness=k, damping=c, offset=theta0,
             ))
 
-    def _make_spring_law_fn(self, project: Project, spring: AssembledSpring, si_unit: str):
+    def _make_spring_law_fn(self, project: Project, spring: AssembledSpring, si_unit: str, bridge=None):
         """Returns a springForceUserFunction. si_unit: 'N' (linear) or 'N*m' (rotational, SI)."""
         def fn(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):
+            if bridge is not None:
+                command = bridge.command_value(spring.spring_id)
+                if command is not None:
+                    source_unit = spring.law_unit or si_unit
+                    quantity = self.expression_service.unit_service.quantity(float(command), source_unit)
+                    return self.expression_service.unit_service.convert(quantity, si_unit)
             variables = {"t": self.expression_service.unit_service.quantity(float(t), "s")}
             quantity = self.expression_service.evaluate_expression(spring.law_expression, project.parameters, variables=variables)
             return self.expression_service.unit_service.convert(quantity, si_unit)
@@ -1006,12 +1030,15 @@ class ExudynAdapter(SolverAdapter):
         node_numbers: dict[str, int],
         ground_object: int,
         driver: AssembledDriver,
+        bridge=None,
         *,
         translation_driver_mode: str = "constraint",
     ) -> None:
         joint = next(joint for joint in assembled.joints if joint.id == driver.target_joint_id)
         if driver.driver_type == DriverType.ROTATION.value:
-            self._create_rotation_driver(mbs, item_interface, project, node_numbers, ground_object, driver, joint)
+            self._create_rotation_driver(
+                mbs, item_interface, project, node_numbers, ground_object, driver, joint, bridge=bridge
+            )
             return
         if driver.driver_type == DriverType.TRANSLATION.value:
             self._create_translation_driver(
@@ -1023,20 +1050,21 @@ class ExudynAdapter(SolverAdapter):
                 ground_object,
                 driver,
                 joint,
+                bridge=bridge,
                 mode=translation_driver_mode,
             )
             return
         raise ValueError(f"Unsupported driver type: {driver.driver_type}")
 
-    def _create_rotation_driver(self, mbs, item_interface, project: Project, node_numbers: dict[str, int], ground_object: int, driver: AssembledDriver, joint) -> None:
+    def _create_rotation_driver(self, mbs, item_interface, project: Project, node_numbers: dict[str, int], ground_object: int, driver: AssembledDriver, joint, bridge=None) -> None:
         marker_numbers = self._rotation_coordinate_markers(mbs, item_interface, node_numbers, ground_object, joint)
         mbs.AddObject(
             item_interface.CoordinateConstraint(
                 name=driver.name,
                 markerNumbers=marker_numbers,
                 offset=0.0,
-                offsetUserFunction=self._make_offset_function(project, driver, Dimension.ANGLE),
-                offsetUserFunction_t=self._make_offset_function_t(project, driver, Dimension.ANGLE),
+                offsetUserFunction=self._make_offset_function(project, driver, Dimension.ANGLE, bridge=bridge),
+                offsetUserFunction_t=self._make_offset_function_t(project, driver, Dimension.ANGLE, bridge=bridge),
             )
         )
 
@@ -1050,6 +1078,7 @@ class ExudynAdapter(SolverAdapter):
         ground_object: int,
         driver: AssembledDriver,
         joint,
+        bridge=None,
         *,
         mode: str = "constraint",
     ) -> None:
@@ -1085,6 +1114,7 @@ class ExudynAdapter(SolverAdapter):
                         project,
                         driver,
                         Dimension.LENGTH,
+                        bridge=bridge,
                         base_value=initial_coordinate,
                     ),
                 )
@@ -1099,6 +1129,7 @@ class ExudynAdapter(SolverAdapter):
                     project,
                     driver,
                     Dimension.LENGTH,
+                    bridge=bridge,
                     base_value=initial_coordinate,
                     scale=-1.0,
                 ),
@@ -1106,6 +1137,7 @@ class ExudynAdapter(SolverAdapter):
                     project,
                     driver,
                     Dimension.LENGTH,
+                    bridge=bridge,
                     base_value=initial_coordinate,
                     scale=-1.0,
                 ),
@@ -1211,17 +1243,35 @@ class ExudynAdapter(SolverAdapter):
         project: Project,
         driver: AssembledDriver,
         expected_dimension: Dimension,
+        bridge=None,
         *,
         base_value: float = 0.0,
     ):
         def spring_force_fn(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):
-            target = base_value + self._evaluate_driver_value(project, driver, expected_dimension, float(t))
-            target_velocity = self._evaluate_driver_rate(project, driver, expected_dimension, float(t))
+            target = base_value + self._evaluate_driver_value(
+                project, driver, expected_dimension, float(t), bridge=bridge
+            )
+            target_velocity = self._evaluate_driver_rate(
+                project, driver, expected_dimension, float(t), bridge=bridge
+            )
             return stiffness * (target - coordinate) + damping * (target_velocity - velocity)
 
         return spring_force_fn
 
-    def _evaluate_driver_value(self, project: Project, driver: AssembledDriver, expected_dimension: Dimension, time_value: float) -> float:
+    def _evaluate_driver_value(self, project: Project, driver: AssembledDriver, expected_dimension: Dimension, time_value: float, bridge=None) -> float:
+        if bridge is not None:
+            command = bridge.command_value(driver.driver_id)
+            if command is not None:
+                quantity = self.expression_service.unit_service.quantity(float(command), driver.unit)
+                if not quantity.is_pure(expected_dimension):
+                    raise ValueError(
+                        f"Driver {driver.name} expected {expected_dimension.value} but got {quantity.dimension_text}"
+                    )
+                if expected_dimension is Dimension.ANGLE:
+                    return self.expression_service.unit_service.convert(quantity, "rad")
+                if expected_dimension is Dimension.LENGTH:
+                    return self.expression_service.unit_service.convert(quantity, "m")
+                return self.expression_service.unit_service.convert(quantity, driver.unit)
         quantity = self.expression_service.evaluate_expression(
             driver.law_expression,
             project.parameters,
@@ -1239,11 +1289,13 @@ class ExudynAdapter(SolverAdapter):
             output_unit = driver.unit
         return self.expression_service.unit_service.convert(quantity, output_unit)
 
-    def _evaluate_driver_rate(self, project: Project, driver: AssembledDriver, expected_dimension: Dimension, time_value: float) -> float:
+    def _evaluate_driver_rate(self, project: Project, driver: AssembledDriver, expected_dimension: Dimension, time_value: float, bridge=None) -> float:
+        if bridge is not None and bridge.command_value(driver.driver_id) is not None:
+            return 0.0
         dt = 1e-6
         return (
-            self._evaluate_driver_value(project, driver, expected_dimension, time_value + dt)
-            - self._evaluate_driver_value(project, driver, expected_dimension, time_value - dt)
+            self._evaluate_driver_value(project, driver, expected_dimension, time_value + dt, bridge=bridge)
+            - self._evaluate_driver_value(project, driver, expected_dimension, time_value - dt, bridge=bridge)
         ) / (2 * dt)
 
     def _make_offset_function(
@@ -1251,13 +1303,16 @@ class ExudynAdapter(SolverAdapter):
         project: Project,
         driver: AssembledDriver,
         expected_dimension: Dimension,
+        bridge=None,
         *,
         base_value: float = 0.0,
         scale: float = 1.0,
     ):
         def offset_fn(mbs, t, itemNumber, lOffset):
             return scale * (
-                base_value + self._evaluate_driver_value(project, driver, expected_dimension, float(t))
+                base_value + self._evaluate_driver_value(
+                    project, driver, expected_dimension, float(t), bridge=bridge
+                )
             )
 
         return offset_fn
@@ -1267,6 +1322,7 @@ class ExudynAdapter(SolverAdapter):
         project: Project,
         driver: AssembledDriver,
         expected_dimension: Dimension,
+        bridge=None,
         *,
         base_value: float = 0.0,
         scale: float = 1.0,
@@ -1275,6 +1331,7 @@ class ExudynAdapter(SolverAdapter):
             project,
             driver,
             expected_dimension,
+            bridge=bridge,
             base_value=base_value,
             scale=scale,
         )

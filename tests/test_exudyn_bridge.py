@@ -10,8 +10,12 @@ import exudyn as exu
 from exudyn import itemInterface as item
 from exudyn import utilities
 
+from quino import ApplicationService, MarkerInput
 from quino.blocks.exudyn_bridge import ExudynBlockBridge
 from quino.domain.blocks import BlockDiagram, BlockInstance, Connection, PortSpec
+from quino.services.expressions import ExpressionService
+from quino.services.units import UnitService
+from quino.simulation.assembler import MechanismAssembler
 
 
 def _build_free_body(mbs, x=0.0, y=0.0):
@@ -53,6 +57,145 @@ def _run_trajectory(mbs, duration=1.0, steps=10):
 
 
 class TestExudynBridge:
+    def test_bridge_sensor_reading_from_model_sensor(self) -> None:
+        """MBSSensor may reference a model Sensor via sensor_id/channel."""
+        app = ApplicationService()
+        app.new_project("Bridge semantic sensor")
+        body_id = app.create_bar(
+            "Body",
+            MarkerInput("0 mm", "2500 mm", "A"),
+            MarkerInput("100 mm", "2500 mm", "B"),
+        )
+        body = app.get_body(body_id)
+        marker_a = next(marker.id for marker in body.markers if marker.name == "A")
+        sensor_id = app.create_sensor("Probe", "point", [marker_a])
+        assembled = MechanismAssembler(ExpressionService(UnitService())).assemble(app.project)
+
+        sc = exu.SystemContainer()
+        mbs = sc.AddSystem()
+        mbs.AddObject(item.ObjectGround())
+        body_node, body_obj = _build_free_body(mbs, x=0.0, y=2.5)
+
+        diagram = BlockDiagram(
+            instances={
+                "sensor": BlockInstance(
+                    "sensor", "MBSSensor",
+                    parameters={"sensor_id": sensor_id, "channel": "y"},
+                    output_ports=[PortSpec("out")],
+                ),
+            },
+            connections=[],
+        )
+
+        bridge = ExudynBlockBridge(
+            diagram,
+            mbs,
+            item,
+            exu,
+            {body_id: body_node},
+            {body_id: body_obj},
+            project=app.project,
+            assembled=assembled,
+        )
+        mbs.Assemble()
+        bridge.initialize(mbs)
+
+        sensor_value = bridge._engine._compiled.source.instances["sensor"].parameters.get("_value", 0.0)
+        assert np.isclose(sensor_value, 2500.0)
+
+    def test_bridge_actuator_binding_to_model_load(self) -> None:
+        """MBSActuator may target an existing model Load via load_id."""
+        app = ApplicationService()
+        app.new_project("Bridge semantic load")
+        body_id = app.create_bar(
+            "Body",
+            MarkerInput("0 mm", "0 mm", "A"),
+            MarkerInput("100 mm", "0 mm", "B"),
+        )
+        body = app.get_body(body_id)
+        marker_a = next(marker.id for marker in body.markers if marker.name == "A")
+        load_id = app.create_load("DriveX", marker_a, "0 N", "0 N")
+        assembled = MechanismAssembler(ExpressionService(UnitService())).assemble(app.project)
+
+        sc = exu.SystemContainer()
+        mbs = sc.AddSystem()
+        mbs.AddObject(item.ObjectGround())
+        body_node, body_obj = _build_free_body(mbs, x=0.0, y=0.0)
+
+        diagram = BlockDiagram(
+            instances={
+                "force": BlockInstance(
+                    "force", "Constant",
+                    parameters={"value": 7.0},
+                    output_ports=[PortSpec("out")],
+                ),
+                "act": BlockInstance(
+                    "act", "MBSActuator",
+                    parameters={"load_id": load_id, "component": "fx"},
+                    input_ports=[PortSpec("in")],
+                    output_ports=[PortSpec("out")],
+                ),
+            },
+            connections=[Connection("force", "out", "act", "in")],
+        )
+
+        bridge = ExudynBlockBridge(
+            diagram,
+            mbs,
+            item,
+            exu,
+            {body_id: body_node},
+            {body_id: body_obj},
+            project=app.project,
+            assembled=assembled,
+        )
+        bridge.add_actuator_loads()
+        bridge.initialize(mbs)
+        bridge.pre_step(mbs, 0.1)
+
+        assert np.isclose(bridge._actuator_buffers.get(load_id, 0.0), 7.0)
+
+    def test_bridge_buffers_spring_and_driver_targets(self) -> None:
+        """Semantic actuator targets may address springs and drivers directly."""
+        sc = exu.SystemContainer()
+        mbs = sc.AddSystem()
+        mbs.AddObject(item.ObjectGround())
+        body_node, body_obj = _build_free_body(mbs, x=0.0, y=0.0)
+
+        diagram = BlockDiagram(
+            instances={
+                "force": BlockInstance(
+                    "force", "Constant",
+                    parameters={"value": 3.5},
+                    output_ports=[PortSpec("out")],
+                ),
+                "spring_act": BlockInstance(
+                    "spring_act", "MBSActuator",
+                    parameters={"spring_id": "spring_001"},
+                    input_ports=[PortSpec("in")],
+                    output_ports=[PortSpec("out")],
+                ),
+                "driver_act": BlockInstance(
+                    "driver_act", "MBSActuator",
+                    parameters={"driver_id": "driver_001"},
+                    input_ports=[PortSpec("in")],
+                    output_ports=[PortSpec("out")],
+                ),
+            },
+            connections=[
+                Connection("force", "out", "spring_act", "in"),
+                Connection("force", "out", "driver_act", "in"),
+            ],
+        )
+
+        bridge = ExudynBlockBridge(
+            diagram, mbs, item, exu, {"body1": body_node}, {"body1": body_obj}
+        )
+        bridge.pre_step(mbs, 0.1)
+
+        assert np.isclose(bridge.command_value("spring_001") or 0.0, 3.5)
+        assert np.isclose(bridge.command_value("driver_001") or 0.0, 3.5)
+
     def test_bridge_sensor_to_actuator(self) -> None:
         """A block-diagram Constant feeds an MBSActuator."""
         sc = exu.SystemContainer()

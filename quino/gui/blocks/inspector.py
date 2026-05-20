@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import ast
 from typing import Any
 
 from PySide6 import QtCore, QtWidgets
+
+from quino.simulation.sensor_expressions import sensor_channel_keys
 
 
 class BlockInspector(QtWidgets.QWidget):
@@ -16,10 +19,14 @@ class BlockInspector(QtWidgets.QWidget):
         super().__init__(parent)
         self._instance_id: str | None = None
         self._block_type: str = ""
+        self._project = None
         self._layout = QtWidgets.QFormLayout(self)
         self._layout.setRowWrapPolicy(QtWidgets.QFormLayout.RowWrapPolicy.WrapLongRows)
         self._fields: dict[str, QtWidgets.QWidget] = {}
         self._clear_form()
+
+    def set_project(self, project: Any | None) -> None:
+        self._project = project
 
     def _clear_form(self) -> None:
         while self._layout.rowCount() > 0:
@@ -51,6 +58,9 @@ class BlockInspector(QtWidgets.QWidget):
                 widget.currentIndexChanged.connect(self._on_field_changed)
 
     def _widget_for_value(self, key: str, value: Any) -> QtWidgets.QWidget:
+        semantic = self._semantic_widget(key, value)
+        if semantic is not None:
+            return semantic
         if isinstance(value, bool):
             cb = QtWidgets.QCheckBox()
             cb.setChecked(value)
@@ -67,6 +77,85 @@ class BlockInspector(QtWidgets.QWidget):
             return le
         le = QtWidgets.QLineEdit(str(value))
         return le
+
+    def _semantic_widget(self, key: str, value: Any) -> QtWidgets.QWidget | None:
+        model = getattr(self._project, "model", None)
+        if key == "sensor_id":
+            return self._entity_combo(getattr(model, "sensors", []), str(value))
+        if key == "load_id":
+            return self._entity_combo(getattr(model, "loads", []), str(value))
+        if key == "spring_id":
+            return self._entity_combo(getattr(model, "springs", []), str(value))
+        if key == "driver_id":
+            return self._entity_combo(getattr(model, "drivers", []), str(value))
+        if key == "body_id":
+            return self._entity_combo(getattr(model, "bodies", []), str(value))
+        if key == "component":
+            combo = QtWidgets.QComboBox()
+            for option in ("fx", "fy", "x", "y", "angle"):
+                combo.addItem(option, option)
+            self._set_combo_value(combo, str(value))
+            return combo
+        if key == "channel":
+            combo = QtWidgets.QComboBox()
+            self._populate_channel_combo(combo, current_value=str(value))
+            return combo
+        return None
+
+    def _entity_combo(self, entities: list[Any], current_id: str) -> QtWidgets.QComboBox:
+        combo = QtWidgets.QComboBox()
+        combo.addItem("", "")
+        for entity in entities:
+            combo.addItem(f"{entity.name} ({entity.id})", entity.id)
+        self._set_combo_value(combo, current_id)
+        if self._project is not None and self._block_type in {"ModelSensor", "MBSSensor"}:
+            combo.currentIndexChanged.connect(self._on_sensor_selection_changed)
+        return combo
+
+    def _set_combo_value(self, combo: QtWidgets.QComboBox, value: str) -> None:
+        for index in range(combo.count()):
+            if combo.itemData(index) == value or combo.itemText(index) == value:
+                combo.setCurrentIndex(index)
+                return
+        if value:
+            combo.addItem(value, value)
+            combo.setCurrentIndex(combo.count() - 1)
+
+    def _populate_channel_combo(self, combo: QtWidgets.QComboBox, current_value: str = "") -> None:
+        combo.blockSignals(True)
+        combo.clear()
+        channels = self._available_sensor_channels()
+        if not channels:
+            channels = [("y", "y")]
+        seen: set[str] = set()
+        for channel, _unit in channels:
+            if channel in seen:
+                continue
+            combo.addItem(channel, channel)
+            seen.add(channel)
+        self._set_combo_value(combo, current_value or combo.currentText())
+        combo.blockSignals(False)
+
+    def _available_sensor_channels(self) -> list[tuple[str, str]]:
+        if self._project is None:
+            return []
+        sensor_widget = self._fields.get("sensor_id")
+        sensor_id = ""
+        if isinstance(sensor_widget, QtWidgets.QComboBox):
+            sensor_id = str(sensor_widget.currentData() or "")
+        if not sensor_id:
+            return []
+        sensor = next((item for item in self._project.model.sensors if item.id == sensor_id), None)
+        if sensor is None:
+            return []
+        return sensor_channel_keys(sensor)
+
+    def _on_sensor_selection_changed(self) -> None:
+        channel_widget = self._fields.get("channel")
+        if isinstance(channel_widget, QtWidgets.QComboBox):
+            current_value = str(channel_widget.currentData() or channel_widget.currentText() or "")
+            self._populate_channel_combo(channel_widget, current_value=current_value)
+        self._on_field_changed()
 
     def _horizontal_line(self) -> QtWidgets.QFrame:
         line = QtWidgets.QFrame()
@@ -87,13 +176,12 @@ class BlockInspector(QtWidgets.QWidget):
                 text = widget.text().strip()
                 # Try to parse as number
                 try:
-                    if "," in text and text.startswith("["):
-                        # list literal
-                        new_params[key] = eval(text)
+                    if text.startswith("["):
+                        new_params[key] = ast.literal_eval(text)
                     else:
                         new_params[key] = float(text)
-                except ValueError:
+                except (ValueError, SyntaxError):
                     new_params[key] = text
             elif isinstance(widget, QtWidgets.QComboBox):
-                new_params[key] = widget.currentText()
+                new_params[key] = widget.currentData() or widget.currentText()
         self.parametersChanged.emit(self._instance_id, new_params)
