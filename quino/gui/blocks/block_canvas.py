@@ -214,6 +214,117 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
             n += 1
         return f"{base}_{n:03d}"
 
+    def create_subsystem_from_selection(self) -> BlockItem | None:
+        """Group selected blocks into a Subsystem instance."""
+        selected = [it for it in self.selectedItems() if isinstance(it, BlockItem)]
+        if len(selected) < 2:
+            return None
+
+        selected_ids = {it.instance_id for it in selected}
+
+        # Collect boundary connections
+        boundary_inputs: list[tuple[str, str, str, str]] = []  # (ext_src, ext_src_port, dst_inst, dst_port)
+        boundary_outputs: list[tuple[str, str, str, str]] = []  # (src_inst, src_port, ext_dst, ext_dst_port)
+        internal_connections: list[Connection] = []
+
+        for conn in self._diagram.connections:
+            src_in = conn.src_instance in selected_ids
+            dst_in = conn.dst_instance in selected_ids
+            if src_in and dst_in:
+                internal_connections.append(conn)
+            elif not src_in and dst_in:
+                boundary_inputs.append((conn.src_instance, conn.src_port, conn.dst_instance, conn.dst_port))
+            elif src_in and not dst_in:
+                boundary_outputs.append((conn.src_instance, conn.src_port, conn.dst_instance, conn.dst_port))
+
+        # Build internal diagram
+        internal_instances: dict[str, BlockInstance] = {}
+        internal_connections_list: list[Connection] = list(internal_connections)
+
+        for item in selected:
+            inst = self._diagram.instances[item.instance_id]
+            internal_instances[inst.instance_id] = BlockInstance(
+                instance_id=inst.instance_id,
+                block_type=inst.block_type,
+                parameters=dict(inst.parameters),
+                input_ports=list(inst.input_ports),
+                output_ports=list(inst.output_ports),
+                position=inst.position,
+            )
+
+        # Add Inport blocks for each boundary input
+        inport_mappings: dict[tuple[str, str], str] = {}
+        for idx, (ext_src, ext_src_port, dst_inst, dst_port) in enumerate(boundary_inputs):
+            inport_id = f"inport_{idx}"
+            internal_instances[inport_id] = BlockInstance(
+                instance_id=inport_id,
+                block_type="Inport",
+                parameters={"port_name": dst_port},
+                input_ports=[PortSpec("in")],
+                output_ports=[PortSpec("out")],
+            )
+            internal_connections_list.append(Connection(inport_id, "out", dst_inst, dst_port))
+            inport_mappings[(dst_inst, dst_port)] = inport_id
+
+        # Add Outport blocks for each boundary output
+        outport_mappings: dict[tuple[str, str], str] = {}
+        for idx, (src_inst, src_port, ext_dst, ext_dst_port) in enumerate(boundary_outputs):
+            outport_id = f"outport_{idx}"
+            internal_instances[outport_id] = BlockInstance(
+                instance_id=outport_id,
+                block_type="Outport",
+                parameters={"port_name": src_port},
+                input_ports=[PortSpec("in")],
+                output_ports=[PortSpec("out")],
+            )
+            internal_connections_list.append(Connection(src_inst, src_port, outport_id, "in"))
+            outport_mappings[(src_inst, src_port)] = outport_id
+
+        internal_diagram = BlockDiagram(
+            instances=internal_instances,
+            connections=internal_connections_list,
+        )
+
+        # Create Subsystem instance
+        sub_id = self._generate_instance_id("Subsystem")
+        input_ports = [PortSpec(f"in_{i}") for i in range(len(boundary_inputs))]
+        output_ports = [PortSpec(f"out_{i}") for i in range(len(boundary_outputs))]
+        sub_inst = BlockInstance(
+            instance_id=sub_id,
+            block_type="Subsystem",
+            parameters={},
+            input_ports=input_ports,
+            output_ports=output_ports,
+            internal_diagram=internal_diagram,
+        )
+        self._diagram.instances[sub_id] = sub_inst
+
+        # Remove old blocks and their connections
+        for item in selected:
+            self.delete_block(item.instance_id)
+
+        # Add visual item
+        sub_item = BlockItem(
+            instance_id=sub_id,
+            block_type="Subsystem",
+            parameters={},
+            input_ports=[p.name for p in input_ports],
+            output_ports=[p.name for p in output_ports],
+            position=(0.0, 0.0),
+        )
+        self.addItem(sub_item)
+        self._block_items[sub_id] = sub_item
+
+        # Rewire external connections
+        for idx, (ext_src, ext_src_port, _dst_inst, _dst_port) in enumerate(boundary_inputs):
+            self._diagram.connections.append(Connection(ext_src, ext_src_port, sub_id, f"in_{idx}"))
+        for idx, (_src_inst, _src_port, ext_dst, ext_dst_port) in enumerate(boundary_outputs):
+            self._diagram.connections.append(Connection(sub_id, f"out_{idx}", ext_dst, ext_dst_port))
+
+        self._build_from_diagram()  # rebuild scene to show new wiring
+        self.sync_to_diagram()
+        return sub_item
+
     # -- wiring interactions ------------------------------------------------
 
     def mousePressEvent(self, event: QtWidgets.QGraphicsSceneMouseEvent) -> None:
@@ -349,3 +460,57 @@ class BlockEditorCanvas(QtWidgets.QGraphicsView):
             self.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.ArrowCursor))
             return
         super().mouseReleaseEvent(event)
+
+    def contextMenuEvent(self, event: QtGui.QContextMenuEvent) -> None:
+        scene = self.scene()
+        if not isinstance(scene, BlockDiagramScene):
+            return
+        selected = [it for it in scene.selectedItems() if isinstance(it, BlockItem)]
+        menu = QtWidgets.QMenu(self)
+        if len(selected) >= 2:
+            action = menu.addAction("Create Subsystem")
+            action.triggered.connect(lambda: scene.create_subsystem_from_selection())
+            menu.addSeparator()
+        action_delete = menu.addAction("Delete")
+        action_delete.triggered.connect(self._delete_selected)
+        menu.exec(event.globalPos())
+
+    def _delete_selected(self) -> None:
+        scene = self.scene()
+        if not isinstance(scene, BlockDiagramScene):
+            return
+        for item in list(scene.selectedItems()):
+            if isinstance(item, BlockItem):
+                scene.delete_block(item.instance_id)
+            elif isinstance(item, ConnectionItem):
+                scene.delete_connection(item)
+
+    def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:
+        scene = self.scene()
+        if not isinstance(scene, BlockDiagramScene):
+            return
+        item = scene.itemAt(self.mapToScene(event.pos()), QtGui.QTransform())
+        if isinstance(item, BlockItem) and item.block_type == "Subsystem":
+            self._open_subsystem_editor(item)
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def _open_subsystem_editor(self, item: BlockItem) -> None:
+        scene = self.scene()
+        if not isinstance(scene, BlockDiagramScene):
+            return
+        inst = scene.diagram.instances.get(item.instance_id)
+        if inst is None or inst.internal_diagram is None:
+            return
+        from quino.gui.blocks.editor_widget import BlockEditorWidget
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle(f"Subsystem: {item.instance_id}")
+        dialog.resize(800, 600)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        editor = BlockEditorWidget(dialog)
+        editor.set_diagram(inst.internal_diagram)
+        layout.addWidget(editor)
+        btn = QtWidgets.QPushButton("Close")
+        btn.clicked.connect(dialog.accept)
+        layout.addWidget(btn)
+        dialog.exec()

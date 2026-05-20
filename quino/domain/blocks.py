@@ -29,6 +29,8 @@ class BlockInstance:
     output_ports: list[PortSpec] = field(default_factory=list)
     # Position hint for the visual editor (Fase 4)
     position: tuple[float, float] = (0.0, 0.0)
+    # Internal diagram for subsystems (Fase 5.5)
+    internal_diagram: "BlockDiagram | None" = None
 
     def parameter(self, key: str, default: Any = None) -> Any:
         return self.parameters.get(key, default)

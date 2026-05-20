@@ -297,6 +297,108 @@ def _derivative_filtered_update(
 
 
 # ---------------------------------------------------------------------------
+# Electrical domain
+# ---------------------------------------------------------------------------
+
+def _resistor(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float, **kwargs) -> dict[str, np.ndarray]:
+    r = float(parameters.get("r", 1.0))
+    v = float(inputs["v"][0])
+    return {"i": np.array([v / r])}
+
+
+def _inductor_init(parameters: dict[str, Any]) -> dict[str, np.ndarray]:
+    return {"i_state": np.array([float(parameters.get("initial_current", 0.0))])}
+
+
+def _inductor_update(
+    inputs: dict[str, np.ndarray],
+    parameters: dict[str, Any],
+    t: float,
+    dt: float,
+    state: dict[str, np.ndarray],
+    **kwargs,
+) -> dict[str, np.ndarray]:
+    l = float(parameters.get("l", 1.0))
+    v = float(inputs["v"][0])
+    i = state["i_state"][0] + (v / l) * dt
+    return {"i": np.array([i]), "i_state": np.array([i])}
+
+
+def _capacitor_init(parameters: dict[str, Any]) -> dict[str, np.ndarray]:
+    return {"v_state": np.array([float(parameters.get("initial_voltage", 0.0))])}
+
+
+def _capacitor_update(
+    inputs: dict[str, np.ndarray],
+    parameters: dict[str, Any],
+    t: float,
+    dt: float,
+    state: dict[str, np.ndarray],
+    **kwargs,
+) -> dict[str, np.ndarray]:
+    c = float(parameters.get("c", 1.0))
+    i = float(inputs["i"][0])
+    v = state["v_state"][0] + (i / c) * dt
+    return {"v": np.array([v]), "v_state": np.array([v])}
+
+
+def _dc_motor(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float, **kwargs) -> dict[str, np.ndarray]:
+    """Simplified DC motor: torque = Kt * V / R (steady-state electrical)."""
+    kt = float(parameters.get("kt", 1.0))
+    r = float(parameters.get("r", 1.0))
+    v = float(inputs["v"][0])
+    torque = kt * v / r
+    return {"torque": np.array([torque])}
+
+
+# ---------------------------------------------------------------------------
+# Hydraulic domain
+# ---------------------------------------------------------------------------
+
+def _hydraulic_pump(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float, **kwargs) -> dict[str, np.ndarray]:
+    q = float(parameters.get("q", 1.0))
+    return {"out": np.array([q])}
+
+
+def _hydraulic_orifice(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float, **kwargs) -> dict[str, np.ndarray]:
+    gain = float(parameters.get("gain", 1.0))
+    dp = float(inputs["dp"][0])
+    q = gain * np.sign(dp) * np.sqrt(abs(dp))
+    return {"out": np.array([q])}
+
+
+def _hydraulic_chamber_init(parameters: dict[str, Any]) -> dict[str, np.ndarray]:
+    return {"p_state": np.array([float(parameters.get("initial_pressure", 0.0))])}
+
+
+def _hydraulic_chamber_update(
+    inputs: dict[str, np.ndarray],
+    parameters: dict[str, Any],
+    t: float,
+    dt: float,
+    state: dict[str, np.ndarray],
+    **kwargs,
+) -> dict[str, np.ndarray]:
+    beta = float(parameters.get("bulk_modulus", 1.6e9))
+    volume = float(parameters.get("volume", 1.0))
+    q = float(inputs["q"][0])
+    p = state["p_state"][0] + (beta / volume) * q * dt
+    return {"p": np.array([p]), "p_state": np.array([p])}
+
+
+# ---------------------------------------------------------------------------
+# Subsystem ports
+# ---------------------------------------------------------------------------
+
+def _inport(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float, **kwargs) -> dict[str, np.ndarray]:
+    return {"out": inputs["in"].copy()}
+
+
+def _outport(inputs: dict[str, np.ndarray], parameters: dict[str, Any], t: float, **kwargs) -> dict[str, np.ndarray]:
+    return {"out": inputs["in"].copy()}
+
+
+# ---------------------------------------------------------------------------
 # MBS Interface (Exudyn bridge)
 # ---------------------------------------------------------------------------
 
@@ -350,6 +452,28 @@ BLOCK_REGISTRY: dict[str, BlockDef] = {
         [PortSpec("in")], [PortSpec("out")],
         init_state=_derivative_filtered_init, update=_derivative_filtered_update,
     ),
+    # Electrical
+    "Resistor": BlockDef([PortSpec("v")], [PortSpec("i")], compute=_resistor),
+    "Inductor": BlockDef(
+        [PortSpec("v")], [PortSpec("i")],
+        init_state=_inductor_init, update=_inductor_update,
+    ),
+    "Capacitor": BlockDef(
+        [PortSpec("i")], [PortSpec("v")],
+        init_state=_capacitor_init, update=_capacitor_update,
+    ),
+    "DCMotor": BlockDef([PortSpec("v")], [PortSpec("torque")], compute=_dc_motor),
+    # Hydraulic
+    "HydraulicPump": BlockDef([], [PortSpec("out")], compute=_hydraulic_pump),
+    "HydraulicOrifice": BlockDef([PortSpec("dp")], [PortSpec("out")], compute=_hydraulic_orifice),
+    "HydraulicChamber": BlockDef(
+        [PortSpec("q")], [PortSpec("p")],
+        init_state=_hydraulic_chamber_init, update=_hydraulic_chamber_update,
+    ),
+    # Subsystem ports
+    "Inport": BlockDef([PortSpec("in")], [PortSpec("out")], compute=_inport),
+    "Outport": BlockDef([PortSpec("in")], [PortSpec("out")], compute=_outport),
+    # MBS Interface
     "MBSSensor": BlockDef(
         [], [PortSpec("out")],
         compute=_mbs_sensor,

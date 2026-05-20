@@ -26,6 +26,8 @@ class BlockPalette(QtWidgets.QTreeWidget):
             "Routing": ["Mux", "Demux"],
             "Stateful": ["Integrator", "IntegratorLimited", "UnitDelay"],
             "Control": ["PID", "DerivativeFiltered"],
+            "Electrical": ["Resistor", "Inductor", "Capacitor", "DCMotor"],
+            "Hydraulic": ["HydraulicPump", "HydraulicOrifice", "HydraulicChamber"],
             "MBS Interface": ["MBSSensor", "MBSActuator"],
         }
         for cat_name, block_names in categories.items():
