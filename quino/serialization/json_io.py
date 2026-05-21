@@ -959,6 +959,9 @@ class JsonMapper:
             "case_id": pose.case_id,
             "project_pose_id": pose.project_pose_id,
             "is_default": pose.is_default,
+            "parent_pose_id": pose.parent_pose_id,
+            "requires_recompute": pose.requires_recompute,
+            "solve_failed": pose.solve_failed,
             "metadata": pose.metadata,
         }
 
@@ -970,6 +973,9 @@ class JsonMapper:
             case_id=data.get("case_id"),
             project_pose_id=data.get("project_pose_id"),
             is_default=data.get("is_default", False),
+            parent_pose_id=data.get("parent_pose_id"),
+            requires_recompute=data.get("requires_recompute", True),
+            solve_failed=data.get("solve_failed", False),
             metadata=data.get("metadata", {}),
         )
 

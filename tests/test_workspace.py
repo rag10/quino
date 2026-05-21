@@ -339,3 +339,31 @@ def test_json_mapper_run_entry_without_result_ref() -> None:
     restored = mapper._run_entry_from_dict(data)
     assert restored.result_ref is None
     assert restored.status == "not_run"
+
+
+def test_workspace_pose_has_inheritance_fields():
+    from quino.domain.workspace import WorkspacePose
+    pose = WorkspacePose(id="p1", name="Default", is_default=True)
+    assert pose.parent_pose_id is None
+    assert pose.requires_recompute is True
+    assert pose.solve_failed is False
+
+
+def test_workspace_pose_roundtrip_with_inheritance_fields(tmp_path):
+    from quino.domain.workspace import WorkspacePose, Workspace
+    from quino.domain.model import Project
+    from quino.serialization.json_io import JsonMapper
+    pose = WorkspacePose(
+        id="p1", name="Default", is_default=True,
+        parent_pose_id="p0", requires_recompute=False, solve_failed=False,
+        metadata={"solved_state": {"m1": [1.0, 2.0]}},
+    )
+    ws = Workspace(poses=[pose])
+    project = Project(id="proj1", name="Test", schema_version="0.1.0", workspace=ws)
+    payload = JsonMapper().dump(project)
+    restored = JsonMapper().load(payload)
+    restored_pose = restored.workspace.poses[0]
+    assert restored_pose.parent_pose_id == "p0"
+    assert restored_pose.requires_recompute is False
+    assert restored_pose.solve_failed is False
+    assert restored_pose.metadata["solved_state"]["m1"] == [1.0, 2.0]

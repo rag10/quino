@@ -125,6 +125,9 @@ class WorkspacePose:
     case_id: str | None = None
     project_pose_id: str | None = None
     is_default: bool = False
+    parent_pose_id: str | None = None
+    requires_recompute: bool = True
+    solve_failed: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
