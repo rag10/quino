@@ -21,6 +21,38 @@ from quino.domain.workspace import Case, ScalarValue, Study, StudyOverlay
 from quino.services.workspace_catalog import build_parameter_catalog
 
 
+# ------------------------------------------------------------------
+# Adapter for BlockDiagram.instances (dict) to expose as list-like
+# ------------------------------------------------------------------
+
+class _DictAsListView:
+    """Adapter to expose dict[id, entity] as a list-like for the composer."""
+
+    def __init__(self, d: dict):
+        self._d = d
+
+    def append(self, item):
+        self._d[item.instance_id] = item
+
+    def __iter__(self):
+        return iter(self._d.values())
+
+    def __contains__(self, item):
+        return item in self._d.values()
+
+
+def _block_instances_view(project: Project) -> _DictAsListView:
+    if project.model.control_graph is None:
+        return _DictAsListView({})
+    return _DictAsListView(project.model.control_graph.instances)
+
+
+def _block_connections_view(project: Project) -> list:
+    if project.model.control_graph is None:
+        return []
+    return project.model.control_graph.connections
+
+
 def compose_project(base: Project, study: Study | None = None, case: Case | None = None) -> Project:
     """Return a deep-copied Project with structural deltas and parameter overrides applied.
 
@@ -128,6 +160,8 @@ _ENTITY_DOMAIN_LISTS = {
     "loads": lambda p: p.model.loads,
     "sensors": lambda p: p.model.sensors,
     "springs": lambda p: p.model.springs,
+    "blocks": _block_instances_view,
+    "connections": _block_connections_view,
 }
 
 
@@ -149,14 +183,22 @@ def _apply_structural_deltas(project: Project, case: Case) -> None:
         "loads": mapper._load_from_dict,
         "sensors": mapper._sensor_from_dict,
         "springs": mapper._spring_from_dict,
+        "blocks": mapper._block_instance_from_dict,
+        "connections": mapper._block_connection_from_dict,
     }
     for domain, entities_data in case.added_entities.items():
+        if not entities_data:
+            continue
         target_list = _ENTITY_DOMAIN_LISTS.get(domain)
         if target_list is None:
             continue
         deserializer = deserializers.get(domain)
         if deserializer is None:
             continue
+        # Ensure control_graph exists before appending blocks or connections
+        if domain in ("blocks", "connections") and project.model.control_graph is None:
+            from quino.domain.blocks import BlockDiagram
+            project.model.control_graph = BlockDiagram()
         for entity_data in entities_data:
             entity = deserializer(entity_data)
             target_list(project).append(entity)
@@ -182,6 +224,11 @@ def _find_entity_in_project(project: Project, entity_id: str) -> Any | None:
         for marker in body.markers:
             if marker.id == entity_id:
                 return marker
+    # BlockInstance uses instance_id rather than id
+    if project.model.control_graph is not None:
+        inst = project.model.control_graph.instances.get(entity_id)
+        if inst is not None:
+            return inst
     return None
 
 
@@ -278,6 +325,13 @@ def _remove_entity_from_project(project: Project, entity_id: str) -> None:
         project.model.sensors = [s for s in project.model.sensors if s.id != entity_id]
     elif isinstance(entity, Spring):
         project.model.springs = [sp for sp in project.model.springs if sp.id != entity_id]
+
+    # BlockInstance removal (Connections have no id and are not removed by entity_id)
+    from quino.domain.blocks import BlockInstance
+    if isinstance(entity, BlockInstance):
+        cg = project.model.control_graph
+        if cg is not None:
+            cg.instances.pop(entity.instance_id, None)
 
 
 # ------------------------------------------------------------------

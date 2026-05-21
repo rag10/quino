@@ -194,6 +194,55 @@ def test_body_removal_cascade_in_composed_project(svc_with_case):
     assert not any(d.id == driver_id for d in dp.model.drivers)
 
 
+def test_case_adds_block_instance_to_composed_model():
+    from quino.domain.blocks import BlockDiagram
+    from quino.domain.model import Model, Project
+    from quino.domain.workspace import Case, Workspace, Baseline
+    from quino.services.workspace_composition import compose_project
+
+    project = Project(id="p", name="test", schema_version="1", model=Model(control_graph=BlockDiagram()))
+    project.workspace = Workspace(
+        baselines=[Baseline(id="b", name="base")],
+        cases=[Case(id="c1", name="C1", baseline_id="b",
+                    added_entities={"blocks": [{
+                        "id": "pid",
+                        "block_type": "pid",
+                        "parameters": {"kp": 1.0},
+                        "input_ports": [],
+                        "output_ports": [],
+                        "position": [0.0, 0.0],
+                    }]})],
+    )
+    composed = compose_project(project, case=project.workspace.cases[0])
+    assert "pid" in composed.model.control_graph.instances
+    assert composed.model.control_graph.instances["pid"].parameters["kp"] == 1.0
+
+
+def test_case_adds_connection_to_composed_model():
+    from quino.domain.blocks import BlockDiagram, BlockInstance
+    from quino.domain.model import Model, Project
+    from quino.domain.workspace import Case, Workspace, Baseline
+    from quino.services.workspace_composition import compose_project
+
+    diagram = BlockDiagram()
+    diagram.instances["src"] = BlockInstance(instance_id="src", block_type="constant")
+    diagram.instances["dst"] = BlockInstance(instance_id="dst", block_type="gain")
+    project = Project(id="p", name="test", schema_version="1", model=Model(control_graph=diagram))
+    project.workspace = Workspace(
+        baselines=[Baseline(id="b", name="base")],
+        cases=[Case(id="c1", name="C1", baseline_id="b",
+                    added_entities={"connections": [{
+                        "src_instance": "src", "src_port": "out",
+                        "dst_instance": "dst", "dst_port": "in",
+                    }]})],
+    )
+    composed = compose_project(project, case=project.workspace.cases[0])
+    assert len(composed.model.control_graph.connections) == 1
+    conn = composed.model.control_graph.connections[0]
+    assert conn.src_instance == "src"
+    assert conn.dst_instance == "dst"
+
+
 def test_roundtrip_json_preserves_structural_diffs(svc_with_case):
     svc, base_body_id, baseline, case = svc_with_case
     svc.set_working_context(case_id=case.id)
