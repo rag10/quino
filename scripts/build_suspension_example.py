@@ -83,13 +83,12 @@ def build_active_suspension(app: ApplicationService) -> None:
     # 2. Sketch (paramétrico)
     # ------------------------------------------------------------------
     p_chassis = app.create_sketch_point("0 mm", "0 mm", name="ChassisHinge")
-    p_strut_top = app.create_sketch_point("250 mm", "320 mm", name="StrutTop")
+    p_strut_top = app.create_sketch_point("ArmLength", "320 mm", name="StrutTop")
     p_ball = app.create_sketch_point("ArmLength", "0 mm", name="BallJoint")
-    p_hub = app.create_sketch_point("250 mm", "0 mm", name="WheelHub")
+    p_hub = app.create_sketch_point("ArmLength", "0 mm", name="WheelHub")
 
     app.create_sketch_line_segment(p_chassis, p_ball, name="LowerArm")
     app.create_sketch_line_segment(p_strut_top, p_hub, name="Strut")
-    app.create_sketch_line_segment(p_ball, p_hub, name="HubMount")
 
     app.create_sketch_constraint("fix", [p_chassis], name="FixChassis")
     app.create_sketch_constraint("fix", [p_strut_top], name="FixStrutTop")
@@ -100,7 +99,7 @@ def build_active_suspension(app: ApplicationService) -> None:
         "distance", [p_chassis, p_ball], value="ArmLength", name="LenArm",
     )
     app.create_sketch_constraint(
-        "distance", [p_ball, p_hub], value="50 mm", name="HubOffset",
+        "vertical", [p_strut_top, p_hub], name="VStrut",
     )
 
     # ------------------------------------------------------------------
@@ -110,7 +109,7 @@ def build_active_suspension(app: ApplicationService) -> None:
         "ChassisMount", "ChassisMountX", "ChassisMountY",
     )
     strut_top_anchor_id, strut_top_marker = app.create_ground_anchor(
-        "StrutTopMount", "250 mm", "320 mm",
+        "StrutTopMount", "ArmLength", "320 mm",
     )
 
     lower_arm = app.create_bar(
@@ -118,14 +117,22 @@ def build_active_suspension(app: ApplicationService) -> None:
         MarkerInput("ChassisMountX", "ChassisMountY", "Hinge"),
         MarkerInput("ArmLength", "0 mm", "BallJoint"),
     )
+    app.update_property(
+        lower_arm, "mass",
+        PropertyValueInput(kind="expression", value="3 kg"),
+    )
 
-    # The wheel hub is a small rigid body (sprung mass).
+    # The wheel hub is a small rigid body (sprung mass). Its markers must
+    # coincide at rest with their joint counterparts:
+    #   Center      → coincident with LowerArm.BallJoint  (ball joint)
+    #   StrutAttach → coincident with StrutTopMount       (strut top pivot)
+    #   ContactPatch is below the hub (where the road bump applies).
     hub = app.create_body(
         "WheelHub",
         [
-            MarkerInput("250 mm", "0 mm", "Center"),
-            MarkerInput("250 mm", "50 mm", "StrutAttach"),
-            MarkerInput("200 mm", "-30 mm", "ContactPatch"),
+            MarkerInput("ArmLength", "0 mm", "Center"),
+            MarkerInput("ArmLength", "320 mm", "StrutAttach"),
+            MarkerInput("ArmLength", "-50 mm", "ContactPatch"),
         ],
         body_type="body",
     )
@@ -134,10 +141,11 @@ def build_active_suspension(app: ApplicationService) -> None:
         PropertyValueInput(kind="expression", value="40 kg"),
     )
 
-    # Strut: prismatic slider along the strut axis (almost vertical here).
+    # Strut: prismatic slider along the vertical strut axis, anchored at
+    # the strut top mount, pointing down.
     strut_slider = app.create_slider(
         "StrutGuide",
-        SliderInput("250 mm", "320 mm", "270 deg", "-60 mm", "60 mm"),
+        SliderInput("ArmLength", "320 mm", "270 deg", "-60 mm", "60 mm"),
     )
 
     # ------------------------------------------------------------------
@@ -173,23 +181,10 @@ def build_active_suspension(app: ApplicationService) -> None:
             marker_id=_marker_id(app, hub, "Center"),
         ),
     )
-    # Strut top pinned to the chassis top mount (revolute so the strut can
-    # swing slightly with the arm).
-    app.create_joint(
-        "StrutTopPivot",
-        "revolute",
-        JointEndpointInput(
-            JointEndpointKind.MARKER,
-            body_id=strut_top_anchor_id,
-            marker_id=strut_top_marker,
-        ),
-        JointEndpointInput(
-            JointEndpointKind.MARKER,
-            body_id=hub,
-            marker_id=_marker_id(app, hub, "StrutAttach"),
-        ),
-    )
     # Strut prismatic: hub StrutAttach slides along the strut guide axis.
+    # The strut top mount only acts as a geometric reference for the spring
+    # (no separate revolute joint — the slider already constrains the hub
+    # to the strut axis, so adding a pivot would over-constrain the model).
     app.connect_marker_to_slider(
         _marker_id(app, hub, "StrutAttach"),
         strut_slider,
@@ -315,9 +310,11 @@ def build_active_suspension(app: ApplicationService) -> None:
         src_instance=sensor_block, src_port="out",
         dst_instance=gain_block, dst_port="in",
     )
+    # PID block's input port is named "error" (it expects an error signal,
+    # i.e. the negated hub displacement here).
     app.add_connection(
         src_instance=gain_block, src_port="out",
-        dst_instance=pid_block, dst_port="in",
+        dst_instance=pid_block, dst_port="error",
     )
     app.add_connection(
         src_instance=pid_block, src_port="out",

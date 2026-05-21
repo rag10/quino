@@ -88,7 +88,7 @@
         },
         "metadata": {},
         "x": {
-          "text": "250 mm",
+          "text": "ArmLength",
           "unit": "mm"
         },
         "y": {
@@ -134,7 +134,7 @@
         },
         "metadata": {},
         "x": {
-          "text": "250 mm",
+          "text": "ArmLength",
           "unit": "mm"
         },
         "y": {
@@ -174,23 +174,6 @@
         },
         "metadata": {},
         "start_point_id": "skpt_002",
-        "end_point_id": "skpt_004"
-      },
-      "skline_003": {
-        "id": "skline_003",
-        "name": "HubMount",
-        "type": "line_segment",
-        "visible": true,
-        "construction": false,
-        "selectable": true,
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {},
-        "start_point_id": "skpt_003",
         "end_point_id": "skpt_004"
       }
     },
@@ -255,17 +238,13 @@
       },
       "skcon_005": {
         "id": "skcon_005",
-        "name": "HubOffset",
-        "type": "distance",
+        "name": "VStrut",
+        "type": "vertical",
         "references": [
-          "skpt_003",
+          "skpt_002",
           "skpt_004"
         ],
-        "value": {
-          "expression": "50 mm",
-          "unit": "mm",
-          "expected_dimension": "length"
-        },
+        "value": null,
         "entity_references": [],
         "enabled": true,
         "driving": true,
@@ -355,12 +334,12 @@
             "name": "P",
             "type": "structural",
             "x": {
-              "expression": "250 mm",
+              "expression": "ArmLength",
               "unit": "mm",
               "expected_dimension": "length"
             },
             "y": {
-              "expression": "(320 mm) + 270.000000 mm",
+              "expression": "320 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -378,7 +357,7 @@
             "name": "CoM",
             "type": "com",
             "x": {
-              "expression": "250 mm",
+              "expression": "300 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -478,7 +457,7 @@
               "unit": "mm",
               "expected_dimension": "length"
             },
-            "visible": false,
+            "visible": true,
             "style": {
               "color": "#000000",
               "visible": true,
@@ -495,7 +474,11 @@
           "marker_006"
         ],
         "closed_shape": false,
-        "mass": null,
+        "mass": {
+          "expression": "3 kg",
+          "unit": "kg",
+          "expected_dimension": "mass"
+        },
         "style": {
           "color": "#000000",
           "visible": true,
@@ -514,7 +497,7 @@
             "name": "Center",
             "type": "structural",
             "x": {
-              "expression": "250 mm",
+              "expression": "ArmLength",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -537,7 +520,7 @@
             "name": "StrutAttach",
             "type": "structural",
             "x": {
-              "expression": "250 mm",
+              "expression": "ArmLength",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -560,12 +543,12 @@
             "name": "ContactPatch",
             "type": "structural",
             "x": {
-              "expression": "200 mm",
+              "expression": "ArmLength",
               "unit": "mm",
               "expected_dimension": "length"
             },
             "y": {
-              "expression": "-30 mm",
+              "expression": "-50 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -583,12 +566,12 @@
             "name": "CoM",
             "type": "com",
             "x": {
-              "expression": "233.333 mm",
+              "expression": "300 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
             "y": {
-              "expression": "6.66667 mm",
+              "expression": "90 mm",
               "unit": "mm",
               "expected_dimension": "length"
             },
@@ -627,7 +610,7 @@
         "id": "slider_001",
         "name": "StrutGuide",
         "origin_x": {
-          "expression": "250 mm",
+          "expression": "ArmLength",
           "unit": "mm",
           "expected_dimension": "length"
         },
@@ -754,31 +737,6 @@
       },
       {
         "id": "joint_005",
-        "name": "StrutTopPivot",
-        "type": "revolute",
-        "endpoint_a": {
-          "kind": "marker",
-          "body_id": "body_002",
-          "marker_id": "marker_003"
-        },
-        "endpoint_b": {
-          "kind": "marker",
-          "body_id": "body_004",
-          "marker_id": "marker_009"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {
-          "angle_limit_reference_body_id": "body_002",
-          "angle_limit_moving_body_id": "body_004"
-        }
-      },
-      {
-        "id": "joint_006",
         "name": "StrutSlide",
         "type": "revolute",
         "endpoint_a": {
@@ -1025,7 +983,7 @@
           "src_instance": "blk_002",
           "src_port": "out",
           "dst_instance": "blk_003",
-          "dst_port": "in"
+          "dst_port": "error"
         },
         {
           "src_instance": "blk_003",
@@ -1405,6 +1363,16 @@
         "default_value": null,
         "entity_id": "param_004",
         "property_name": "expression"
+      },
+      "bodies/body_003/mass": {
+        "path": "bodies/body_003/mass",
+        "tag": "invariant",
+        "display_name": "LowerArm mass",
+        "unit": "kg",
+        "dimension": "mass",
+        "default_value": null,
+        "entity_id": "body_003",
+        "property_name": "mass"
       },
       "bodies/body_004/mass": {
         "path": "bodies/body_004/mass",
