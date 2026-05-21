@@ -3133,6 +3133,136 @@ def test_block_inspector_pid_anti_windup_renders_as_checkbox(qtbot):
     assert found_cb, "PID.anti_windup must be rendered as checkbox"
 
 
+def test_model_tree_marks_inherited_block_in_italics(qtbot):
+    """A block added by an ancestor case must show italic / lighter-green
+    in the active subcase's model tree; a tooltip identifies the source case."""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.main_window import MainWindow
+
+    app = ApplicationService()
+    app.new_project("test")
+    parent = app.workspace.create_case("Parent")
+    child = app.workspace.create_case("Child", parent_case_id=parent.id)
+    app.set_working_context(case_id=parent.id)
+    pblock = app.add_block(block_type="Constant", name="ParentSrc", position=(0.0, 0.0))
+    app.set_working_context(case_id=child.id)
+
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window.refresh_all()
+
+    item = window._tree_items.get(pblock)
+    assert item is not None
+    assert item.font(0).italic() is True
+    tip = item.toolTip(0)
+    assert "Parent" in tip
+
+
+def test_model_tree_marks_local_override_in_blue(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.domain.inputs import PropertyValueInput
+    from quino.gui.main_window import MainWindow
+
+    app = ApplicationService()
+    app.new_project("test")
+    body_id = app.create_punctual_mass("Mass", x="0 mm", y="0 mm")
+    app.update_property(body_id, "mass", PropertyValueInput(kind="expression", value="1 kg"))
+    case = app.workspace.create_case("C1")
+    app.set_working_context(case_id=case.id)
+    app.update_property(body_id, "mass", PropertyValueInput(kind="expression", value="5 kg"))
+
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window.refresh_all()
+
+    item = window._tree_items.get(body_id)
+    assert item is not None
+    color = item.foreground(0).color().name()
+    assert color == "#2255aa", f"Expected local-override blue, got {color}"
+    assert item.font(0).italic() is False
+
+
+def test_inspector_reset_button_clears_local_override(qtbot):
+    """Clicking the Reset button on an overridden row clears the local
+    override via ApplicationService.reset_override and refreshes the UI."""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.domain.inputs import MarkerInput, PropertyValueInput
+    from quino.domain.workspace import ScalarValue
+    from quino.gui.main_window import MainWindow
+
+    app = ApplicationService()
+    app.new_project("test")
+    body_id = app.create_punctual_mass("Mass", x="0 mm", y="0 mm")
+    # Baseline mass 2 kg
+    app.update_property(body_id, "mass", PropertyValueInput(kind="expression", value="2 kg"))
+    # Add a case with a local override
+    case = app.workspace.create_case("C1")
+    case.invariant_values[f"bodies/{body_id}/mass"] = ScalarValue(value=7.0, unit="kg")
+    app.set_working_context(case_id=case.id)
+
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window._selected_entity_id = body_id
+    window._populate_inspector()
+
+    # Locate the Reset button on the "mass" row.
+    outer = window.inspector._row_widgets.get("mass")
+    assert outer is not None
+    reset_btn = None
+    for child in outer.findChildren(QtWidgets.QToolButton):
+        if child.text() == "Reset":
+            reset_btn = child
+            break
+    assert reset_btn is not None, "Expected a Reset override button on the overridden mass row"
+
+    reset_btn.click()
+    QtWidgets.QApplication.processEvents()
+
+    # The local override is gone.
+    case_live = next(c for c in app.project.workspace.cases if c.id == case.id)
+    assert f"bodies/{body_id}/mass" not in case_live.invariant_values
+    # Composed view falls back to the baseline 2 kg.
+    composed_body = next(b for b in app.display_project.model.bodies if b.id == body_id)
+    assert "2" in (composed_body.mass.expression or "")
+
+
+def test_inspector_inherited_hint_has_no_reset(qtbot):
+    """When the override comes from an ancestor case (not local), the hint
+    is shown but the Reset button is NOT, because we can only reset from
+    the case that owns the entry."""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.domain.inputs import MarkerInput, PropertyValueInput
+    from quino.domain.workspace import ScalarValue
+    from quino.gui.main_window import MainWindow
+
+    app = ApplicationService()
+    app.new_project("test")
+    body_id = app.create_punctual_mass("Mass", x="0 mm", y="0 mm")
+    app.update_property(body_id, "mass", PropertyValueInput(kind="expression", value="2 kg"))
+    parent = app.workspace.create_case("Parent")
+    parent.invariant_values[f"bodies/{body_id}/mass"] = ScalarValue(value=5.0, unit="kg")
+    child = app.workspace.create_case("Child", parent_case_id=parent.id)
+    app.set_working_context(case_id=child.id)
+
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window._selected_entity_id = body_id
+    window._populate_inspector()
+
+    outer = window.inspector._row_widgets.get("mass")
+    assert outer is not None
+    reset_buttons = [b for b in outer.findChildren(QtWidgets.QToolButton) if b.text() == "Reset"]
+    assert reset_buttons == [], "Inherited overrides must not expose a Reset button"
+
+
 def test_block_inspector_hides_internal_position_param(qtbot):
     import os
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

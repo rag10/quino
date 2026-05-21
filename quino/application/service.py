@@ -1046,3 +1046,43 @@ class ApplicationService:
     def set_block_position(self, instance_id: str, position: tuple[float, float]) -> None:
         self.blocks.set_block_position(instance_id, position)
 
+    # ------------------------------------------------------------------ overrides
+
+    def reset_override(self, *, path: str | None = None, entity_id: str | None = None, prop: str | None = None) -> bool:
+        """Clear a local override on the active case so the inherited (or
+        baseline) value becomes effective again.
+
+        Pass either ``path`` (e.g. ``"bodies/<id>/mass"``) for invariant_values,
+        or ``entity_id`` + ``prop`` for reference_overrides. Returns True when
+        an override was actually removed.
+
+        No-op (returns False) when no case is active, or when the active case
+        does not contain that override locally. Overrides set on an ancestor
+        case cannot be cleared from this call: ascend to that case first.
+        """
+        if self.project is None or self.project.workspace is None:
+            return False
+        case = next(
+            (c for c in self.project.workspace.cases if c.id == self.project.workspace.active_case_id),
+            None,
+        )
+        if case is None:
+            return False
+        with self._operation():
+            if path is not None:
+                if path in case.invariant_values:
+                    case.invariant_values.pop(path)
+                    self.entities.invalidate_index()
+                    return True
+                return False
+            if entity_id is not None and prop is not None:
+                overrides = case.reference_overrides.get(entity_id)
+                if overrides is None or prop not in overrides:
+                    return False
+                overrides.pop(prop)
+                if not overrides:
+                    case.reference_overrides.pop(entity_id, None)
+                self.entities.invalidate_index()
+                return True
+        return False
+

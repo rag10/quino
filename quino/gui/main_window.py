@@ -318,6 +318,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Inspector property form (replaces old table)
         self.inspector = InspectorPropertyWidget()
         self.inspector.property_changed.connect(self._on_inspector_property_changed)
+        self.inspector.override_reset_requested.connect(self._on_inspector_override_reset)
         inspector_scroll = QtWidgets.QScrollArea()
         inspector_scroll.setWidget(self.inspector)
         inspector_scroll.setWidgetResizable(True)
@@ -2178,6 +2179,144 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.tree.blockSignals(False)
 
+    def _inject_case_override_hints(self, selected_entity_id: str | None) -> None:
+        """Render under each overridden property row a "Baseline: ..." (or
+        "Inherited from <CaseName>: ...") hint, plus a Reset button when the
+        override is local to the active case (hence resettable from here)."""
+        if not selected_entity_id:
+            return
+        project = self.app_service.project
+        if project is None or project.workspace is None:
+            return
+        ws = project.workspace
+        if not ws.active_case_id:
+            return
+        case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
+        if case is None:
+            return
+        from quino.services.case_diff_summary import build_case_diff_summary
+        summary = build_case_diff_summary(project, case)
+        # Map source_case_id -> case object for name lookup.
+        case_by_id = {c.id: c for c in ws.cases}
+        # Invariant override hints
+        for entry in summary.invariant_overrides:
+            parts = entry.path.split("/")
+            if len(parts) < 3 or parts[1] != selected_entity_id:
+                continue
+            prop_path = parts[2]
+            baseline_str = self._baseline_value_for_path(project, entry.path)
+            if baseline_str is None:
+                baseline_str = f"{entry.value:.4g} {entry.unit}".strip()
+            if entry.is_local:
+                if entry.shadows_inherited:
+                    source_case = case_by_id.get(entry.source_case_id)
+                    parent_label = source_case.name if source_case else "parent"
+                    hint = f"Baseline: {baseline_str}  ·  Local override shadows {parent_label}"
+                else:
+                    hint = f"Baseline: {baseline_str}"
+                self.inspector.set_property_hint(prop_path, hint, resettable=True)
+            else:
+                source_case = case_by_id.get(entry.source_case_id)
+                src_label = source_case.name if source_case else "ancestor"
+                hint = f"Inherited from {src_label}: {baseline_str} (current applies)"
+                self.inspector.set_property_hint(prop_path, hint, resettable=False)
+        # Reference-override hints (e.g. block parameter string overrides).
+        for entry in summary.reference_overrides:
+            if entry.entity_id != selected_entity_id:
+                continue
+            # Skip internal/positional refs for blocks
+            if entry.prop in {"_position"}:
+                continue
+            # For block string overrides we stored {parameters: {key: value}}
+            # so render each nested key with the appropriate path.
+            if entry.prop == "parameters" and isinstance(entry.value, dict):
+                for k in entry.value:
+                    prop_path = f"block_param/{entry.entity_id}/{k}"
+                    if entry.is_local:
+                        self.inspector.set_property_hint(
+                            prop_path, "Local override (case)", resettable=True,
+                        )
+                    else:
+                        source_case = case_by_id.get(entry.source_case_id)
+                        src_label = source_case.name if source_case else "ancestor"
+                        self.inspector.set_property_hint(
+                            prop_path, f"Inherited from {src_label}", resettable=False,
+                        )
+
+    def _on_inspector_override_reset(self, path: str) -> None:
+        """Handle the inspector's Reset-override button.
+
+        `path` follows the inspector's row path convention (e.g.
+        ``mass`` for entity props, ``block_param/<id>/<key>`` for blocks).
+        We map it back to a workspace path and clear the local override.
+        """
+        if self.app_service.project is None:
+            return
+        try:
+            if path.startswith("block_param/"):
+                parts = path.split("/")
+                if len(parts) == 3:
+                    instance_id, key = parts[1], parts[2]
+                    # Try invariant first; fall back to reference_overrides.
+                    ws_path = f"model/control_graph/instances/{instance_id}/parameters/{key}"
+                    if not self.app_service.reset_override(path=ws_path):
+                        # Look up the case's reference_overrides.parameters dict
+                        ws = self.app_service.project.workspace
+                        if ws and ws.active_case_id:
+                            case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
+                            if case is not None:
+                                refs = case.reference_overrides.get(instance_id, {})
+                                params = refs.get("parameters", {})
+                                if key in params:
+                                    params.pop(key)
+                                    if not params:
+                                        refs.pop("parameters", None)
+                                    if not refs:
+                                        case.reference_overrides.pop(instance_id, None)
+                                    self.app_service.entities.invalidate_index()
+                self.refresh_all()
+                return
+            # Entity row paths: prop_path is the second component of the iv path
+            # (e.g. "mass"). Reconstruct the workspace path domain from the
+            # selected entity.
+            if self._selected_entity_id is None:
+                return
+            ws_path = self._workspace_path_for_entity_prop(self._selected_entity_id, path)
+            if ws_path is not None:
+                self.app_service.reset_override(path=ws_path)
+            self.refresh_all()
+        except Exception as exc:  # pragma: no cover - UI feedback
+            self._append_message(f"Reset override failed: {exc}")
+
+    def _workspace_path_for_entity_prop(self, entity_id: str, prop: str) -> str | None:
+        """Best-effort mapping from (entity_id, prop) to a workspace iv_path."""
+        if self.app_service.project is None:
+            return None
+        proj = self.app_service.project
+        # bodies / loads / springs / drivers / sliders / joints / sensors / parameters
+        if any(b.id == entity_id for b in proj.model.bodies):
+            return f"bodies/{entity_id}/{prop}"
+        if any(s.id == entity_id for s in proj.model.sliders):
+            return f"sliders/{entity_id}/{prop}"
+        if any(j.id == entity_id for j in proj.model.joints):
+            return f"joints/{entity_id}/{prop}"
+        if any(d.id == entity_id for d in proj.model.drivers):
+            return f"drivers/{entity_id}/{prop}"
+        if any(ld.id == entity_id for ld in proj.model.loads):
+            return f"loads/{entity_id}/{prop}"
+        if any(sp.id == entity_id for sp in proj.model.springs):
+            # springs use two domains: springs (rest_value, law) and springs_meta
+            if prop in {"stiffness", "damping"}:
+                return f"springs_meta/{entity_id}/{prop}"
+            return f"springs/{entity_id}/{prop}"
+        # Markers live inside bodies
+        for body in proj.model.bodies:
+            if any(m.id == entity_id for m in body.markers):
+                return f"markers/{entity_id}/{prop}"
+        if any(p.id == entity_id for p in proj.parameters):
+            return f"parameters/{entity_id}"
+        return None
+
     def _populate_block_inspector(self, block, project) -> None:
         """Render the block diagram inspector using the per-block schema."""
         from quino.gui.blocks.parameter_schema import schema_for, is_hidden_param
@@ -2315,15 +2454,24 @@ class MainWindow(QtWidgets.QMainWindow):
     def _apply_case_delta_highlights(self) -> None:
         """Highlight model tree items for entities changed in the active case.
 
-        - Blue: property override
-        - Green: entity added by case
-        - Red: entity removed by case
+        Color semantics:
+          - dark blue: property override added by THIS case (local)
+          - light blue (italic): property override inherited from an ancestor
+          - dark green: entity added by THIS case (local)
+          - light green (italic): entity added by an ancestor case (inherited)
+          - red: entity removed by THIS case
+          - light red (italic): entity removed by an ancestor case
+        Tooltips spell out which case set the override / addition / removal.
         """
-        # First, clear all foreground overrides on entity items
+        # First, clear all foreground overrides + font italics on entity items
         it = QtWidgets.QTreeWidgetItemIterator(self.tree)
         while it.value():
             item = it.value()
             item.setForeground(0, QtGui.QBrush())
+            item.setToolTip(0, "")
+            font = item.font(0)
+            font.setItalic(False)
+            item.setFont(0, font)
             it += 1
 
         project = self.app_service.project
@@ -2335,40 +2483,80 @@ class MainWindow(QtWidgets.QMainWindow):
         case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
         if case is None:
             return
-        if not case.invariant_values and not case.removed_entity_ids and not case.added_entities:
+
+        from quino.services.case_diff_summary import build_case_diff_summary
+        summary = build_case_diff_summary(project, case)
+        if not (summary.invariant_overrides or summary.additions or summary.removals
+                or summary.reference_overrides):
             return
 
-        changed_ids = _changed_entity_ids_for_case(case)
-        # Collect added entity ids across all domains (incl. blocks).
-        added_ids: set[str] = set()
-        for domain, entities in case.added_entities.items():
-            for ent in entities:
-                eid = ent.get("id") or ent.get("instance_id")
-                if eid:
-                    added_ids.add(eid)
-        removed_ids = set(case.removed_entity_ids)
+        case_by_id = {c.id: c for c in ws.cases}
 
-        override_brush = QtGui.QBrush(QtGui.QColor("#2255aa"))
-        added_brush = QtGui.QBrush(QtGui.QColor("#228822"))
-        removed_brush = QtGui.QBrush(QtGui.QColor("#aa2222"))
+        # Aggregate per-entity: most specific tag wins (added > removed > override).
+        # Each value: (color_hex, italic, tooltip)
+        per_entity: dict[str, tuple[str, bool, str]] = {}
 
+        def _set(entity_id: str, color: str, italic: bool, tip: str) -> None:
+            per_entity[entity_id] = (color, italic, tip)
+
+        for entry in summary.invariant_overrides:
+            parts = entry.path.split("/")
+            if len(parts) >= 2:
+                eid = parts[1]
+                source = case_by_id.get(entry.source_case_id)
+                src_label = source.name if source else entry.source_case_id
+                if entry.is_local:
+                    tip = f"Property override (local): {entry.path}"
+                    if entry.shadows_inherited:
+                        tip += "  ·  shadows an inherited override"
+                    _set(eid, "#2255aa", False, tip)
+                else:
+                    _set(eid, "#6fa0d8", True, f"Inherited override from {src_label}: {entry.path}")
+
+        for entry in summary.reference_overrides:
+            tip = f"Override {entry.prop}"
+            source = case_by_id.get(entry.source_case_id)
+            src_label = source.name if source else entry.source_case_id
+            if entry.is_local:
+                _set(entry.entity_id, "#2255aa", False, tip + " (local)")
+            else:
+                _set(entry.entity_id, "#6fa0d8", True, f"Inherited {entry.prop} from {src_label}")
+
+        for entry in summary.removals:
+            if entry.kind != "entity":
+                continue
+            source = case_by_id.get(entry.source_case_id)
+            src_label = source.name if source else entry.source_case_id
+            if entry.is_local:
+                _set(str(entry.payload), "#aa2222", False, f"Removed by this case")
+            else:
+                _set(str(entry.payload), "#d68585", True, f"Removed by ancestor {src_label}")
+
+        for entry in summary.additions:
+            source = case_by_id.get(entry.source_case_id)
+            src_label = source.name if source else entry.source_case_id
+            if entry.is_local:
+                _set(entry.entity_id, "#228822", False, f"Added by this case")
+            else:
+                _set(entry.entity_id, "#80c280", True, f"Inherited (added by {src_label})")
+
+        # Walk tree and apply.
         it = QtWidgets.QTreeWidgetItemIterator(self.tree)
         while it.value():
             item = it.value()
             data = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
-            if data is not None:
-                entity_id: str | None = None
-                if isinstance(data, (tuple, list)) and len(data) > 1:
-                    entity_id = data[1]
-                elif isinstance(data, str):
-                    entity_id = data
-                if entity_id:
-                    if entity_id in removed_ids:
-                        item.setForeground(0, removed_brush)
-                    elif entity_id in added_ids:
-                        item.setForeground(0, added_brush)
-                    elif entity_id in changed_ids:
-                        item.setForeground(0, override_brush)
+            entity_id: str | None = None
+            if isinstance(data, (tuple, list)) and len(data) > 1:
+                entity_id = data[1]
+            elif isinstance(data, str):
+                entity_id = data
+            if entity_id and entity_id in per_entity:
+                color, italic, tip = per_entity[entity_id]
+                item.setForeground(0, QtGui.QBrush(QtGui.QColor(color)))
+                font = item.font(0)
+                font.setItalic(italic)
+                item.setFont(0, font)
+                item.setToolTip(0, tip)
             it += 1
 
     def _collect_expanded_tree_keys(self) -> set[str]:
@@ -4197,6 +4385,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 block = project.model.control_graph.instances.get(self._selected_entity_id)
             if block is not None:
                 self._populate_block_inspector(block, project)
+                self._inject_case_override_hints(self._selected_entity_id)
                 return
 
             entity = self.app_service.get_entity(self._selected_entity_id)
@@ -4231,24 +4420,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.inspector.add_property(label, path, value, kind, evaluated, enabled)
             self.inspector.layout.addStretch()
 
-            # --- inject baseline hints for case-overridden properties ---
-            project = self.app_service.project
-            if project is not None and project.workspace is not None:
-                ws = project.workspace
-                if ws.active_case_id and self._selected_entity_id:
-                    case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
-                    if case:
-                        for iv_path, scalar in case.invariant_values.items():
-                            parts = iv_path.split("/")
-                            # paths look like: category/entity_id/prop
-                            if len(parts) >= 3 and parts[1] == self._selected_entity_id:
-                                prop_path = parts[2]
-                                baseline_str = self._baseline_value_for_path(project, iv_path)
-                                if baseline_str is None:
-                                    # Fall back to scalar value (no baseline definition)
-                                    baseline_str = f"{scalar.value:.4g} {scalar.unit}".strip()
-                                hint = f"Baseline: {baseline_str}"
-                                self.inspector.set_property_hint(prop_path, hint)
+            # --- inject baseline/inherited hints for case-overridden properties ---
+            self._inject_case_override_hints(self._selected_entity_id)
 
             # --- markers section for Body/Bar (consolidated with reordering) ---
             if isinstance(entity, Body) and entity.markers:

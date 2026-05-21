@@ -65,6 +65,7 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
     """Custom form widget for displaying entity properties with appropriate input controls."""
 
     property_changed = QtCore.Signal(str, str, str)  # (property_path, new_value, kind)
+    override_reset_requested = QtCore.Signal(str)  # property_path
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -217,11 +218,16 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
         })
         self.layout.addWidget(outer_widget)
 
-    def set_property_hint(self, path: str, hint: str) -> None:
+    def set_property_hint(self, path: str, hint: str, *, resettable: bool = False) -> None:
         """Add a small gray hint label below the property row for the given path.
 
-        Typically used to show the baseline value when a case override is active.
-        Also tints the row's left edge blue to indicate the override visually.
+        Typically used to show the baseline (or parent) value when a case
+        override is active. Also tints the row's left edge blue to indicate
+        the override visually. When ``resettable`` is True, a small "Reset"
+        button is added next to the hint; clicking it emits
+        ``override_reset_requested(path)`` so the host can clear the local
+        override and refresh.
+
         If the path is not found, this is a no-op.
         """
         outer_widget = self._row_widgets.get(path)
@@ -230,25 +236,40 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
         outer_layout = outer_widget.layout()
         if outer_layout is None:
             return
-        # Remove any existing hint labels (avoid duplicates on re-populate)
+        # Remove any existing hint rows (avoid duplicates on re-populate)
         for i in reversed(range(outer_layout.count())):
             item = outer_layout.itemAt(i)
-            if item and isinstance(item.widget(), QtWidgets.QLabel):
-                lbl = item.widget()
-                if lbl.property("is_baseline_hint"):
-                    outer_layout.removeWidget(lbl)
-                    lbl.deleteLater()
+            if item is None:
+                continue
+            w = item.widget()
+            if w is not None and w.property("is_baseline_hint_row"):
+                outer_layout.removeWidget(w)
+                w.deleteLater()
         # Apply a left-border accent to the outer widget to flag the override
         outer_widget.setStyleSheet(
             "QWidget { border-left: 3px solid #2255aa; padding-left: 4px; }"
         )
+        hint_row = QtWidgets.QWidget()
+        hint_row.setProperty("is_baseline_hint_row", True)
+        hint_layout = QtWidgets.QHBoxLayout(hint_row)
+        hint_layout.setContentsMargins(108, 0, 0, 0)
+        hint_layout.setSpacing(6)
         hint_label = QtWidgets.QLabel(hint)
-        hint_label.setProperty("is_baseline_hint", True)
-        hint_label.setStyleSheet(
-            "color: #888888; font-size: 8pt; margin-left: 108px; margin-top: 0px; border: none;"
-        )
+        hint_label.setStyleSheet("color: #888888; font-size: 8pt; border: none;")
         hint_label.setWordWrap(False)
-        outer_layout.addWidget(hint_label)
+        hint_layout.addWidget(hint_label)
+        if resettable:
+            reset_btn = QtWidgets.QToolButton()
+            reset_btn.setText("Reset")
+            reset_btn.setAutoRaise(True)
+            reset_btn.setToolTip(
+                "Clear this local override so the inherited (or baseline) value applies again"
+            )
+            reset_btn.setStyleSheet("QToolButton { color: #2255aa; font-size: 8pt; }")
+            reset_btn.clicked.connect(lambda _, p=path: self.override_reset_requested.emit(p))
+            hint_layout.addWidget(reset_btn)
+        hint_layout.addStretch()
+        outer_layout.addWidget(hint_row)
 
     def rowCount(self) -> int:
         return len(self._compat_rows)
