@@ -122,6 +122,101 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
         })
         self.layout.addWidget(outer_widget)
 
+    def add_property_combo(
+        self,
+        label: str,
+        path: str,
+        value: str,
+        choices: list[tuple[str, str]],
+        kind: str = "combo",
+        enabled: bool = True,
+    ) -> None:
+        """Combo with (label, value) pairs. The label is shown to the user;
+        the value is what's emitted via property_changed. The current `value`
+        selects the matching pair (when present), else falls back to the first
+        item or an empty entry."""
+        outer_widget = QtWidgets.QWidget()
+        outer_layout = QtWidgets.QVBoxLayout(outer_widget)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+        row_widget = QtWidgets.QWidget()
+        row_layout = QtWidgets.QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(8)
+        label_widget = QtWidgets.QLabel(label)
+        label_widget.setMinimumWidth(100)
+        label_widget.setMaximumWidth(150)
+        row_layout.addWidget(label_widget)
+
+        combo = QtWidgets.QComboBox()
+        combo.setEnabled(enabled)
+        selected_index = -1
+        for i, (lbl, val) in enumerate(choices):
+            combo.addItem(lbl, userData=val)
+            if val == value:
+                selected_index = i
+        if selected_index == -1 and value:
+            # Stale value: keep it visible so user can see what was stored.
+            combo.addItem(f"{value} (unknown)", userData=value)
+            selected_index = combo.count() - 1
+        if selected_index >= 0:
+            combo.setCurrentIndex(selected_index)
+        combo.currentIndexChanged.connect(
+            lambda idx, p=path, k=kind, c=combo: self.property_changed.emit(
+                p, str(c.itemData(idx) if c.itemData(idx) is not None else c.currentText()), k
+            )
+        )
+        row_layout.addWidget(combo, stretch=1)
+        outer_layout.addWidget(row_widget)
+        self._row_widgets[path] = outer_widget
+        self._compat_rows.append({
+            "label": label,
+            "path": path,
+            "value": value,
+            "kind": kind,
+            "evaluated": value,
+            "enabled": enabled,
+            "editor": combo,
+            "widget": combo,
+        })
+        self.layout.addWidget(outer_widget)
+
+    def add_property_checkbox(self, label: str, path: str, value: bool, enabled: bool = True) -> None:
+        outer_widget = QtWidgets.QWidget()
+        outer_layout = QtWidgets.QVBoxLayout(outer_widget)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+        row_widget = QtWidgets.QWidget()
+        row_layout = QtWidgets.QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(8)
+        label_widget = QtWidgets.QLabel(label)
+        label_widget.setMinimumWidth(100)
+        label_widget.setMaximumWidth(150)
+        row_layout.addWidget(label_widget)
+
+        cb = QtWidgets.QCheckBox()
+        cb.setChecked(bool(value))
+        cb.setEnabled(enabled)
+        cb.toggled.connect(
+            lambda checked, p=path: self.property_changed.emit(p, "true" if checked else "false", "block_bool")
+        )
+        row_layout.addWidget(cb)
+        row_layout.addStretch()
+        outer_layout.addWidget(row_widget)
+        self._row_widgets[path] = outer_widget
+        self._compat_rows.append({
+            "label": label,
+            "path": path,
+            "value": "true" if value else "false",
+            "kind": "block_bool",
+            "evaluated": "true" if value else "false",
+            "enabled": enabled,
+            "editor": cb,
+            "widget": cb,
+        })
+        self.layout.addWidget(outer_widget)
+
     def set_property_hint(self, path: str, hint: str) -> None:
         """Add a small gray hint label below the property row for the given path.
 

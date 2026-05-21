@@ -2620,7 +2620,7 @@ def test_main_window_block_palette_adds_block_to_project_tree_and_inspector(qtbo
     assert window._selected_entity_id == block_id
     assert window.inspector_title.text()
     assert any(
-        window.inspector.item(row, 0).text() == "value"
+        window.inspector.item(row, 0).text().lower() == "value"
         for row in range(window.inspector.rowCount())
     )
 
@@ -3000,6 +3000,168 @@ def test_block_editor_clear_diagram_removes_all_blocks(qtbot):
     assert len(widget._scene._block_items) == 0
     cg = app.project.model.control_graph
     assert cg is None or len(cg.instances) == 0
+
+
+def test_block_inspector_renders_combo_for_modelsensor(qtbot):
+    """ModelSensor.sensor_id must be a combo populated from display_project."""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.domain.blocks import BlockDiagram, BlockInstance, PortSpec
+    from quino.gui.main_window import MainWindow
+
+    app = ApplicationService()
+    app.new_project("test")
+    # Add a body + a position sensor we can reference.
+    from quino.domain.inputs import MarkerInput
+    body_id = app.create_bar("Bar", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    body = app.get_body(body_id)
+    marker_a = next(m.id for m in body.markers if m.name == "A")
+    sensor_id = app.create_sensor("PosSensor", "point", [marker_a])
+
+    diagram = BlockDiagram(
+        instances={
+            "ms": BlockInstance(
+                instance_id="ms", block_type="ModelSensor",
+                parameters={"sensor_id": "", "channel": "y", "_position": [0, 0]},
+                input_ports=[], output_ports=[PortSpec("out")],
+            ),
+        },
+    )
+    app.project.model.control_graph = diagram
+
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window._select_block("ms")
+
+    # Locate the combo for sensor_id.
+    found_combo = False
+    for row in range(window.inspector.rowCount()):
+        path = window.inspector._compat_rows[row]["path"]
+        editor = window.inspector._compat_rows[row]["editor"]
+        if path.endswith("/sensor_id") and isinstance(editor, QtWidgets.QComboBox):
+            # Combo should contain at least one real sensor entry.
+            assert editor.count() >= 1
+            labels = [editor.itemText(i) for i in range(editor.count())]
+            assert any("PosSensor" in label for label in labels)
+            found_combo = True
+            break
+    assert found_combo, "Expected sensor_id combo for ModelSensor block"
+
+
+def test_block_inspector_channel_combo_depends_on_sensor_kind(qtbot):
+    """ModelSensor.channel must be a combo whose options depend on the sensor."""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.domain.blocks import BlockDiagram, BlockInstance, PortSpec
+    from quino.domain.inputs import MarkerInput
+    from quino.gui.main_window import MainWindow
+
+    app = ApplicationService()
+    app.new_project("test")
+    body_id = app.create_bar("Bar", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    body = app.get_body(body_id)
+    marker_a = next(m.id for m in body.markers if m.name == "A")
+    sensor_id = app.create_sensor("DistSensor", "distance", [marker_a, marker_a])
+
+    diagram = BlockDiagram(
+        instances={
+            "ms": BlockInstance(
+                instance_id="ms", block_type="ModelSensor",
+                parameters={"sensor_id": sensor_id, "channel": "d", "_position": [0, 0]},
+                input_ports=[], output_ports=[PortSpec("out")],
+            ),
+        },
+    )
+    app.project.model.control_graph = diagram
+
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window._select_block("ms")
+
+    # Channel combo for a distance sensor must show "d", not the point channels.
+    found_channel = False
+    for row in range(window.inspector.rowCount()):
+        path = window.inspector._compat_rows[row]["path"]
+        editor = window.inspector._compat_rows[row]["editor"]
+        if path.endswith("/channel") and isinstance(editor, QtWidgets.QComboBox):
+            labels = [editor.itemText(i) for i in range(editor.count())]
+            assert "d" in labels
+            assert "vx" not in labels
+            found_channel = True
+            break
+    assert found_channel, "Expected channel combo dependent on distance sensor"
+
+
+def test_block_inspector_pid_anti_windup_renders_as_checkbox(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.domain.blocks import BlockDiagram, BlockInstance, PortSpec
+    from quino.gui.main_window import MainWindow
+
+    app = ApplicationService()
+    app.new_project("test")
+    diagram = BlockDiagram(
+        instances={
+            "pid": BlockInstance(
+                instance_id="pid", block_type="PID",
+                parameters={
+                    "kp": 1.0, "ki": 0.1, "kd": 0.0,
+                    "lower": -1.0, "upper": 1.0, "anti_windup": True,
+                    "_position": [0, 0],
+                },
+                input_ports=[PortSpec("in")], output_ports=[PortSpec("out")],
+            ),
+        },
+    )
+    app.project.model.control_graph = diagram
+
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window._select_block("pid")
+
+    found_cb = False
+    for row in range(window.inspector.rowCount()):
+        path = window.inspector._compat_rows[row]["path"]
+        editor = window.inspector._compat_rows[row]["editor"]
+        if path.endswith("/anti_windup") and isinstance(editor, QtWidgets.QCheckBox):
+            assert editor.isChecked() is True
+            found_cb = True
+            break
+    assert found_cb, "PID.anti_windup must be rendered as checkbox"
+
+
+def test_block_inspector_hides_internal_position_param(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.domain.blocks import BlockDiagram, BlockInstance, PortSpec
+    from quino.gui.main_window import MainWindow
+
+    app = ApplicationService()
+    app.new_project("test")
+    diagram = BlockDiagram(
+        instances={
+            "c": BlockInstance(
+                instance_id="c", block_type="Constant",
+                parameters={"value": 3.14, "_position": [10, 20]},
+                input_ports=[], output_ports=[PortSpec("out")],
+            ),
+        },
+    )
+    app.project.model.control_graph = diagram
+
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window._select_block("c")
+
+    paths = [
+        window.inspector._compat_rows[row]["path"]
+        for row in range(window.inspector.rowCount())
+    ]
+    assert not any(p.endswith("/_position") for p in paths)
 
 
 def test_block_editor_set_selected_centers_view(qtbot):

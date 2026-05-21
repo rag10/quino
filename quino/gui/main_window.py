@@ -2178,6 +2178,68 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.tree.blockSignals(False)
 
+    def _populate_block_inspector(self, block, project) -> None:
+        """Render the block diagram inspector using the per-block schema."""
+        from quino.gui.blocks.parameter_schema import schema_for, is_hidden_param
+
+        self.inspector_title.setText(
+            f'<b>{block.instance_id}</b> &nbsp;'
+            f'<span style="color:#888;font-weight:normal">{block.block_type}</span>'
+        )
+        schema = schema_for(block.block_type)
+        enabled = self._editing_allowed() and self._app_mode != "pose"
+        params = dict(block.parameters)
+
+        # Render schema-known params in declared order; unknown params fall
+        # back to a string editor.
+        rendered: set[str] = set()
+        for param_name, spec in schema.items():
+            path = f"block_param/{block.instance_id}/{param_name}"
+            value = params.get(param_name, "")
+            label = spec.label or param_name
+            if spec.type == "bool":
+                self.inspector.add_property_checkbox(label, path, bool(value), enabled=enabled)
+            elif spec.type == "entity_ref":
+                choices = (
+                    spec.dynamic_choices(project, params) if spec.dynamic_choices else []
+                )
+                self.inspector.add_property_combo(
+                    label, path, str(value or ""), choices, kind="block_entity_ref", enabled=enabled,
+                )
+            elif spec.type == "enum":
+                if spec.dynamic_choices is not None:
+                    choices = spec.dynamic_choices(project, params)
+                else:
+                    choices = [(c, c) for c in spec.choices]
+                self.inspector.add_property_combo(
+                    label, path, str(value or ""), choices, kind="block_enum", enabled=enabled,
+                )
+            elif spec.type in {"float", "int", "str", "list_float"}:
+                self.inspector.add_property(
+                    label,
+                    path,
+                    str(value),
+                    "block_param",
+                    str(value),
+                    enabled=enabled,
+                )
+            rendered.add(param_name)
+
+        # Remaining unknown parameters (excluding internal ones).
+        for param_key, param_value in params.items():
+            if param_key in rendered or is_hidden_param(param_key):
+                continue
+            self.inspector.add_property(
+                param_key,
+                f"block_param/{block.instance_id}/{param_key}",
+                str(param_value),
+                "block_param",
+                str(param_value),
+                enabled=enabled,
+            )
+
+        self.inspector.layout.addStretch()
+
     def _baseline_value_for_path(self, project, path: str) -> str | None:
         """Read the baseline (pre-override) value at *path* for the inspector hint.
 
@@ -4134,19 +4196,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if project is not None and project.model.control_graph is not None:
                 block = project.model.control_graph.instances.get(self._selected_entity_id)
             if block is not None:
-                self.inspector_title.setText(
-                    f'<b>{block.instance_id}</b> &nbsp;<span style="color:#888;font-weight:normal">{block.block_type}</span>'
-                )
-                for param_key, param_value in block.parameters.items():
-                    self.inspector.add_property(
-                        param_key,
-                        f"block_param/{block.instance_id}/{param_key}",
-                        str(param_value),
-                        "block_param",
-                        str(param_value),
-                        enabled=self._editing_allowed() and self._app_mode != "pose",
-                    )
-                self.inspector.layout.addStretch()
+                self._populate_block_inspector(block, project)
                 return
 
             entity = self.app_service.get_entity(self._selected_entity_id)
@@ -4777,8 +4827,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if kind in {"readonly", "section_header", "key"}:
             return
-        # Block diagram parameters
-        if kind == "block_param":
+        # Block diagram parameters (text/numeric, combos, checkbox).
+        if kind in {"block_param", "block_entity_ref", "block_enum", "block_bool"}:
             if not self._editing_allowed():
                 return
             try:
@@ -4786,11 +4836,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 if len(parts) == 3:
                     instance_id = parts[1]
                     param_key = parts[2]
-                    coerced: object = value
-                    try:
-                        coerced = float(value) if "." in value else int(value)
-                    except ValueError:
+                    coerced: object
+                    if kind == "block_bool":
+                        coerced = value.lower() == "true"
+                    elif kind in {"block_entity_ref", "block_enum"}:
+                        # Keep string verbatim (sensor_id, channel, etc.)
                         coerced = value
+                    else:
+                        try:
+                            coerced = float(value) if "." in value else int(value)
+                        except ValueError:
+                            coerced = value
                     self.app_service.set_block_parameter(instance_id, param_key, coerced)
                     self._mark_project_dirty()
             except Exception as exc:  # pragma: no cover - UI feedback
