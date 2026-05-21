@@ -430,21 +430,32 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         case_id: str | None = None,
         pose_id: str | None = None,
     ) -> None:
-        name, ok = QtWidgets.QInputDialog.getText(self, "New Analysis", "Name:")
-        if not ok or not name:
+        from quino.gui.dialogs.new_analysis_dialog import NewAnalysisDialog
+
+        ws = self.app_service.project.workspace
+        if ws is None:
             return
-        # Future types: static, kinematic, equilibrium
-        analysis_type, ok2 = QtWidgets.QInputDialog.getItem(
-            self, "Analysis Type", "Type:", ["dynamic"], 0, False
-        )
-        if not ok2:
+        # Build poses list for the dialog
+        if pose_id is not None:
+            poses = [(pose_id, next((p.name for p in ws.poses if p.id == pose_id), pose_id))]
+        elif case_id is not None:
+            poses = [(p.id, p.name) for p in ws.poses if p.case_id == case_id]
+        else:
+            poses = [(p.id, p.name) for p in ws.poses if p.baseline_id == baseline_id and p.case_id is None]
+        if not poses:
+            QtWidgets.QMessageBox.warning(
+                self, "No poses", "Cannot create analysis: no poses exist for this scope."
+            )
+            return
+        dialog = NewAnalysisDialog(poses=poses, parent=self)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
         self.app_service.workspace.create_analysis(
-            name,
-            analysis_type=analysis_type,
+            dialog.selected_name(),
+            analysis_type=dialog.selected_type(),
             baseline_id=baseline_id,
             case_id=case_id,
-            workspace_pose_id=pose_id,
+            workspace_pose_id=dialog.selected_pose_id(),
         )
         self.refresh()
 
