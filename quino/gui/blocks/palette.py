@@ -31,6 +31,7 @@ class BlockPalette(QtWidgets.QTreeWidget):
         self.setHeaderHidden(True)
         self.setDragEnabled(True)
         self.setMaximumWidth(220)
+        self.itemActivated.connect(self._emit_block_request)
         self._populate()
 
     def _populate(self) -> None:
@@ -47,9 +48,7 @@ class BlockPalette(QtWidgets.QTreeWidget):
 
     def startDrag(self, supportedActions: QtCore.Qt.DropAction) -> None:
         item = self.currentItem()
-        if item is None:
-            return
-        block_type = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        block_type = self._block_type_for_item(item)
         if not block_type:
             return
         drag = QtGui.QDrag(self)
@@ -57,3 +56,24 @@ class BlockPalette(QtWidgets.QTreeWidget):
         mime.setText(block_type)
         drag.setMimeData(mime)
         drag.exec(QtCore.Qt.DropAction.CopyAction)
+
+    def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:
+        item = self.itemAt(event.pos())
+        block_type = self._block_type_for_item(item)
+        if block_type:
+            self.blockTypeRequested.emit(block_type)
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def _emit_block_request(self, item: QtWidgets.QTreeWidgetItem, column: int) -> None:
+        block_type = self._block_type_for_item(item)
+        if block_type:
+            self.blockTypeRequested.emit(block_type)
+
+    def _block_type_for_item(self, item: QtWidgets.QTreeWidgetItem | None) -> str | None:
+        if item is None:
+            return None
+        block_type = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        if not block_type:
+            return None
+        return str(block_type)

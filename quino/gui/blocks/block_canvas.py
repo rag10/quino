@@ -15,6 +15,26 @@ from .block_items import BlockItem, ConnectionItem, PortItem, CONNECTION_COLOR, 
 
 
 _BLOCK_DEFAULT_PARAMETERS: dict[str, dict[str, Any]] = {
+    "Constant": {"value": 0.0},
+    "Step": {"step_time": 0.0, "initial_value": 0.0, "final_value": 1.0},
+    "Ramp": {"slope": 1.0, "start_time": 0.0},
+    "Sine": {"amplitude": 1.0, "frequency": 1.0, "phase": 0.0, "bias": 0.0},
+    "Gain": {"k": 1.0},
+    "Adder": {"signs": [1.0, 1.0]},
+    "Saturation": {"lower": -1.0, "upper": 1.0},
+    "DeadZone": {"deadband": 0.5},
+    "Integrator": {"initial_condition": 0.0},
+    "IntegratorLimited": {"initial_condition": 0.0, "lower": -1e30, "upper": 1e30},
+    "UnitDelay": {"initial_condition": 0.0},
+    "PID": {"kp": 1.0, "ki": 0.0, "kd": 0.0, "lower": -1e30, "upper": 1e30, "anti_windup": False},
+    "DerivativeFiltered": {"time_constant": 0.01},
+    "Resistor": {"r": 1.0},
+    "Inductor": {"l": 1.0, "initial_current": 0.0},
+    "Capacitor": {"c": 1.0, "initial_voltage": 0.0},
+    "DCMotor": {"kt": 1.0, "r": 1.0},
+    "HydraulicPump": {"q": 1.0},
+    "HydraulicOrifice": {"gain": 1.0},
+    "HydraulicChamber": {"bulk_modulus": 1.6e9, "volume": 1.0, "initial_pressure": 0.0},
     "MBSSensor": {"body_id": "", "variable": "Position", "component": "y"},
     "MBSActuator": {"body_id": "", "direction": [0.0, 1.0, 0.0]},
     "ModelSensor": {"sensor_id": "", "channel": "y"},
@@ -22,6 +42,23 @@ _BLOCK_DEFAULT_PARAMETERS: dict[str, dict[str, Any]] = {
     "SpringCommand": {"spring_id": ""},
     "DriverCommand": {"driver_id": ""},
 }
+
+
+def default_block_parameters(block_type: str) -> dict[str, Any]:
+    return copy.deepcopy(_BLOCK_DEFAULT_PARAMETERS.get(block_type, {}))
+
+
+def _port_names_for_instance(inst: BlockInstance) -> tuple[list[str], list[str]]:
+    if inst.block_type in BLOCK_REGISTRY:
+        block_def = get_block_def(inst.block_type)
+        return (
+            [p.name for p in block_def.input_specs],
+            [p.name for p in block_def.output_specs],
+        )
+    return (
+        [p.name for p in inst.input_ports],
+        [p.name for p in inst.output_ports],
+    )
 
 
 class BlockDiagramScene(QtWidgets.QGraphicsScene):
@@ -61,14 +98,13 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
         self._block_items.clear()
         self._connection_items.clear()
         self._build_from_diagram()
+        self.validate_and_highlight()
 
     # -- build from domain --------------------------------------------------
 
     def _build_from_diagram(self) -> None:
         for inst_id, inst in self._diagram.instances.items():
-            block_def = get_block_def(inst.block_type)
-            input_names = [p.name for p in block_def.input_specs]
-            output_names = [p.name for p in block_def.output_specs]
+            input_names, output_names = _port_names_for_instance(inst)
             pos = inst.parameters.get("_position", (0.0, 0.0))
             if isinstance(pos, list):
                 pos = (pos[0], pos[1])
@@ -178,7 +214,7 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
 
         # Route through ApplicationService when wired (snapshot + case overlay).
         if self._app_service is not None:
-            default_params = copy.deepcopy(_BLOCK_DEFAULT_PARAMETERS.get(block_type, {}))
+            default_params = default_block_parameters(block_type)
             default_params["_position"] = [position.x(), position.y()]
             new_id = self._app_service.add_block(
                 block_type=block_type,
@@ -187,7 +223,12 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
                 parameters=default_params,
             )
             self._sync_from_app_service()
-            return self._block_items.get(new_id)
+            item = self._block_items.get(new_id)
+            if item is not None:
+                self.clearSelection()
+                item.setSelected(True)
+                self.blockSelected.emit(new_id)
+            return item
 
         if instance_id is None:
             instance_id = self._generate_instance_id(block_type)
@@ -198,7 +239,7 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
             instance_id=instance_id,
             block_type=block_type,
             parameters={
-                **copy.deepcopy(_BLOCK_DEFAULT_PARAMETERS.get(block_type, {})),
+                **default_block_parameters(block_type),
                 "_position": [position.x(), position.y()],
             },
             input_ports=[PortSpec(p.name, shape=p.shape) for p in block_def.input_specs],
@@ -218,7 +259,10 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
         )
         self.addItem(item)
         self._block_items[instance_id] = item
+        self.clearSelection()
+        item.setSelected(True)
         self.sync_to_diagram()
+        self.blockSelected.emit(instance_id)
         return item
 
     def _sync_from_app_service(self) -> None:
@@ -516,6 +560,8 @@ class BlockEditorCanvas(QtWidgets.QGraphicsView):
 
     def __init__(self, scene: BlockDiagramScene, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(scene, parent)
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
         self.setRenderHints(QtGui.QPainter.RenderHint.Antialiasing)
         self.setViewportUpdateMode(QtWidgets.QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
         self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
@@ -554,6 +600,30 @@ class BlockEditorCanvas(QtWidgets.QGraphicsView):
             self.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.ArrowCursor))
             return
         super().mouseReleaseEvent(event)
+
+    def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:
+        if event.mimeData().hasText() and event.mimeData().text() in BLOCK_REGISTRY:
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event: QtGui.QDragMoveEvent) -> None:
+        if event.mimeData().hasText() and event.mimeData().text() in BLOCK_REGISTRY:
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event: QtGui.QDropEvent) -> None:
+        block_type = event.mimeData().text()
+        if block_type not in BLOCK_REGISTRY:
+            super().dropEvent(event)
+            return
+        scene = self.scene()
+        if isinstance(scene, BlockDiagramScene):
+            scene.add_block(block_type, self.mapToScene(event.position().toPoint()))
+            event.acceptProposedAction()
+            return
+        super().dropEvent(event)
 
     def contextMenuEvent(self, event: QtGui.QContextMenuEvent) -> None:
         scene = self.scene()

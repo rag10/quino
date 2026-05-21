@@ -2585,6 +2585,208 @@ def test_block_editor_widget_no_inspector(qtbot):
     widget.set_selected("nonexistent")  # should not raise
 
 
+def test_block_palette_request_adds_block_to_editor(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.gui.blocks.editor_widget import BlockEditorWidget
+    widget = BlockEditorWidget()
+    qtbot.addWidget(widget)
+
+    widget._palette.blockTypeRequested.emit("Constant")
+
+    diagram = widget._scene.diagram
+    assert len(diagram.instances) == 1
+    assert next(iter(diagram.instances.values())).block_type == "Constant"
+
+
+def test_main_window_block_palette_adds_block_to_project_tree_and_inspector(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.main_window import MainWindow
+    app = ApplicationService()
+    app.new_project("test")
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+
+    window._block_editor._palette.blockTypeRequested.emit("Constant")
+    QtWidgets.QApplication.processEvents()
+
+    diagram = app.project.model.control_graph
+    assert diagram is not None
+    assert len(diagram.instances) == 1
+    block_id = next(iter(diagram.instances))
+    assert block_id in window._tree_items
+    assert window._selected_entity_id == block_id
+    assert window.inspector_title.text()
+    assert any(
+        window.inspector.item(row, 0).text() == "value"
+        for row in range(window.inspector.rowCount())
+    )
+
+
+def test_existing_blocks_refresh_into_block_canvas(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.domain.blocks import BlockDiagram, BlockInstance, PortSpec
+    from quino.gui.main_window import MainWindow
+    app = ApplicationService()
+    app.new_project("test")
+    app.project.model.control_graph = BlockDiagram(
+        instances={
+            "b1": BlockInstance(
+                instance_id="b1",
+                block_type="CustomBlock",
+                parameters={"gain": 2.0, "_position": [12.0, 34.0]},
+                input_ports=[PortSpec("in")],
+                output_ports=[PortSpec("out")],
+            )
+        }
+    )
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+
+    window.refresh_all()
+
+    assert "b1" in window._block_editor._scene._block_items
+
+
+def test_block_inspector_parameter_edit_updates_project(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.domain.blocks import BlockDiagram, BlockInstance
+    from quino.gui.main_window import MainWindow
+    app = ApplicationService()
+    app.new_project("test")
+    app.project.model.control_graph = BlockDiagram(
+        instances={
+            "b1": BlockInstance(
+                instance_id="b1",
+                block_type="Constant",
+                parameters={"value": 1.0},
+            )
+        }
+    )
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window._select_block("b1")
+
+    value_editor = window.inspector.cellWidget(0, 1)
+    assert isinstance(value_editor, QtWidgets.QLineEdit)
+    value_editor.setText("3.5")
+    value_editor.editingFinished.emit()
+
+    assert app.project.model.control_graph.instances["b1"].parameters["value"] == 3.5
+
+
+def test_selecting_block_in_model_tree_selects_block_canvas_item(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.domain.blocks import BlockDiagram, BlockInstance
+    from quino.gui.main_window import MainWindow
+    app = ApplicationService()
+    app.new_project("test")
+    app.project.model.control_graph = BlockDiagram(
+        instances={"b1": BlockInstance(instance_id="b1", block_type="Constant", parameters={"value": 1.0})}
+    )
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window.refresh_all()
+
+    window.tree.setCurrentItem(window._tree_items["b1"])
+
+    assert window._selected_entity_id == "b1"
+    assert window._block_editor._scene._block_items["b1"].isSelected()
+
+
+def test_delete_selected_block_from_model_tree_updates_project_and_canvas(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.domain.blocks import BlockDiagram, BlockInstance
+    from quino.gui.main_window import MainWindow
+    app = ApplicationService()
+    app.new_project("test")
+    app.project.model.control_graph = BlockDiagram(
+        instances={"b1": BlockInstance(instance_id="b1", block_type="Constant", parameters={"value": 1.0})}
+    )
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window.refresh_all()
+    window.tree.setCurrentItem(window._tree_items["b1"])
+
+    window.delete_selected_entity()
+
+    assert "b1" not in app.project.model.control_graph.instances
+    assert "b1" not in window._block_editor._scene._block_items
+
+
+def test_delete_selected_block_connection_from_model_tree(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.domain.blocks import BlockDiagram, BlockInstance, Connection
+    from quino.gui.main_window import MainWindow
+    app = ApplicationService()
+    app.new_project("test")
+    app.project.model.control_graph = BlockDiagram(
+        instances={
+            "src": BlockInstance(instance_id="src", block_type="Constant", parameters={"value": 1.0}),
+            "dst": BlockInstance(instance_id="dst", block_type="Gain", parameters={"k": 2.0}),
+        },
+        connections=[Connection("src", "out", "dst", "in")],
+    )
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window.refresh_all()
+    connection_item = None
+    for item_index in range(window.tree.topLevelItemCount()):
+        root = window.tree.topLevelItem(item_index)
+        for child_index in range(root.childCount()):
+            child = root.child(child_index)
+            for grandchild_index in range(child.childCount()):
+                candidate = child.child(grandchild_index)
+                data = candidate.data(0, QtCore.Qt.ItemDataRole.UserRole)
+                if isinstance(data, tuple) and data[0] == "block_connection":
+                    connection_item = candidate
+                    break
+    assert connection_item is not None
+
+    window.tree.setCurrentItem(connection_item)
+    window.delete_selected_entity()
+
+    assert app.project.model.control_graph.connections == []
+
+
+def test_block_canvas_drag_between_ports_creates_connection(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.main_window import MainWindow
+    app = ApplicationService()
+    app.new_project("test")
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window._block_editor._scene.add_block("Constant", QtCore.QPointF(0.0, 0.0))
+    window._block_editor._scene.add_block("Gain", QtCore.QPointF(200.0, 0.0))
+    blocks = list(window._block_editor._scene._block_items.values())
+    src = next(block for block in blocks if block.block_type == "Constant")
+    dst = next(block for block in blocks if block.block_type == "Gain")
+
+    src_port = src.output_ports["out"]
+    dst_port = dst.input_ports["in"]
+    window._block_editor._scene._start_drag_connection(src_port, src_port.scene_center())
+    window._block_editor._scene._finish_drag_connection(dst_port.scene_center())
+
+    connections = app.project.model.control_graph.connections
+    assert len(connections) == 1
+    assert connections[0].src_instance == src.instance_id
+    assert connections[0].dst_instance == dst.instance_id
+
+
 # --- C2: Shared selection between canvas and blocks ---
 
 def test_selecting_block_clears_mech_selection(qtbot):
@@ -2675,3 +2877,38 @@ def test_pose_constraints_strip_visible_only_in_pose_mode(qtbot):
     window._set_app_mode("model")
     QtWidgets.QApplication.processEvents()
     assert window.pose_constraints_strip.isVisible() is False
+
+
+def test_pose_toolbar_has_at_most_two_buttons_per_column(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.main_window import MainWindow
+    app = ApplicationService()
+    app.new_project("test")
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+
+    constraints_widget = None
+    for action in window._pose_toolbar.actions():
+        widget = action.defaultWidget() if hasattr(action, "defaultWidget") else None
+        if widget is None:
+            continue
+        labels = widget.findChildren(QtWidgets.QLabel)
+        if any(label.text() == "Constraints" for label in labels):
+            constraints_widget = widget
+            break
+
+    assert constraints_widget is not None
+    grid_widget = constraints_widget.layout().itemAt(0).widget()
+    grid = grid_widget.layout()
+    buttons_by_column: dict[int, int] = {}
+    for index in range(grid.count()):
+        item = grid.itemAt(index)
+        widget = item.widget()
+        if not isinstance(widget, QtWidgets.QToolButton) or widget.defaultAction() is None:
+            continue
+        _row, column, _row_span, _col_span = grid.getItemPosition(index)
+        buttons_by_column[column] = buttons_by_column.get(column, 0) + 1
+
+    assert max(buttons_by_column.values()) <= 2

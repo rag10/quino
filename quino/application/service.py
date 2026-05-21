@@ -1021,7 +1021,7 @@ class ApplicationService:
             dst_port=dst_port,
         )
 
-    def set_block_parameter(self, instance_id: str, key: str, value: float) -> None:
+    def set_block_parameter(self, instance_id: str, key: str, value) -> None:
         self.blocks.set_block_parameter(instance_id, key, value)
 
     def set_block_name(self, instance_id: str, name: str) -> None:

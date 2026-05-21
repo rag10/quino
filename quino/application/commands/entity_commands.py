@@ -320,7 +320,7 @@ class EntityCommands:
 
     def _find_entity(self, entity_id: str) -> object:
         if entity_id == "__gravity__":
-            gravity = self._project.model.gravity
+            gravity = self._ctx.effective_project().model.gravity
             if gravity is None:
                 raise ValueError("No gravity in this project")
             return gravity
@@ -334,7 +334,7 @@ class EntityCommands:
     def get_entity(self, entity_id: str) -> object | None:
         """Return any entity by id, or None if not found."""
         if entity_id == "__gravity__":
-            project = self._ctx.project_provider()
+            project = self._ctx.effective_project()
             return project.model.gravity if project else None
         if entity_id.startswith("__reaction__"):
             joint_id = entity_id[len("__reaction__"):]
@@ -587,21 +587,29 @@ class EntityCommands:
     # ------------------------------------------------------------------
 
     def add_gravity(self) -> None:
-        project = self._project
-        if project.model.gravity is not None:
+        case = self._ctx.get_active_case()
+        effective = self._ctx.effective_project()
+        if effective.model.gravity is not None:
             return
         self._ctx.snapshot()
-        project.model.gravity = GravityLoad()
+        if case is not None:
+            case.reference_overrides.setdefault("__gravity__", {})["enabled"] = True
+            return
+        self._project.model.gravity = GravityLoad()
 
     def delete_gravity(self) -> None:
-        project = self._project
-        if project.model.gravity is None:
+        case = self._ctx.get_active_case()
+        effective = self._ctx.effective_project()
+        if effective.model.gravity is None:
             return
         self._ctx.snapshot()
-        project.model.gravity = None
+        if case is not None:
+            case.reference_overrides.setdefault("__gravity__", {})["enabled"] = False
+            return
+        self._project.model.gravity = None
 
     def _update_gravity_property(self, path: str, value: PropertyValueInput) -> None:
-        gravity = self._project.model.gravity
+        gravity = self._ctx.effective_project().model.gravity
         if gravity is None:
             raise ValueError("No gravity in this project")
         if path not in {"magnitude", "direction_x", "direction_y"}:
@@ -613,6 +621,10 @@ class EntityCommands:
         except (ValueError, TypeError):
             raise ValueError(f"Gravity {path} must be a number, got: {value.value!r}")
         self._ctx.snapshot()
+        case = self._ctx.get_active_case()
+        if case is not None:
+            case.invariant_values[f"gravity/{path}"] = _WsScalarValue(value=float_val, unit="")
+            return
         setattr(gravity, path, float_val)
 
     # ------------------------------------------------------------------

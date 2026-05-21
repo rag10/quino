@@ -40,6 +40,15 @@ def test_set_working_context_clears_invalid_pose(svc_with_workspace):
     assert ws.selected_pose_id is None
 
 
+def test_set_working_context_clears_invalid_analysis(svc_with_workspace):
+    svc, baseline, case = svc_with_workspace
+    analysis_b = svc.workspace.create_analysis("AnalysisB", baseline_id=baseline.id)
+    svc.workspace.set_selected_analysis(analysis_b.id)
+    svc.set_working_context(case_id=case.id)
+    ws = svc.project.workspace
+    assert ws.selected_analysis_id is None
+
+
 def test_set_working_context_is_undoable(svc_with_workspace):
     svc, baseline, case = svc_with_workspace
     svc.set_working_context(case_id=case.id)

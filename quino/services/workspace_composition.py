@@ -3,13 +3,15 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-from typing import Callable
+from typing import Any, Callable
 
 from quino.domain.model import (
     Body,
     Driver,
+    GravityLoad,
     Joint,
     Load,
+    Marker,
     Parameter,
     Project,
     ScalarProperty,
@@ -206,14 +208,25 @@ def _apply_structural_deltas(project: Project, case: Case) -> None:
     # 2b. Remove explicit connections by 4-tuple.
     if case.removed_connections and project.model.control_graph is not None:
         kill = {tuple(t) for t in case.removed_connections}
-        project.model.control_graph.connections = [
-            c for c in project.model.control_graph.connections
-            if (c.src_instance, c.src_port, c.dst_instance, c.dst_port) not in kill
-        ]
+        object.__setattr__(
+            project.model.control_graph,
+            "connections",
+            [
+                c for c in project.model.control_graph.connections
+                if (c.src_instance, c.src_port, c.dst_instance, c.dst_port) not in kill
+            ],
+        )
 
     # 3. Apply reference overrides
     from quino.domain.blocks import BlockInstance as _BlockInstance
     for entity_id, overrides in case.reference_overrides.items():
+        if entity_id == "__gravity__":
+            enabled = overrides.get("enabled")
+            if enabled is True and project.model.gravity is None:
+                project.model.gravity = GravityLoad()
+            elif enabled is False:
+                project.model.gravity = None
+            continue
         entity = _find_entity_in_project(project, entity_id)
         if entity is None:
             continue
@@ -221,6 +234,9 @@ def _apply_structural_deltas(project: Project, case: Case) -> None:
             # Block-specific: _position lives in parameters, not as an attribute.
             if isinstance(entity, _BlockInstance) and prop == "_position":
                 entity.parameters["_position"] = list(value)
+                continue
+            if isinstance(entity, _BlockInstance) and prop == "parameters" and isinstance(value, dict):
+                entity.parameters.update(copy.deepcopy(value))
                 continue
             if hasattr(entity, prop):
                 try:
@@ -349,6 +365,14 @@ def _remove_entity_from_project(project: Project, entity_id: str) -> None:
         cg = project.model.control_graph
         if cg is not None:
             cg.instances.pop(entity.instance_id, None)
+            object.__setattr__(
+                cg,
+                "connections",
+                [
+                    conn for conn in cg.connections
+                    if conn.src_instance != entity.instance_id and conn.dst_instance != entity.instance_id
+                ],
+            )
 
 
 # ------------------------------------------------------------------
@@ -423,6 +447,17 @@ def _resolve_driver_property(project: Project, parts: list[str], scalar: ScalarV
     if driver is None:
         raise ValueError(f"Driver {driver_id!r} not found")
     _set_scalar_property(driver, prop, scalar)
+
+
+def _resolve_gravity_property(project: Project, parts: list[str], scalar: ScalarValue) -> None:
+    if len(parts) != 2:
+        raise ValueError(f"Invalid gravity path: {'/'.join(parts)!r}")
+    if project.model.gravity is None:
+        raise ValueError("Project has no gravity")
+    prop = parts[1]
+    if prop not in {"magnitude", "direction_x", "direction_y"}:
+        raise ValueError(f"Unknown gravity property: {prop!r}")
+    setattr(project.model.gravity, prop, float(scalar.value))
 
 
 def _resolve_block_parameter(project: Project, parts: list[str], scalar: ScalarValue) -> None:
@@ -510,6 +545,7 @@ _PARAMETER_RESOLVERS: dict[str, Callable[[Project, list[str], ScalarValue], None
     "springs": _resolve_spring_property,
     "springs_meta": _resolve_spring_metadata_property,
     "drivers": _resolve_driver_property,
+    "gravity": _resolve_gravity_property,
     "block_diagram": _resolve_block_parameter,
     "model": _resolve_model_control_graph_parameter,
 }

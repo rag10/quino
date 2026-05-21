@@ -299,6 +299,12 @@ class WorkspaceCommands:
             valid_poses = [p for p in ws.poses if p.baseline_id == baseline_id and p.case_id is None]
         if ws.selected_pose_id and not any(p.id == ws.selected_pose_id for p in valid_poses):
             ws.selected_pose_id = None
+        if case_id is not None:
+            valid_analyses = [a for a in ws.analyses if a.case_id == case_id]
+        else:
+            valid_analyses = [a for a in ws.analyses if a.baseline_id == baseline_id and a.case_id is None]
+        if ws.selected_analysis_id and not any(a.id == ws.selected_analysis_id for a in valid_analyses):
+            ws.selected_analysis_id = None
 
     def set_selected_pose(self, pose_id: str | None) -> None:
         self._ctx.snapshot()

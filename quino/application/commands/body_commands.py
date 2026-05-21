@@ -80,7 +80,7 @@ class BodyCommands:
         raise ValueError(f"Unknown body: {body_id}")
 
     def _find_body_by_marker(self, marker_id: str) -> Body:
-        project = self._project
+        project = self._ctx.effective_project()
         for body in project.model.bodies:
             if any(marker.id == marker_id for marker in body.markers):
                 return body
@@ -231,23 +231,71 @@ class BodyCommands:
     def create_punctual_mass(self, name: str, x: str, y: str) -> str:
         return self.create_body(name=name, markers=[MarkerInput(x, y, "P")], body_type=BodyType.POINT_MASS.value)
 
+    def _locate_created_body(self, body_id: str):
+        """Return (body_obj, owner_dict_or_None). When a case is active and
+        the body was just added by the case, ``body_obj`` is a Body deserialized
+        from the case's added_entities[bodies] entry; mutating it must be
+        reflected back into the dict via _serialize_body_into_case_dict.
+        Outside case mode, returns the live Body in project.model.bodies."""
+        case = self._ctx.get_active_case()
+        project = self._project
+        # Try baseline first
+        for body in project.model.bodies:
+            if body.id == body_id:
+                return body, None
+        # Try case added_entities
+        if case is not None:
+            from quino.serialization.json_io import JsonMapper
+            mapper = JsonMapper()
+            for ent in case.added_entities.get("bodies", []):
+                if ent.get("id") == body_id:
+                    body_obj = mapper._body_from_dict(ent)
+                    return body_obj, ent
+        raise ValueError(f"Unknown body: {body_id}")
+
+    def _persist_body_back_to_case(self, body_obj, owner_dict) -> None:
+        """Re-serialize the in-memory Body back into its case dict so changes
+        (e.g. metadata flags) take effect when the case is composed."""
+        from quino.serialization.json_io import JsonMapper
+        mapper = JsonMapper()
+        owner_dict.update(mapper._body_to_dict(body_obj))
+
+    def _tag_joint_internal_ground(self, joint_id: str) -> None:
+        case = self._ctx.get_active_case()
+        project = self._project
+        # Live baseline joint
+        for j in project.model.joints:
+            if j.id == joint_id:
+                j.metadata.values["internal_ground_anchor"] = True
+                return
+        # Case-added joint
+        if case is not None:
+            for ent in case.added_entities.get("joints", []):
+                if ent.get("id") == joint_id:
+                    meta = ent.setdefault("metadata", {})
+                    values = meta.setdefault("values", {})
+                    values["internal_ground_anchor"] = True
+                    return
+
     def create_ground_anchor(self, name: str, x: str, y: str) -> tuple[str, str]:
         """Create a PointMass body + rigid ground joint as one undo step.
 
         Returns (body_id, structural_marker_id).
         """
-        project = self._project
-        self._ctx.validation.ensure_unique_name(project.model.bodies, name)
+        # Use the effective project for name-uniqueness check so cases see
+        # bodies added by parents.
+        existing_bodies = list(self._ctx.effective_project().model.bodies)
+        self._ctx.validation.ensure_unique_name(existing_bodies, name)
         with self._ctx.operation():
             body_id = self.create_body(name=name, markers=[MarkerInput(x, y, "P")], body_type=BodyType.POINT_MASS.value)
-            body = next(b for b in project.model.bodies if b.id == body_id)
+            body, owner_dict = self._locate_created_body(body_id)
             structural = next(m for m in body.markers if m.type is MarkerType.STRUCTURAL)
             body.metadata.values["ground_anchor"] = True
             body.metadata.values["ground_marker_id"] = structural.id
+            if owner_dict is not None:
+                self._persist_body_back_to_case(body, owner_dict)
             joint_id = self._ctx.connect_marker_to_ground(structural.id, joint_type="rigid", name=f"Ground_{name}")
-            joint = next((item for item in project.model.joints if item.id == joint_id), None)
-            if joint is not None:
-                joint.metadata.values["internal_ground_anchor"] = True
+            self._tag_joint_internal_ground(joint_id)
         return body_id, structural.id
 
     def create_free_ground(self, name: str, x: str, y: str) -> tuple[str, str]:
@@ -257,17 +305,18 @@ class BodyCommands:
         solver backend does not need a new primitive. The body itself is tagged in
         metadata so the GUI can render and interact with it as a dedicated Ground.
         """
-        project = self._project
-        self._ctx.validation.ensure_unique_name(project.model.bodies, name)
+        existing_bodies = list(self._ctx.effective_project().model.bodies)
+        self._ctx.validation.ensure_unique_name(existing_bodies, name)
         with self._ctx.operation():
             body_id = self.create_body(name=name, markers=[MarkerInput(x, y, "P")], body_type=BodyType.POINT_MASS.value)
-            body = next(b for b in project.model.bodies if b.id == body_id)
+            body, owner_dict = self._locate_created_body(body_id)
             structural = next(m for m in body.markers if m.type is MarkerType.STRUCTURAL)
             body.metadata.values["ground_anchor"] = True
             body.metadata.values["ground_marker_id"] = structural.id
+            if owner_dict is not None:
+                self._persist_body_back_to_case(body, owner_dict)
             joint_id = self._ctx.connect_marker_to_ground(structural.id, joint_type="rigid", name=f"Ground_{name}")
-            joint = next(j for j in project.model.joints if j.id == joint_id)
-            joint.metadata.values["internal_ground_anchor"] = True
+            self._tag_joint_internal_ground(joint_id)
         return body_id, structural.id
 
     def get_marker_deletion_consequence(self, marker_id: str) -> str:

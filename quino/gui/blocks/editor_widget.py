@@ -19,6 +19,7 @@ class BlockEditorWidget(QtWidgets.QWidget):
 
     diagramChanged = QtCore.Signal()  # emitted when user modifies the diagram
     blockSelected = QtCore.Signal(str)  # forwarded from scene: instance_id
+    selectionCleared = QtCore.Signal()
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -48,7 +49,9 @@ class BlockEditorWidget(QtWidgets.QWidget):
         layout.addWidget(self._canvas, stretch=1)
 
         # Wiring
+        self._palette.blockTypeRequested.connect(self._add_block_from_palette)
         self._scene.blockSelected.connect(self.blockSelected.emit)
+        self._scene.selectionCleared.connect(self.selectionCleared.emit)
         self._scene.diagramChanged.connect(self.diagramChanged.emit)
 
     # -- public API ---------------------------------------------------------
@@ -70,6 +73,10 @@ class BlockEditorWidget(QtWidgets.QWidget):
     def diagram(self) -> BlockDiagram | None:
         self._scene.sync_to_diagram()
         return self._diagram
+
+    def _add_block_from_palette(self, block_type: str) -> None:
+        center = self._canvas.mapToScene(self._canvas.viewport().rect().center())
+        self._scene.add_block(block_type, center)
 
     # -- drag & drop --------------------------------------------------------
 

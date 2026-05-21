@@ -188,6 +188,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._block_editor.diagramChanged.connect(self._on_block_diagram_changed)
         self._block_editor._scene.validationError.connect(self._on_block_validation_error)
         self._block_editor.blockSelected.connect(self._select_block)
+        self._block_editor.selectionCleared.connect(self._clear_selection)
 
         self._canvas_stack = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self._canvas_stack.addWidget(self.canvas)
@@ -941,9 +942,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._add_toolbar_sep(t)
 
         self._add_toolbar_block(t, [
-            [self.action_pose_prescribe_x, self.action_pose_prescribe_y],
-            [self.action_pose_prescribe_horizontal, self.action_pose_prescribe_vertical],
-            [self.action_pose_prescribe_angle],
+            [self.action_pose_prescribe_x, self.action_pose_prescribe_y, self.action_pose_prescribe_angle],
+            [self.action_pose_prescribe_horizontal, self.action_pose_prescribe_vertical, None],
         ], "Constraints")
 
         self._pose_toolbar.setVisible(False)
@@ -1087,6 +1087,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_case_delta_highlights()
         self._populate_parameters(project)
         self._populate_inspector()
+        if self._app_mode in {"model", "sketch"}:
+            self._refresh_block_editor()
         if hasattr(self, "pose_constraints_strip") and self._app_mode == "pose":
             self.pose_constraints_strip.refresh()
         if hasattr(self, "workflow_panel"):
@@ -1095,6 +1097,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_toggle_sensors.setChecked(project.view_state.show_sensors)
         self.canvas.set_show_sensors(project.view_state.show_sensors)
         self.canvas.set_selection(self._selected_entity_id)
+        if isinstance(self._selected_entity_id, str):
+            self._block_editor.set_selected(self._selected_entity_id)
         self._update_interaction_state()
         self._update_mode_button_enable_rules()
         self._update_status_message()
@@ -1105,9 +1109,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if project is None:
             self._block_editor.set_diagram(None)
             return
-        if project.model.control_graph is None:
-            project.model.control_graph = BlockDiagram()
-        self._block_editor.set_diagram(project.model.control_graph)
+        self._block_editor.set_diagram(project.model.control_graph or BlockDiagram())
+        if isinstance(self._selected_entity_id, str):
+            self._block_editor.set_selected(self._selected_entity_id)
 
     def _set_block_editor_visible(self, visible: bool) -> None:
         if self._block_editor.isVisible() == visible:
@@ -1124,18 +1128,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if project is None:
             return
         ws = project.workspace
-        # In case mode, mutations already went through ApplicationService.blocks
-        # (snapshot + case overlay). Do NOT overwrite the baseline control_graph.
-        if ws is not None and ws.active_case_id is not None:
-            if ws is not None:
-                from quino.services.workspace_invalidation import invalidate_on_model_change
-                invalidate_on_model_change(project)
-            return
-        project.model.control_graph = self._block_editor.diagram()
-        self.app_service._snapshot()
         if ws is not None:
             from quino.services.workspace_invalidation import invalidate_on_model_change
             invalidate_on_model_change(project)
+        self._mark_project_dirty()
+        self._populate_tree(self.app_service.display_project)
+        self._populate_inspector()
 
     def _on_block_validation_error(self, message: str) -> None:
         self.statusBar().showMessage(f"Block diagram: {message}", 5000)
@@ -1246,15 +1244,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if ws is None:
             return
         if kind == "baseline":
-            ws.active_baseline_id = obj_id
-            ws.active_case_id = None
+            self.app_service.set_working_context(baseline_id=obj_id)
             self._set_app_mode("model")
         elif kind == "case":
             case = next((c for c in ws.cases if c.id == obj_id), None)
             if case is None:
                 return
-            ws.active_baseline_id = case.baseline_id
-            ws.active_case_id = obj_id
+            self.app_service.set_working_context(case_id=obj_id, baseline_id=case.baseline_id)
             self._set_app_mode("model")
         elif kind == "pose":
             pose = next((p for p in ws.poses if p.id == obj_id), None)
@@ -1263,12 +1259,10 @@ class MainWindow(QtWidgets.QMainWindow):
             if pose.case_id is not None:
                 case = next((c for c in ws.cases if c.id == pose.case_id), None)
                 if case is not None:
-                    ws.active_baseline_id = case.baseline_id
-                    ws.active_case_id = case.id
+                    self.app_service.set_working_context(case_id=case.id, baseline_id=case.baseline_id)
             elif pose.baseline_id is not None:
-                ws.active_baseline_id = pose.baseline_id
-                ws.active_case_id = None
-            ws.selected_pose_id = obj_id
+                self.app_service.set_working_context(baseline_id=pose.baseline_id)
+            self.app_service.set_selected_pose(obj_id)
             self.canvas.set_pose_readonly(pose.is_default)
             self._set_app_mode("pose")
         elif kind == "analysis":
@@ -1278,12 +1272,10 @@ class MainWindow(QtWidgets.QMainWindow):
             if analysis.case_id is not None:
                 case = next((c for c in ws.cases if c.id == analysis.case_id), None)
                 if case is not None:
-                    ws.active_baseline_id = case.baseline_id
-                    ws.active_case_id = case.id
+                    self.app_service.set_working_context(case_id=case.id, baseline_id=case.baseline_id)
             elif analysis.baseline_id is not None:
-                ws.active_baseline_id = analysis.baseline_id
-                ws.active_case_id = None
-            ws.selected_analysis_id = obj_id
+                self.app_service.set_working_context(baseline_id=analysis.baseline_id)
+            self.app_service.set_selected_analysis(obj_id)
             self._set_app_mode("analysis")
         self.refresh_all()
 
@@ -1476,6 +1468,41 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._prepare_for_model_edit():
             return
         entity_id = self._selected_entity_id
+        if isinstance(entity_id, tuple):
+            kind = entity_id[0]
+            try:
+                if kind == "block_connection" and len(entity_id) == 5:
+                    _, src_instance, src_port, dst_instance, dst_port = entity_id
+                    self.app_service.remove_connection(
+                        src_instance=src_instance,
+                        src_port=src_port,
+                        dst_instance=dst_instance,
+                        dst_port=dst_port,
+                    )
+                    self._append_message("Deleted selected block connection")
+                    self._selected_entity_id = None
+                    self._mark_project_dirty()
+                elif kind == "block_param":
+                    return
+            except Exception as exc:  # pragma: no cover - UI feedback
+                self._append_message(f"Delete failed: {exc}")
+            self.refresh_all()
+            return
+        project = self.app_service.display_project
+        if (
+            project is not None
+            and project.model.control_graph is not None
+            and entity_id in project.model.control_graph.instances
+        ):
+            try:
+                self.app_service.remove_block(entity_id)
+                self._append_message("Deleted selected block")
+                self._selected_entity_id = None
+                self._mark_project_dirty()
+            except Exception as exc:  # pragma: no cover - UI feedback
+                self._append_message(f"Delete failed: {exc}")
+            self.refresh_all()
+            return
         consequence = self.app_service.get_marker_deletion_consequence(entity_id)
         result = "accept"
         if consequence == "to_bar":
@@ -2127,7 +2154,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 for conn in control_graph.connections:
                     conn_label = f"{conn.src_instance}.{conn.src_port} → {conn.dst_instance}.{conn.dst_port}"
                     conn_item = QtWidgets.QTreeWidgetItem([conn_label, "block_connection"])
-                    conn_item.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("block_connection", conn.src_instance, conn.dst_instance))
+                    conn_item.setData(
+                        0,
+                        QtCore.Qt.ItemDataRole.UserRole,
+                        ("block_connection", conn.src_instance, conn.src_port, conn.dst_instance, conn.dst_port),
+                    )
                     conn_root.addChild(conn_item)
 
         if project.reaction_outputs:
@@ -2390,6 +2421,26 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._suspend_tree_injection:
             return
         entity_id = current.data(0, QtCore.Qt.ItemDataRole.UserRole) if current else None
+        if isinstance(entity_id, tuple):
+            kind = entity_id[0]
+            if kind == "block_param" and len(entity_id) >= 3:
+                self._select_block(entity_id[1])
+                return
+            if kind == "block_connection":
+                self._selected_entity_id = entity_id
+                self._populate_inspector()
+                self.canvas.set_selection(None)
+                self._block_editor.set_selected(None)
+                return
+        project = self.app_service.display_project
+        if (
+            isinstance(entity_id, str)
+            and project is not None
+            and project.model.control_graph is not None
+            and entity_id in project.model.control_graph.instances
+        ):
+            self._select_block(entity_id)
+            return
         if entity_id is not None and self.canvas.mode() in self._CREATION_MODES:
             # In a creation workflow: route the selection to the canvas without
             # overwriting canvas internal state (joint start marker, etc.)
@@ -4069,6 +4120,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 return
 
             # --- Block diagram support ---
+            if isinstance(self._selected_entity_id, tuple):
+                selection = self._selected_entity_id
+                if selection[0] == "block_connection" and len(selection) == 5:
+                    _, src_instance, src_port, dst_instance, dst_port = selection
+                    self.inspector_title.setText("<b>Block connection</b>")
+                    self.inspector.add_property("source", "connection/source", f"{src_instance}.{src_port}", "readonly", f"{src_instance}.{src_port}", enabled=False)
+                    self.inspector.add_property("target", "connection/target", f"{dst_instance}.{dst_port}", "readonly", f"{dst_instance}.{dst_port}", enabled=False)
+                    self.inspector.layout.addStretch()
+                return
             project = self.app_service.display_project
             block = None
             if project is not None and project.model.control_graph is not None:
@@ -4726,23 +4786,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 if len(parts) == 3:
                     instance_id = parts[1]
                     param_key = parts[2]
-                    project = self.app_service.project
-                    if project is not None and project.model.control_graph is not None:
-                        inst = project.model.control_graph.instances.get(instance_id)
-                        if inst is not None:
-                            # Try to preserve numeric type
-                            try:
-                                if "." in value:
-                                    inst.parameters[param_key] = float(value)
-                                else:
-                                    inst.parameters[param_key] = int(value)
-                            except ValueError:
-                                inst.parameters[param_key] = value
-                            self.app_service._snapshot()
-                            self._mark_project_dirty()
-                            if project.workspace is not None:
-                                from quino.services.workspace_invalidation import invalidate_on_model_change
-                                invalidate_on_model_change(project)
+                    coerced: object = value
+                    try:
+                        coerced = float(value) if "." in value else int(value)
+                    except ValueError:
+                        coerced = value
+                    self.app_service.set_block_parameter(instance_id, param_key, coerced)
+                    self._mark_project_dirty()
             except Exception as exc:  # pragma: no cover - UI feedback
                 self._append_message(f"Block parameter update failed: {exc}")
             self.refresh_all()

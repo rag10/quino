@@ -105,14 +105,16 @@ class JointCommands:
     # ------------------------------------------------------------------
 
     def _find_joint(self, joint_id: str) -> Joint:
-        project = self._project
+        project = self._ctx.effective_project()
         for joint in project.model.joints:
             if joint.id == joint_id:
                 return joint
         raise ValueError(f"Unknown joint: {joint_id}")
 
     def _find_body_by_marker(self, marker_id: str) -> Body:
-        project = self._project
+        # Search the effective project so markers added by the active case
+        # (i.e. on bodies in case.added_entities) are also resolvable.
+        project = self._ctx.effective_project()
         for body in project.model.bodies:
             if any(marker.id == marker_id for marker in body.markers):
                 return body
@@ -123,7 +125,7 @@ class JointCommands:
     # ------------------------------------------------------------------
 
     def _ensure_joint_not_duplicate(self, candidate: Joint) -> None:
-        project = self._project
+        project = self._ctx.effective_project()
         new_key = self._ctx.validation._joint_key(candidate)
         for joint in project.model.joints:
             if self._ctx.validation._joint_key(joint) == new_key:
@@ -143,7 +145,7 @@ class JointCommands:
         return marker_endpoint, slider_endpoint
 
     def _joints_for_marker(self, marker_id: str) -> list[Joint]:
-        project = self._project
+        project = self._ctx.effective_project()
         return [
             joint
             for joint in project.model.joints
@@ -246,7 +248,7 @@ class JointCommands:
         marker.y.expression = f"{y_mm:.6f} mm"
 
     def _markers_linked_to_slider(self, slider_id: str) -> list[Marker]:
-        project = self._project
+        project = self._ctx.effective_project()
         marker_ids: list[str] = []
         for joint in project.model.joints:
             endpoints = (joint.endpoint_a, joint.endpoint_b)
@@ -558,7 +560,8 @@ class JointCommands:
 
     def create_slider(self, name: str, slider: SliderInput) -> str:
         project = self._project
-        self._ctx.validation.ensure_unique_name(project.model.sliders, name)
+        effective = self._ctx.effective_project()
+        self._ctx.validation.ensure_unique_name(effective.model.sliders, name)
         slider_obj = Slider(
             id=self._ctx.ids.new("slider"),
             name=name,
@@ -628,9 +631,10 @@ class JointCommands:
         endpoint_b: JointEndpointInput,
     ) -> str:
         project = self._project
-        self._ctx.validation.ensure_unique_name(project.model.joints, name)
-        self._validate_endpoint_input(endpoint_a, project)
-        self._validate_endpoint_input(endpoint_b, project)
+        effective = self._ctx.effective_project()
+        self._ctx.validation.ensure_unique_name(effective.model.joints, name)
+        self._validate_endpoint_input(endpoint_a, effective)
+        self._validate_endpoint_input(endpoint_b, effective)
         joint = Joint(
             id=self._ctx.ids.new("joint"),
             name=name,
@@ -685,10 +689,11 @@ class JointCommands:
         unit: str,
     ) -> str:
         project = self._project
-        self._ctx.validation.ensure_unique_name(project.model.drivers, name)
+        effective = self._ctx.effective_project()
+        self._ctx.validation.ensure_unique_name(effective.model.drivers, name)
         joint = self._find_joint(target_joint_id)
         dtype = DriverType(driver_type)
-        if any(driver.target_joint_id == target_joint_id for driver in project.model.drivers):
+        if any(driver.target_joint_id == target_joint_id for driver in effective.model.drivers):
             raise ValueError("Only one driver per joint is supported in V1")
         if dtype is DriverType.ROTATION and joint.type is not JointType.REVOLUTE:
             raise ValueError("Rotation drivers require a revolute joint")
@@ -767,9 +772,10 @@ class JointCommands:
             endpoint_b=self._make_endpoint(endpoint_b),
         )
         project = self._project
-        self._ctx.validation.ensure_unique_name(project.model.joints, joint_name)
-        self._validate_endpoint_input(endpoint_a, project)
-        self._validate_endpoint_input(endpoint_b, project)
+        effective = self._ctx.effective_project()
+        self._ctx.validation.ensure_unique_name(effective.model.joints, joint_name)
+        self._validate_endpoint_input(endpoint_a, effective)
+        self._validate_endpoint_input(endpoint_b, effective)
         self._ensure_joint_not_duplicate(candidate)
 
         with self._ctx.operation():

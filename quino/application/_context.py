@@ -43,6 +43,26 @@ class ServiceContext:
             return None
         return next((c for c in ws.cases if c.id == ws.active_case_id), None)
 
+    def effective_project(self):
+        """Return a read-only composed project view (baseline + case chain).
+
+        In case mode, returns the project with structural deltas applied so
+        commands can validate inputs against entities added by the case.
+        Outside case mode, returns the raw project.
+
+        IMPORTANT: do NOT mutate the returned project — it may be a
+        deep-copy clone. Mutations must go via case routing helpers.
+        """
+        project = self.project_provider()
+        case = self.get_active_case()
+        if case is None:
+            return project
+        from quino.services.workspace_composition import compose_project
+        try:
+            return compose_project(project, case=case)
+        except Exception:
+            return project
+
     def add_entity_to_case(self, entity, domain: str) -> bool:
         """If a case is active, serialize *entity* and append it to
         case.added_entities[*domain*].  Return True when redirected

@@ -232,11 +232,15 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
             layout.addStretch()
             return container
 
-        elif kind in {"expression", "expression_or_null"}:
+        elif kind in {"expression", "expression_or_null", "block_param"}:
             text_input = QtWidgets.QLineEdit(value)
             text_input.setEnabled(enabled)
             text_input.editingFinished.connect(lambda p=path, w=text_input, k=kind: self.property_changed.emit(p, w.text(), k))
             layout.addWidget(text_input)
+
+            if kind == "block_param":
+                layout.addStretch()
+                return container
 
             eval_label = QtWidgets.QLabel(evaluated)
             eval_label.setStyleSheet("color: #666; font-size: 9pt;")
