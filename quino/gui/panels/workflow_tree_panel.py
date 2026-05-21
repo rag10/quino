@@ -4,6 +4,20 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from quino.application.service import ApplicationService
 from quino.domain.workspace import Analysis, Case as _Case
+from quino.gui.icons import get_icon
+from quino.gui.tree_branches import tree_branch_stylesheet
+
+
+_BASE_TREE_STYLESHEET = (
+    "QTreeWidget { background: #fbfcfd; alternate-background-color: #f4f6f9;"
+    " border: 1px solid #d0d7de; }"
+    " QTreeView::item { padding: 1px 0; }"
+    " QTreeView::item:selected { background: #cfe1f5; color: #112746; }"
+)
+
+
+def _tree_stylesheet() -> str:
+    return _BASE_TREE_STYLESHEET + tree_branch_stylesheet()
 
 _USER_ROLE = int(QtCore.Qt.ItemDataRole.UserRole)
 _OWNER_ROLE = _USER_ROLE + 1
@@ -118,14 +132,14 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         self._tree.setAnimated(True)
         self._tree.setAlternatingRowColors(True)
         self._tree.setUniformRowHeights(True)
+        self._tree.setIconSize(QtCore.QSize(16, 16))
         self._tree.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         self._tree.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
-        self._tree.setStyleSheet(
-            "QTreeWidget { background: #fbfcfd; alternate-background-color: #f4f6f9;"
-            " border: 1px solid #d0d7de; }"
-            " QTreeView::item { padding: 1px 0; }"
-            " QTreeView::item:selected { background: #cfe1f5; color: #112746; }"
-        )
+        # Inventor-style branch lines: the disclosure carets are replaced by
+        # explicit guide-line glyphs so parent/child relationships read at a
+        # glance. Vertical guides + L/T connectors are drawn by Qt via the
+        # QTreeView::branch substyles.
+        self._tree.setStyleSheet(_tree_stylesheet())
         self._tree.customContextMenuRequested.connect(self._on_context_menu)
         self._tree.itemDoubleClicked.connect(self._on_item_double_clicked)
         self._tree.currentItemChanged.connect(self._on_current_changed)
@@ -192,6 +206,9 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             counts = self._scope_counts(baseline_id=None, case_id=case.id)
             label = f"{glyph}  {kind_label} · {case.name}{_badge_string(case)}{counts}"
             c_item = self._make_item(case.id, "case", label)
+            # Subcases get a distinct glyph (hollow diamond) over top cases.
+            if parent_case_id:
+                c_item.setIcon(0, get_icon("workspace-subcase", size=16))
             self._style_node(c_item, "subcase" if parent_case_id else "case")
             summary = _build_delta_summary(case)
             if summary:
@@ -229,6 +246,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
                 font.setItalic(True)
                 diffs_node.setFont(0, font)
                 diffs_node.setForeground(0, QtGui.QBrush(QtGui.QColor("#888888")))
+                diffs_node.setIcon(0, get_icon("workspace-diffs", size=16))
                 parent_item.addChild(diffs_node)
 
         # Poses subgroup. For case scope, match by case_id only (baseline_id
@@ -241,6 +259,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             poses_node = QtWidgets.QTreeWidgetItem([f"📐  Poses  ({len(poses)})"])
             poses_node.setFlags(poses_node.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
             poses_node.setForeground(0, QtGui.QBrush(QtGui.QColor("#666666")))
+            poses_node.setIcon(0, get_icon("workspace-poses", size=16))
             parent_item.addChild(poses_node)
             self._populate_poses(poses_node, baseline_id=baseline_id, case_id=case_id)
 
@@ -265,6 +284,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             an_node = QtWidgets.QTreeWidgetItem([f"⚙  Analyses  ({len(all_analyses)})"])
             an_node.setFlags(an_node.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
             an_node.setForeground(0, QtGui.QBrush(QtGui.QColor("#666666")))
+            an_node.setIcon(0, get_icon("workspace-analyses", size=16))
             parent_item.addChild(an_node)
             for analysis in free_analyses:
                 self._add_analysis_item(an_node, analysis)
@@ -277,6 +297,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
                 blocks_node = QtWidgets.QTreeWidgetItem([f"🧩  Blocks  ({len(block_adds)})"])
                 blocks_node.setFlags(blocks_node.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
                 blocks_node.setForeground(0, QtGui.QBrush(QtGui.QColor("#666666")))
+                blocks_node.setIcon(0, get_icon("workspace-blocks", size=16))
                 parent_item.addChild(blocks_node)
                 for ent in block_adds:
                     bid = ent.get("id") or ent.get("instance_id") or "?"
@@ -369,9 +390,23 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         a_item.setForeground(0, QtGui.QBrush(QtGui.QColor(color)))
         a_item.setToolTip(0, f"Status: {status}")
 
+    _ITEM_ICONS = {
+        "baseline": "workspace-baseline",
+        "case": "workspace-case",
+        "subcase": "workspace-subcase",
+        "pose": "workspace-pose",
+        "analysis": "workspace-analysis",
+        "block": "block-instance",
+    }
+
     def _make_item(self, obj_id: str, kind: str, text: str) -> QtWidgets.QTreeWidgetItem:
         item = QtWidgets.QTreeWidgetItem([text])
         item.setData(0, _USER_ROLE, (kind, obj_id))
+        # Attach an Inventor-style type icon. Subcases get a distinct glyph
+        # vs. top-level cases — caller passes "subcase" explicitly.
+        icon_name = self._ITEM_ICONS.get(kind)
+        if icon_name:
+            item.setIcon(0, get_icon(icon_name, size=16))
         return item
 
     # ------------------------------------------------------------------
@@ -661,11 +696,15 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         self.pose_selected.emit(pose_id)
 
     def _action_rename(self, kind: str, obj_id: str) -> None:
-        item = self._item_map.get(obj_id)
-        current = item.text(0) if item else ""
+        # Read the logical name straight from the workspace object so the
+        # prefilled value never contains tree decorations (glyphs, badges,
+        # "P:1 A:2", etc.). Reusing item.text(0) would persist the whole
+        # decorated label and add the prefix on every subsequent rename.
+        current = self._logical_name(kind, obj_id)
         name, ok = QtWidgets.QInputDialog.getText(self, "Rename", "Name:", text=current)
-        if not ok or not name:
+        if not ok or not name.strip():
             return
+        name = name.strip()
         if kind == "baseline":
             self.app_service.workspace.rename_baseline(obj_id, name)
         elif kind == "case":
@@ -675,6 +714,24 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         elif kind == "analysis":
             self.app_service.workspace.rename_analysis(obj_id, name)
         self.refresh()
+
+    def _logical_name(self, kind: str, obj_id: str) -> str:
+        """Return the persisted (undecorated) name of a workspace object."""
+        project = self.app_service.project
+        if project is None or project.workspace is None:
+            return ""
+        ws = project.workspace
+        if kind == "baseline":
+            obj = next((b for b in ws.baselines if b.id == obj_id), None)
+        elif kind == "case":
+            obj = next((c for c in ws.cases if c.id == obj_id), None)
+        elif kind == "pose":
+            obj = next((p for p in ws.poses if p.id == obj_id), None)
+        elif kind == "analysis":
+            obj = next((a for a in ws.analyses if a.id == obj_id), None)
+        else:
+            obj = None
+        return getattr(obj, "name", "") if obj is not None else ""
 
     def _delete_item(self, kind: str, obj_id: str, label: str) -> None:
         reply = QtWidgets.QMessageBox.question(

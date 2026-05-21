@@ -1181,6 +1181,18 @@ def test_canvas_badge_shows_active_pose_in_pose_mode() -> None:
     qt_app.processEvents()
 
 
+def test_analysis_bar_is_hidden_at_startup() -> None:
+    """The Analysis playback bar (run/play/stop + duration/frames/dt) must
+    stay hidden when the app opens; it only belongs to analysis mode."""
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    window = MainWindow(ApplicationService())
+    window.show()
+    qt_app.processEvents()
+    assert window._playback_widget.isVisible() is False
+    window.close()
+    qt_app.processEvents()
+
+
 def test_mode_indicator_is_anchored_top_right_of_canvas() -> None:
     qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = MainWindow(ApplicationService())

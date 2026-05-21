@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+  <!-- Play triangle on a time axis = an analysis run. -->
+  <line x1="4" y1="25" x2="28" y2="25" stroke="#3d3d3d" stroke-width="1.6" stroke-linecap="round"/>
+  <line x1="4" y1="25" x2="4" y2="6" stroke="#3d3d3d" stroke-width="1.6" stroke-linecap="round"/>
+  <polyline points="6,20 11,16 16,18 22,9 27,11" stroke="#2f6f9f" stroke-width="2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+  <polygon points="22,12 28,15 22,18" fill="#2f6f9f"/>
+</svg>

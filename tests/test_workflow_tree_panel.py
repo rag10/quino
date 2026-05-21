@@ -175,3 +175,57 @@ def test_breadcrumb_shows_subcase_chain():
 
     text = panel._badge.text()
     assert "BL" in text and "Parent" in text and "Child" in text
+
+
+def test_rename_dialog_uses_undecorated_logical_name():
+    """The rename popup must prefill with the bare case/baseline name, not
+    with the decorated tree label (glyphs, "Case · ", counts). Otherwise
+    repeated renames accumulate the prefix in the persisted name."""
+    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    svc = ApplicationService()
+    svc.new_project("test")
+    case = svc.workspace.create_case("MyCase")
+    panel = WorkflowTreePanel(svc)
+    panel.refresh()
+    item = panel._item_map[case.id]
+    # The tree label is decorated (◆  Case · MyCase  P:1, etc.).
+    assert "MyCase" in item.text(0) and item.text(0) != "MyCase"
+    # The logical-name helper must return only "MyCase".
+    assert panel._logical_name("case", case.id) == "MyCase"
+
+
+def test_tree_items_carry_type_icons():
+    """Workflow tree items must have a non-null icon so the type is
+    recognisable at a glance (Inventor-style browser)."""
+    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    svc = ApplicationService()
+    svc.new_project("test")
+    baseline = svc.project.workspace.baselines[0]
+    case = svc.workspace.create_case("C1", baseline_id=baseline.id)
+    svc.workspace.create_pose("PoseA", case_id=case.id)
+    svc.workspace.create_analysis("AnalysisA", case_id=case.id)
+    panel = WorkflowTreePanel(svc)
+    panel.refresh()
+
+    assert not panel._item_map[baseline.id].icon(0).isNull()
+    assert not panel._item_map[case.id].icon(0).isNull()
+
+
+def test_subcase_uses_distinct_icon_from_top_case():
+    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    svc = ApplicationService()
+    svc.new_project("test")
+    baseline = svc.project.workspace.baselines[0]
+    parent = svc.workspace.create_case("Parent", baseline_id=baseline.id)
+    child = svc.workspace.create_case("Child", parent_case_id=parent.id)
+    panel = WorkflowTreePanel(svc)
+    panel.refresh()
+
+    parent_icon = panel._item_map[parent.id].icon(0)
+    child_icon = panel._item_map[child.id].icon(0)
+    assert not parent_icon.isNull()
+    assert not child_icon.isNull()
+    # Subcase pixmap should differ from top-level case pixmap.
+    parent_pix = parent_icon.pixmap(16, 16).toImage()
+    child_pix = child_icon.pixmap(16, 16).toImage()
+    assert parent_pix != child_pix

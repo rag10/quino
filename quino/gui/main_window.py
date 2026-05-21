@@ -146,10 +146,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Stretch)
         self.tree.header().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
         self.tree.setAlternatingRowColors(False)
+        from quino.gui.tree_branches import tree_branch_stylesheet
         self.tree.setStyleSheet(
             "QTreeWidget { background-color: #eef3f8; } "
             "QTreeWidget::item { background-color: #eef3f8; color: #3d3d3d; padding: 2px; } "
             "QTreeWidget::item:selected { background-color: #d4e5f7; color: #3d3d3d; outline: none; border: none; }"
+            + tree_branch_stylesheet()
         )
         self.tree.setUniformRowHeights(True)
         self._tree_delegate = TreeBranchDelegate(self.tree)
@@ -286,6 +288,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         playback_layout.addWidget(playback_group)
         center_panel.addWidget(self._playback_widget)
+        # The Analysis bar (run/play/stop + duration/frames/dt) is reserved
+        # for analysis mode. Other modes don't need it and seeing it on
+        # startup confuses the user. We hide it immediately after creation
+        # and rely on _set_app_mode("analysis") to bring it back.
+        self._playback_widget.setVisible(False)
 
         center_panel.setSizes([600, 80])
         splitter.addWidget(center_panel)
@@ -2052,13 +2059,17 @@ class MainWindow(QtWidgets.QMainWindow):
         "linear_actuator": "actuator", "rotational_actuator": "rot-actuator",
     }
     _SECTION_ICON: dict[str, str] = {
-        "Bodies": "body", "Sliders": "slider", "Joints": "revolute",
-        "Drivers": "rotate-driver", "Sensors": "sensor-point",
-        "Reactions": "sensor-point",
-        "Sketch": "sketch-point",
+        "Bodies": "section-bodies",
+        "Sliders": "section-sliders",
+        "Joints": "section-joints",
+        "Drivers": "section-drivers",
+        "Sensors": "section-sensors",
+        "Reactions": "section-reactions",
+        "Sketch": "section-sketch",
         "Constraints": "constraint-distance",
-        "Loads": "load-gravity",
-        "Springs": "spring",
+        "Loads": "section-loads",
+        "Springs": "section-springs",
+        "Block Diagram": "workspace-blocks",
     }
     _SECTION_COLOR: dict[str, str] = {
         "Bodies": "#2f6f9f", "Sliders": "#2f6f9f", "Joints": "#2f6f9f",
@@ -2624,8 +2635,10 @@ class MainWindow(QtWidgets.QMainWindow):
         item = QtWidgets.QTreeWidgetItem([label, kind])
         item.setData(0, QtCore.Qt.ItemDataRole.UserRole, entity_id)
         icon_name = self._KIND_ICON.get(kind, "")
+        if not icon_name and kind.startswith("block_"):
+            icon_name = "block-instance"
         if icon_name:
-            item.setIcon(0, get_icon(icon_name, size=13))
+            item.setIcon(0, get_icon(icon_name, size=14))
         self._tree_items[entity_id] = item
         return item
 

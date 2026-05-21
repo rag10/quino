@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+  <!-- Diff symbol: + and - stacked. -->
+  <line x1="9" y1="11" x2="17" y2="11" stroke="#228822" stroke-width="2.2" stroke-linecap="round"/>
+  <line x1="13" y1="7" x2="13" y2="15" stroke="#228822" stroke-width="2.2" stroke-linecap="round"/>
+  <line x1="9" y1="22" x2="17" y2="22" stroke="#aa2222" stroke-width="2.2" stroke-linecap="round"/>
+  <line x1="22" y1="11" x2="26" y2="11" stroke="#c75b12" stroke-width="2.2" stroke-linecap="round"/>
+  <line x1="22" y1="22" x2="26" y2="22" stroke="#c75b12" stroke-width="2.2" stroke-linecap="round"/>
+</svg>
