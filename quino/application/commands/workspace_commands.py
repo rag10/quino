@@ -109,6 +109,7 @@ class WorkspaceCommands:
         )
         ws.cases.append(case)
         self._ensure_default_pose(case_id=case.id)
+        self._resolve_default_pose_for_case(ws, case.id)
         return case
 
     def rename_case(self, case_id: str, name: str) -> None:
@@ -476,6 +477,15 @@ class WorkspaceCommands:
             if analysis.id == analysis_id:
                 return analysis
         raise ValueError(f"Analysis {analysis_id!r} not found")
+
+    def _resolve_default_pose_for_case(self, ws: Workspace, case_id: str) -> None:
+        """Call the resolver to set parent_pose_id and attempt IK on the default pose."""
+        try:
+            from quino.services.case_pose_resolver import resolve_default_pose
+            app_service = getattr(self._ctx, "app_service", None)
+            resolve_default_pose(ws, case_id=case_id, app_service=app_service)
+        except Exception:
+            pass  # non-critical; pose will be resolved lazily later
 
     def _ensure_default_pose(
         self,
