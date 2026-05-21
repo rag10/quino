@@ -132,6 +132,142 @@ def test_subcase_can_override_inherited_gravity_without_mutating_parent(
     assert svc.display_project.model.gravity.magnitude == pytest.approx(2.5)
 
 
+def test_subcase_creating_block_does_not_touch_parent_or_baseline(
+    svc_with_case_chain,
+) -> None:
+    svc, _body, parent_id, child_id = svc_with_case_chain
+
+    svc.set_working_context(case_id=parent_id)
+    pblock = svc.add_block(block_type="Constant", name="ParentSrc", position=(0.0, 0.0))
+
+    svc.set_working_context(case_id=child_id)
+    cblock = svc.add_block(block_type="Gain", name="ChildGain", position=(50.0, 0.0))
+
+    parent = _case(svc, parent_id)
+    child = _case(svc, child_id)
+    # Parent only has its own added block; child has only its own.
+    assert any(b["id"] == pblock for b in parent.added_entities.get("blocks", []))
+    assert not any(b["id"] == cblock for b in parent.added_entities.get("blocks", []))
+    assert any(b["id"] == cblock for b in child.added_entities.get("blocks", []))
+    assert not any(b["id"] == pblock for b in child.added_entities.get("blocks", []))
+    # Baseline diagram remains empty.
+    cg = svc.project.model.control_graph
+    assert cg is None or len(cg.instances) == 0
+    # Both blocks visible in display_project once we're in the child.
+    composed_cg = svc.display_project.model.control_graph
+    assert pblock in composed_cg.instances
+    assert cblock in composed_cg.instances
+
+
+def test_subcase_can_connect_inherited_block_to_local_block(
+    svc_with_case_chain,
+) -> None:
+    svc, _body, parent_id, child_id = svc_with_case_chain
+
+    svc.set_working_context(case_id=parent_id)
+    pblock = svc.add_block(block_type="Constant", name="ParentSrc", position=(0.0, 0.0))
+
+    svc.set_working_context(case_id=child_id)
+    cblock = svc.add_block(block_type="Gain", name="ChildGain", position=(50.0, 0.0))
+
+    svc.add_connection(src_instance=pblock, src_port="out", dst_instance=cblock, dst_port="in")
+
+    parent = _case(svc, parent_id)
+    child = _case(svc, child_id)
+    # Connection lives only in the child (it doesn't exist in parent's view).
+    assert any(
+        c.get("src_instance") == pblock and c.get("dst_instance") == cblock
+        for c in child.added_entities.get("connections", [])
+    )
+    assert not any(
+        c.get("src_instance") == pblock and c.get("dst_instance") == cblock
+        for c in parent.added_entities.get("connections", [])
+    )
+    # Composed view sees both blocks and the connection.
+    cg = svc.display_project.model.control_graph
+    assert any(
+        c.src_instance == pblock and c.dst_instance == cblock for c in cg.connections
+    )
+
+
+def test_subcase_overriding_block_param_does_not_mutate_parent_or_baseline(
+    svc_with_case_chain,
+) -> None:
+    svc, _body, parent_id, child_id = svc_with_case_chain
+
+    svc.set_working_context(case_id=parent_id)
+    pblock = svc.add_block(
+        block_type="Gain", name="ParentGain", position=(0.0, 0.0),
+        parameters={"k": 1.0},
+    )
+
+    svc.set_working_context(case_id=child_id)
+    svc.set_block_parameter(pblock, "k", 7.5)
+
+    parent = _case(svc, parent_id)
+    child = _case(svc, child_id)
+    # Override is on the child only.
+    override_path = f"model/control_graph/instances/{pblock}/parameters/k"
+    assert override_path in child.invariant_values
+    assert override_path not in parent.invariant_values
+    # Composed value reflects the override.
+    composed_block = svc.display_project.model.control_graph.instances[pblock]
+    assert float(composed_block.parameters["k"]) == 7.5
+
+
+def test_removing_inherited_block_in_subcase_also_hides_its_connections(
+    svc_with_case_chain,
+) -> None:
+    svc, _body, parent_id, child_id = svc_with_case_chain
+
+    svc.set_working_context(case_id=parent_id)
+    src = svc.add_block(block_type="Constant", name="Src", position=(0.0, 0.0))
+    sink = svc.add_block(block_type="Gain", name="Sink", position=(50.0, 0.0))
+    svc.add_connection(src_instance=src, src_port="out", dst_instance=sink, dst_port="in")
+
+    svc.set_working_context(case_id=child_id)
+    svc.remove_block(src)  # block inherited from parent
+
+    parent = _case(svc, parent_id)
+    child = _case(svc, child_id)
+    # Parent still has both blocks and the connection.
+    assert any(b["id"] == src for b in parent.added_entities.get("blocks", []))
+    assert any(
+        c.get("src_instance") == src and c.get("dst_instance") == sink
+        for c in parent.added_entities.get("connections", [])
+    )
+    # Child records the removal; the composed view drops the block AND the
+    # dangling connection that referenced it.
+    assert src in child.removed_entity_ids
+    composed_cg = svc.display_project.model.control_graph
+    assert src not in composed_cg.instances
+    assert not any(
+        c.src_instance == src and c.dst_instance == sink for c in composed_cg.connections
+    )
+
+
+def test_subcase_can_remove_inherited_block_without_mutating_parent(
+    svc_with_case_chain,
+) -> None:
+    svc, _body, parent_id, child_id = svc_with_case_chain
+
+    svc.set_working_context(case_id=parent_id)
+    pblock = svc.add_block(block_type="Constant", name="ParentSrc", position=(0.0, 0.0))
+
+    svc.set_working_context(case_id=child_id)
+    svc.remove_block(pblock)
+
+    parent = _case(svc, parent_id)
+    child = _case(svc, child_id)
+    # Parent still owns the added block.
+    assert any(b["id"] == pblock for b in parent.added_entities.get("blocks", []))
+    # Child records the removal.
+    assert pblock in child.removed_entity_ids
+    # Composed view (child) no longer shows the block.
+    composed_cg = svc.display_project.model.control_graph
+    assert pblock not in composed_cg.instances
+
+
 def test_subcase_can_disable_inherited_gravity_without_mutating_parent(
     svc_with_case_chain,
 ) -> None:
