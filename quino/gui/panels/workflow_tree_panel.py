@@ -235,17 +235,27 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         if ws is None or (ws.active_case_id is None and ws.active_baseline_id is None):
             self._badge.setText("Working: —")
             return
-        if ws.active_case_id:
-            case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
-            if case:
-                self._badge.setText(f"Working: {case.name}")
-                return
-        if ws.active_baseline_id:
-            baseline = next((b for b in ws.baselines if b.id == ws.active_baseline_id), None)
-            if baseline:
-                self._badge.setText(f"Working: {baseline.name}")
-                return
-        self._badge.setText("Working: —")
+        self._badge.setText("Working: " + self._build_breadcrumb(ws))
+
+    def _build_breadcrumb(self, ws) -> str:
+        parts: list[str] = []
+        baseline = next((b for b in ws.baselines if b.id == ws.active_baseline_id), None)
+        if baseline is not None:
+            parts.append(baseline.name)
+        if ws.active_case_id is not None:
+            chain = self._case_chain_names(ws, ws.active_case_id)
+            parts.extend(chain)
+        return " / ".join(parts) if parts else "—"
+
+    def _case_chain_names(self, ws, case_id: str) -> list[str]:
+        by_id = {c.id: c for c in ws.cases}
+        chain: list[str] = []
+        current = by_id.get(case_id)
+        while current is not None:
+            chain.append(current.name)
+            current = by_id.get(current.parent_case_id) if current.parent_case_id else None
+        chain.reverse()
+        return chain
 
     # ------------------------------------------------------------------
     # Interactions
