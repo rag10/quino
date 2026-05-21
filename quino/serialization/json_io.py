@@ -699,8 +699,9 @@ class JsonMapper:
     # ------------------------------------------------------------------
 
     def _block_instance_to_dict(self, inst: BlockInstance) -> dict:
-        """Serialize a BlockInstance to a dictionary."""
+        """Serialize a BlockInstance to a dictionary (id embedded as 'id' key)."""
         return {
+            "id": inst.instance_id,
             "block_type": inst.block_type,
             "parameters": inst.parameters,
             "input_ports": [
@@ -712,10 +713,10 @@ class JsonMapper:
             "position": inst.position,
         }
 
-    def _block_instance_from_dict(self, instance_id: str, data: dict) -> BlockInstance:
-        """Deserialize a BlockInstance from a dictionary."""
+    def _block_instance_from_dict(self, data: dict) -> BlockInstance:
+        """Deserialize a BlockInstance from a dictionary (id in 'id' key)."""
         return BlockInstance(
-            instance_id=instance_id,
+            instance_id=data["id"],
             block_type=data["block_type"],
             parameters=data.get("parameters", {}),
             input_ports=[
@@ -727,7 +728,7 @@ class JsonMapper:
             position=tuple(data.get("position", [0.0, 0.0])),
         )
 
-    def _connection_to_dict(self, conn: Connection) -> dict:
+    def _block_connection_to_dict(self, conn: Connection) -> dict:
         """Serialize a Connection to a dictionary."""
         return {
             "src_instance": conn.src_instance,
@@ -736,7 +737,7 @@ class JsonMapper:
             "dst_port": conn.dst_port,
         }
 
-    def _connection_from_dict(self, data: dict) -> Connection:
+    def _block_connection_from_dict(self, data: dict) -> Connection:
         """Deserialize a Connection from a dictionary."""
         return Connection(
             src_instance=data["src_instance"],
@@ -748,11 +749,11 @@ class JsonMapper:
     def _block_diagram_to_dict(self, diagram: BlockDiagram) -> dict:
         return {
             "instances": {
-                instance_id: self._block_instance_to_dict(instance)
-                for instance_id, instance in diagram.instances.items()
+                inst.instance_id: self._block_instance_to_dict(inst)
+                for inst in diagram.instances.values()
             },
             "connections": [
-                self._connection_to_dict(c)
+                self._block_connection_to_dict(c)
                 for c in diagram.connections
             ],
         }
@@ -760,12 +761,14 @@ class JsonMapper:
     def _block_diagram_from_dict(self, data: dict | None) -> BlockDiagram | None:
         if data is None:
             return None
-        instances = {
-            instance_id: self._block_instance_from_dict(instance_id, item)
-            for instance_id, item in data.get("instances", {}).items()
-        }
+        instances = {}
+        for instance_id, item in data.get("instances", {}).items():
+            item_with_id = dict(item)
+            item_with_id.setdefault("id", instance_id)
+            inst = self._block_instance_from_dict(item_with_id)
+            instances[instance_id] = inst
         connections = [
-            self._connection_from_dict(c)
+            self._block_connection_from_dict(c)
             for c in data.get("connections", [])
         ]
         return BlockDiagram(instances=instances, connections=connections)
