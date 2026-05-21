@@ -2450,3 +2450,15 @@ def test_coincident_point_then_line_uses_entity_reference() -> None:
 
     assert canvas._creation_entity_ids == [line_id]
     assert canvas._sensor_marker_ids == [p3]
+
+
+def test_canvas_pose_readonly_blocks_drag() -> None:
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    app = ApplicationService()
+    app.new_project("test")
+    from quino.gui.canvas import MechanismCanvas
+    canvas = MechanismCanvas(app)
+    assert canvas.is_pose_readonly() is False
+    canvas.set_pose_readonly(True)
+    assert canvas.is_pose_readonly() is True
+    qt_app.processEvents()

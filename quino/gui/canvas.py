@@ -262,6 +262,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._pose_pick_preview_kind: str | None = None
         self._pose_pick_marker_ids: list[str] = []
         self._pose_constraints: list[dict] = []
+        self._pose_readonly: bool = False
         self._creation_entity_ids: list[str] = []
         self._pending_distance_constraint_refs: list[str] = []
         self._hover_world: tuple[float, float] | None = None
@@ -507,6 +508,13 @@ class MechanismCanvas(QtWidgets.QWidget):
             for constraint in constraints
         ]
         self.update()
+
+    def set_pose_readonly(self, readonly: bool) -> None:
+        self._pose_readonly = bool(readonly)
+        self.update()
+
+    def is_pose_readonly(self) -> bool:
+        return self._pose_readonly
 
     def _set_cursor_for_mode(self, mode: str) -> None:
         cursor_map = {
@@ -1058,6 +1066,9 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._draw_edge_rulers(painter, transform)
         self._draw_pose_dof_info(painter, project)
 
+        if self._pose_readonly:
+            painter.fillRect(self.rect(), QtGui.QColor(180, 180, 180, 45))
+
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # pragma: no cover - UI behavior
         super().resizeEvent(event)
         if self._view_scale is None:
@@ -1144,9 +1155,10 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self._select_canvas_entity(clicked_marker.entity_id, additive=additive_selection)
                 if self._editing_enabled:
                     if self._interaction_mode == "pose" and clicked_marker.marker_type is MarkerType.STRUCTURAL:
-                        self._dragging_pose_marker = clicked_marker
-                        self._dragging_pose_marker_start = event.position()
-                        self._dragging_pose_marker_active = False
+                        if not self._pose_readonly:
+                            self._dragging_pose_marker = clicked_marker
+                            self._dragging_pose_marker_start = event.position()
+                            self._dragging_pose_marker_active = False
                     elif self._interaction_mode != "pose":
                         self._dragging_marker = clicked_marker
                         self._drag_preview = (clicked_marker.entity_id, clicked_marker.x, clicked_marker.y)
@@ -1449,6 +1461,8 @@ class MechanismCanvas(QtWidgets.QWidget):
             self.update()
             return
         if self._editing_enabled and self._mode == CanvasMode.SELECT and self._dragging_pose_marker is not None:
+            if self._pose_readonly:
+                return
             if not self._dragging_pose_marker_active:
                 start = self._dragging_pose_marker_start
                 if start is None:
@@ -1571,6 +1585,12 @@ class MechanismCanvas(QtWidgets.QWidget):
             self.update()
             return
         if event.button() == QtCore.Qt.MouseButton.LeftButton and self._dragging_pose_marker is not None:
+            if self._pose_readonly:
+                self._dragging_pose_marker = None
+                self._dragging_pose_marker_start = None
+                self._dragging_pose_marker_active = False
+                self._drag_preview = None
+                return
             if self._dragging_pose_marker_active:
                 if self._drag_preview is None:
                     x, y = self._to_world(event.position(), self._current_transform())
