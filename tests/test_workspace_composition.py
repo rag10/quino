@@ -73,18 +73,24 @@ def test_compose_project_override_load_force() -> None:
 
 
 def test_compose_project_study_variable_override() -> None:
+    """Study overrides a driver.law (catalog-tagged 'variable')."""
     app = ApplicationService()
     base = app.new_project("Base")
-    param_id = app.create_parameter("L1", "120 mm", "mm")
+    body_id = app.create_body("B", [MarkerInput("0 mm", "0 mm", "A")])
+    body = app.get_body(body_id)
+    marker_a = next(m.id for m in body.markers if m.name == "A")
+    joint_id = app.connect_marker_to_ground(marker_a, joint_type="revolute", name="J1")
+    driver_id = app.create_driver("Drv", "rotation", joint_id, "10 deg", "deg")
 
     study = Study(
         id="s1",
         name="Study",
-        variable_values={f"parameters/{param_id}": ScalarValue(300.0, "mm")},
+        variable_values={f"drivers/{driver_id}/law": ScalarValue(45.0, "deg")},
     )
 
     composed = compose_project(base, study, None)
-    assert composed.parameters[0].expression == "300 mm"
+    composed_driver = next(d for d in composed.model.drivers if d.id == driver_id)
+    assert "45" in composed_driver.law.expression
 
 
 def test_compose_project_study_overlay_override() -> None:
@@ -104,25 +110,45 @@ def test_compose_project_study_overlay_override() -> None:
     assert composed.parameters[0].expression == "400 mm"
 
 
-def test_compose_project_priority_case_then_study() -> None:
+def test_compose_project_priority_case_then_study_disjoint_paths() -> None:
+    """Case overrides an invariant path; study overrides a variable path.
+
+    Under the current design these are necessarily disjoint (the scope
+    validator rejects cross-overrides). The composition still applies
+    both layers without conflict.
+    """
     app = ApplicationService()
     base = app.new_project("Base")
-    param_id = app.create_parameter("L1", "120 mm", "mm")
-
-    study = Study(
-        id="s1",
-        name="Study",
-        variable_values={f"parameters/{param_id}": ScalarValue(300.0, "mm")},
+    body_id = app.create_bar(
+        "Crank", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B")
     )
+    body = app.get_body(body_id)
+    marker_a = next(m.id for m in body.markers if m.name == "A")
+    joint_id = app.connect_marker_to_ground(marker_a, joint_type="revolute", name="J1")
+    driver_id = app.create_driver("Drv", "rotation", joint_id, "10 deg", "deg")
+    app.update_property(body_id, "mass", _pvi("2 kg"))
+
     case = Case(
         id="c1",
         name="Case1",
-        invariant_values={f"parameters/{param_id}": ScalarValue(200.0, "mm")},
+        invariant_values={f"bodies/{body_id}/mass": ScalarValue(5.0, "kg")},
+    )
+    study = Study(
+        id="s1",
+        name="Study",
+        variable_values={f"drivers/{driver_id}/law": ScalarValue(45.0, "deg")},
     )
 
     composed = compose_project(base, study, case)
-    # Study variable_values has higher priority than case
-    assert composed.parameters[0].expression == "300 mm"
+    composed_body = next(b for b in composed.model.bodies if b.id == body_id)
+    composed_driver = next(d for d in composed.model.drivers if d.id == driver_id)
+    assert "5" in composed_body.mass.expression
+    assert "45" in composed_driver.law.expression
+
+
+def _pvi(expr: str):
+    from quino.domain.inputs import PropertyValueInput
+    return PropertyValueInput(kind="expression", value=expr)
 
 
 def test_compose_project_invalid_path_raises() -> None:
@@ -154,28 +180,7 @@ def test_compose_project_invalid_domain_raises() -> None:
 
 
 def test_apply_parameter_override_block_diagram() -> None:
-    from quino.domain.blocks import BlockDiagram, BlockInstance
-
-    app = ApplicationService()
-    base = app.new_project("Base")
-    base.block_diagram = BlockDiagram(
-        instances={"pid_001": BlockInstance(instance_id="pid_001", block_type="PID", parameters={"kp": 1.0, "ki": 0.1})},
-        connections=[],
-    )
-
-    study = Study(id="s1", name="Study")
-    case = Case(
-        id="c1",
-        name="Case1",
-        invariant_values={"block_diagram/instances/pid_001/parameters/kp": ScalarValue(5.0, "")},
-    )
-
-    composed = compose_project(base, study, case)
-    assert composed.block_diagram.instances["pid_001"].parameters["kp"] == 5.0
-    assert composed.block_diagram.instances["pid_001"].parameters["ki"] == 0.1
-
-
-def test_apply_parameter_override_model_control_graph() -> None:
+    """Study (not case) overrides block_diagram path: blocks are variable."""
     from quino.domain.blocks import BlockDiagram, BlockInstance
 
     app = ApplicationService()
@@ -185,14 +190,35 @@ def test_apply_parameter_override_model_control_graph() -> None:
         connections=[],
     )
 
-    study = Study(id="s1", name="Study")
-    case = Case(
-        id="c1",
-        name="Case1",
-        invariant_values={"model/control_graph/instances/pid_001/parameters/kp": ScalarValue(7.0, "")},
+    study = Study(
+        id="s1",
+        name="Study",
+        variable_values={"block_diagram/instances/pid_001/parameters/kp": ScalarValue(5.0, "")},
     )
 
-    composed = compose_project(base, study, case)
+    composed = compose_project(base, study, None)
+    assert composed.model.control_graph.instances["pid_001"].parameters["kp"] == 5.0
+    assert composed.model.control_graph.instances["pid_001"].parameters["ki"] == 0.1
+
+
+def test_apply_parameter_override_model_control_graph() -> None:
+    """Same as above using the model/control_graph/... legacy path form."""
+    from quino.domain.blocks import BlockDiagram, BlockInstance
+
+    app = ApplicationService()
+    base = app.new_project("Base")
+    base.model.control_graph = BlockDiagram(
+        instances={"pid_001": BlockInstance(instance_id="pid_001", block_type="PID", parameters={"kp": 1.0, "ki": 0.1})},
+        connections=[],
+    )
+
+    study = Study(
+        id="s1",
+        name="Study",
+        variable_values={"model/control_graph/instances/pid_001/parameters/kp": ScalarValue(7.0, "")},
+    )
+
+    composed = compose_project(base, study, None)
     assert composed.model.control_graph is not None
     assert composed.model.control_graph.instances["pid_001"].parameters["kp"] == 7.0
 

@@ -44,8 +44,11 @@ def test_end_to_end_create_case_study_run_and_roundtrip(tmp_path: Path) -> None:
     param_id = app.create_parameter("L1", "120 mm", "mm")
     body_id = app.create_body("Block", [MarkerInput("0 mm", "0 mm", "A")])
 
-    # 2. Create workspace items via API
-    baseline = app.workspace.create_baseline("Reference")
+    # 2. Configure workspace items via API. new_project already created the
+    # default baseline; attach metrics to it (it is the active baseline used
+    # by the runner).
+    ws = app.project.workspace
+    baseline = next(b for b in ws.baselines if b.id == ws.active_baseline_id)
     baseline.metrics = {
         "final_x": MetricDefinition(
             key="final_x", name="Final X", extractor="frames[-1].body_001.x"
@@ -88,7 +91,7 @@ def test_end_to_end_create_case_study_run_and_roundtrip(tmp_path: Path) -> None:
 
     assert restored.workspace is not None
     assert len(restored.workspace.baselines) == 1
-    assert restored.workspace.baselines[0].name == "Reference"
+    assert restored.workspace.baselines[0].name == "E2E"
     assert len(restored.workspace.cases) == 1
     assert restored.workspace.cases[0].invariant_values[f"parameters/{param_id}"].value == 200.0
     assert len(restored.workspace.studies) == 1

@@ -395,7 +395,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self.update()
 
     def _is_sketch_entity(self, entity_id: str) -> bool:
-        project = self.app_service.project
+        project = self._read_project()
         if project is None or project.sketch is None:
             return False
         if any(p.id == entity_id for p in project.sketch.points()):
@@ -407,7 +407,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         return False
 
     def _is_point_fixed(self, point_id: str) -> bool:
-        project = self.app_service.project
+        project = self._read_project()
         if project is None or project.sketch is None:
             return False
         return any(
@@ -695,6 +695,15 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._display_project = project
         self.update()
 
+    def _read_project(self) -> Project | None:
+        """Single source of truth for read-only queries (paint/find/iterate).
+
+        Returns the composed project (case overlays applied) when available,
+        falling back to the baseline project. Edits MUST go through the
+        ApplicationService fachade, not through this read view.
+        """
+        return self._display_project if self._display_project is not None else self.app_service.project
+
     def set_editing_enabled(self, enabled: bool) -> None:
         self._editing_enabled = enabled
         if not enabled:
@@ -740,7 +749,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         """Process a tree-selection as if the user had clicked the entity on the canvas."""
         if not self._editing_enabled:
             return
-        project = self.app_service.project
+        project = self._read_project()
         if project is None:
             return
 
@@ -924,7 +933,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         return QtCore.QPoint(int(round(point.x())), int(round(point.y())))
 
     def screen_position_for_entity(self, entity_id: str) -> QtCore.QPoint | None:
-        project = self.app_service.project
+        project = self._read_project()
         if project is None:
             return None
         sketch_points = self._collect_sketch_points(project)
@@ -1561,7 +1570,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._snap_to_point = False
         # Update DOF info for status bar when in sketch mode
         if self._interaction_mode == "sketch":
-            project = self.app_service.project
+            project = self._read_project()
             if project is not None and project.sketch is not None:
                 dof_result = self.app_service.sketch_solver.analyze_dof(project)
                 self._dof_result = dof_result
@@ -1706,7 +1715,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 travel_min=self._mm_expression(preview["travel_min"]),
                 travel_max=self._mm_expression(preview["travel_max"]),
             )
-            slider_entity = self.app_service.project.model.sliders
+            slider_entity = self._read_project().model.sliders
             slider_name = next((s.name for s in slider_entity if s.id == slider_id), slider_id)
             self.modelChanged.emit(f"Updated slider {slider_name}")
             self.update()
@@ -1811,7 +1820,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             add_marker_action = menu.addAction("Add Marker To Body")
             add_load_action = menu.addAction("Add Load")
             slider_menu = menu.addMenu("Connect To Slider")
-            for slider_item in self.app_service.project.model.sliders:
+            for slider_item in self._read_project().model.sliders:
                 slider_actions[slider_menu.addAction(slider_item.name)] = slider_item.id
             body = self.app_service.get_body(marker.body_id)
             if body is not None:
@@ -2112,7 +2121,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(self, "Sketch action", str(exc))
 
     def _toggle_fix_for_points(self, entity_ids: list[str]) -> None:
-        project = self.app_service.project
+        project = self._read_project()
         if project is None or project.sketch is None:
             return
         point_ids = [entity_id for entity_id in entity_ids if self.app_service.get_sketch_point(entity_id) is not None]
@@ -2537,7 +2546,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         return entities
 
     def _fit_transform(self) -> tuple[float, float, float]:
-        project = self.app_service.project
+        project = self._read_project()
         if project is None:
             return 2.0, 0.0, 0.0
         assembled = self._assembled_mechanism(project)
@@ -2571,7 +2580,7 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def _current_transform(self) -> tuple[float, float, float]:
         if self._view_scale is None:
-            project = self.app_service.project
+            project = self._read_project()
             if (
                 project is not None
                 and (project.view_state.zoom != 1.0 or project.view_state.pan_x != 0.0 or project.view_state.pan_y != 0.0)
@@ -2585,7 +2594,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         return self._view_scale, self._view_center_x, self._view_center_y
 
     def _sync_view_state(self) -> None:
-        project = self.app_service.project
+        project = self._read_project()
         if project is None or self._view_scale is None:
             return
         project.view_state.zoom = self._view_scale
@@ -2762,7 +2771,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         # DOF-based colouring (only when sketch is valid)
         dof_result = None
         if not invalid:
-            project = self.app_service.project
+            project = self._read_project()
             if project is not None and project.sketch is not None:
                 dof_result = self.app_service.sketch_solver.analyze_dof(project)
                 self._dof_result = dof_result
@@ -3424,7 +3433,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         return QtCore.QPointF(x, y)
 
     def _sensor_scope_rect(self, sensor, top_left: QtCore.QPointF, collapsed: bool) -> QtCore.QRectF:
-        rows = 0 if collapsed else len(self._sensor_scope_rows(self.app_service.project, sensor))
+        rows = 0 if collapsed else len(self._sensor_scope_rows(self._read_project(), sensor))
         width = 156.0
         height = 24.0 if collapsed else 30.0 + rows * 12.0 + 6.0
         return QtCore.QRectF(top_left.x(), top_left.y(), width, height)
@@ -4107,7 +4116,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         text = "?"
         if constraint.value is not None:
             try:
-                project = self.app_service.project
+                project = self._read_project()
                 result = self.app_service.expression_service.evaluate_property(
                     constraint.value, project.parameters
                 )
@@ -4151,7 +4160,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         text = "R ?"
         if constraint.value is not None:
             try:
-                project = self.app_service.project
+                project = self._read_project()
                 result = self.app_service.expression_service.evaluate_property(
                     constraint.value, project.parameters
                 )
@@ -4203,7 +4212,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         text = "?"
         if constraint.value is not None:
             try:
-                project = self.app_service.project
+                project = self._read_project()
                 result = self.app_service.expression_service.evaluate_property(
                     constraint.value, project.parameters
                 )
@@ -4236,7 +4245,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         text = "?°"
         if constraint.value is not None:
             try:
-                project = self.app_service.project
+                project = self._read_project()
                 val_rad = self.app_service.expression_service.evaluate_property(
                     constraint.value, project.parameters
                 ).value
@@ -4326,7 +4335,7 @@ class MechanismCanvas(QtWidgets.QWidget):
     ) -> str:
         if clicked_point is not None:
             return clicked_point.entity_id
-        project = self.app_service.project
+        project = self._read_project()
         if project is not None and project.sketch is not None:
             for point in self._collect_sketch_points(project):
                 if math.hypot(point.x - world[0], point.y - world[1]) <= 1e-6:
@@ -4737,7 +4746,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         point_id: str,
         target: tuple[float, float],
     ) -> dict[str, tuple[float, float]]:
-        project = self.app_service.project
+        project = self._read_project()
         if project is None or project.sketch is None:
             return {}
         temp_project = deepcopy(project)
@@ -4797,7 +4806,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         include_model: bool,
         exclude_point_id: str | None = None,
     ) -> tuple[float, float]:
-        project = self.app_service.project
+        project = self._read_project()
         if project is None or project.sketch is None or not project.sketch.visible:
             return world
         candidates: list[SnapCandidate] = []
@@ -5282,13 +5291,14 @@ class MechanismCanvas(QtWidgets.QWidget):
             painter.drawRect(rect)
 
     def _draw_pose_pick_preview(self, painter: QtGui.QPainter, transform) -> None:
-        if self._mode != CanvasMode.POSE_PICK or not self._pose_pick_marker_ids or self.app_service.project is None:
+        proj = self._read_project()
+        if self._mode != CanvasMode.POSE_PICK or not self._pose_pick_marker_ids or proj is None:
             return
         markers = {
             marker.entity_id: marker
             for marker in self._collect_markers(
-                self.app_service.project,
-                self._assembled_mechanism(self.app_service.project),
+                proj,
+                self._assembled_mechanism(proj),
             )
         }
         points = [
@@ -5480,7 +5490,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             return
         if len(self._creation_points) != 2:
             return
-        name = self._next_name("Bar", [body.name for body in self.app_service.project.model.bodies])
+        name = self._next_name("Bar", [body.name for body in self._read_project().model.bodies])
         (x1, y1), (x2, y2) = self._creation_points
         body_id = self.app_service.create_bar(
             name,
@@ -5497,7 +5507,7 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _create_point_mass_at(self, world: tuple[float, float]) -> None:
         if not self._require_editing():
             return
-        name = self._next_name("Mass", [body.name for body in self.app_service.project.model.bodies])
+        name = self._next_name("Mass", [body.name for body in self._read_project().model.bodies])
         x, y = world
         body_id = self.app_service.create_punctual_mass(name, self._mm_expression(x), self._mm_expression(y))
         self.entitySelected.emit(body_id)
@@ -5509,7 +5519,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             return
         if not self._creation_points:
             return
-        name = self._next_name("Body", [body.name for body in self.app_service.project.model.bodies])
+        name = self._next_name("Body", [body.name for body in self._read_project().model.bodies])
         markers = [
             MarkerInput(self._mm_expression(x), self._mm_expression(y), chr(ord("A") + index))
             for index, (x, y) in enumerate(self._creation_points)
@@ -5527,7 +5537,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             return
         if len(self._creation_points) != 2:
             return
-        name = self._next_name("Slider", [slider.name for slider in self.app_service.project.model.sliders])
+        name = self._next_name("Slider", [slider.name for slider in self._read_project().model.sliders])
         (x1, y1), (x2, y2) = self._creation_points
         slider_id = self.app_service.create_slider_from_points(
             name,
@@ -5555,7 +5565,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         name, joint_type = details
         marker = self._slider_creation_marker
         (_, _), (x2, y2) = self._creation_points
-        slider_name = self._next_name("Slider", [slider.name for slider in self.app_service.project.model.sliders])
+        slider_name = self._next_name("Slider", [slider.name for slider in self._read_project().model.sliders])
         slider_id = self.app_service.create_slider_from_points(
             slider_name,
             self._mm_expression(2.0 * marker.x - x2),
@@ -5595,7 +5605,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._pending_joint_creation = None
             return
         new_body = next(
-            (b for b in self.app_service.project.model.bodies if b.id == new_body_id), None
+            (b for b in self._read_project().model.bodies if b.id == new_body_id), None
         )
         if not new_body:
             self._pending_joint_creation = None
@@ -5704,7 +5714,7 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _create_free_ground_at(self, world: tuple[float, float]) -> None:
         if not self._require_editing():
             return
-        name = self._next_name("Ground", [body.name for body in self.app_service.project.model.bodies])
+        name = self._next_name("Ground", [body.name for body in self._read_project().model.bodies])
         body_id, _marker_id = self.app_service.create_ground_anchor(name, self._mm_expression(world[0]), self._mm_expression(world[1]))
         self.entitySelected.emit(body_id)
         self.modelChanged.emit(f"Created {name}")
@@ -5746,7 +5756,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 return
 
         spring_type_str, default_prefix = self._SPRING_TYPE_NAMES[self._mode]
-        existing_names = [s.name for s in self.app_service.project.model.springs]
+        existing_names = [s.name for s in self._read_project().model.springs]
         name = self._next_name(default_prefix, existing_names)
 
         def _make_ep(marker: "CanvasMarker | None", world_pos: "tuple[float, float]") -> SpringEndpoint:
@@ -5782,7 +5792,7 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def _create_ground_anchor(self, world_pos: tuple[float, float]) -> "SpringEndpoint | None":
         """Create a PointMass body + rigid ground joint at world_pos; return a MARKER SpringEndpoint for it."""
-        project = self.app_service.project
+        project = self._read_project()
         if project is None:
             return None
         existing_body_names = [b.name for b in project.model.bodies]
@@ -5801,7 +5811,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             return
         if joint_id is None:
             return
-        project = self.app_service.project
+        project = self._read_project()
         if project is None:
             return
         joint = next((j for j in project.model.joints if j.id == joint_id), None)
@@ -5940,7 +5950,7 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _request_joint_name(self) -> str | None:
         if not self._require_editing():
             return None
-        default_name = self._next_name("Joint", [joint.name for joint in self.app_service.project.model.joints])
+        default_name = self._next_name("Joint", [joint.name for joint in self._read_project().model.joints])
         title = "Create Rigid Joint" if self._mode == CanvasMode.CREATE_RIGID else "Create Revolute Joint"
         name, accepted = QtWidgets.QInputDialog.getText(self, title, "Joint name:", text=default_name)
         if not accepted or not name.strip():
@@ -5957,7 +5967,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         )
         layout.addRow(message)
         joint_name = QtWidgets.QLineEdit(
-            self._next_name("Joint", [joint.name for joint in self.app_service.project.model.joints])
+            self._next_name("Joint", [joint.name for joint in self._read_project().model.joints])
         )
         type_combo = QtWidgets.QComboBox()
         type_combo.addItems(["revolute", "rigid"])
@@ -6002,7 +6012,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         dialog = QtWidgets.QDialog(self)
         dialog.setWindowTitle("Create Joint")
         layout = QtWidgets.QFormLayout(dialog)
-        name_edit = QtWidgets.QLineEdit(self._next_name(prefix, [joint.name for joint in self.app_service.project.model.joints]))
+        name_edit = QtWidgets.QLineEdit(self._next_name(prefix, [joint.name for joint in self._read_project().model.joints]))
         type_combo = QtWidgets.QComboBox()
         type_combo.addItems(["revolute", "rigid"])
         layout.addRow("Name", name_edit)
@@ -6169,7 +6179,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         slider = self.app_service.get_entity(slider_id)
         if not isinstance(slider, Slider):
             raise ValueError("Unknown slider for preview")
-        project = self.app_service.project
+        project = self._read_project()
         origin_x = self.app_service.expression_service.evaluate_property(slider.origin_x, project.parameters).value
         origin_y = self.app_service.expression_service.evaluate_property(slider.origin_y, project.parameters).value
         angle = self.app_service.expression_service.evaluate_property(slider.angle, project.parameters).value
@@ -6258,7 +6268,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             return
         default_name = self._next_name(
             "RotationDriver" if driver_type == "rotation" else "TranslationDriver",
-            [driver.name for driver in self.app_service.project.model.drivers],
+            [driver.name for driver in self._read_project().model.drivers],
         )
         name, accepted = QtWidgets.QInputDialog.getText(
             self,
@@ -6323,7 +6333,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             return
         default_name = self._next_name(
             "Load",
-            [load.name for load in self.app_service.project.model.loads],
+            [load.name for load in self._read_project().model.loads],
         )
         dialog = QtWidgets.QDialog(self)
         dialog.setWindowTitle("Add Load")
@@ -6369,7 +6379,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         }
         default_name = self._next_name(
             type_labels.get(sensor_type, "Sensor"),
-            [sensor.name for sensor in self.app_service.project.model.sensors],
+            [sensor.name for sensor in self._read_project().model.sensors],
         )
         name, accepted = QtWidgets.QInputDialog.getText(
             self,
