@@ -210,7 +210,7 @@ class MainWindow(QtWidgets.QMainWindow):
         playback_layout.setContentsMargins(6, 6, 6, 6)
         playback_layout.setSpacing(6)
 
-        playback_group = QtWidgets.QGroupBox("Simulation")
+        playback_group = QtWidgets.QGroupBox("Analysis")
         playback_group.setFlat(True)
         playback_group_layout = QtWidgets.QVBoxLayout(playback_group)
         playback_group_layout.setContentsMargins(0, 0, 0, 0)
@@ -1418,8 +1418,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 icon = QtWidgets.QMessageBox.Icon.Warning
             message_box = QtWidgets.QMessageBox(self)
             message_box.setIcon(icon)
-            message_box.setWindowTitle("Simulation Error")
-            message_box.setText(f"Simulation failed:\n\n{result.error}{detail}")
+            message_box.setWindowTitle("Analysis Error")
+            message_box.setText(f"Analysis failed:\n\n{result.error}{detail}")
             message_box.setStandardButtons(QtWidgets.QMessageBox.StandardButton.Ok)
             message_box.exec()
 
