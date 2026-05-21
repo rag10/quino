@@ -41,7 +41,7 @@ from quino.domain.model import (
 )
 from quino.gui.canvas import CanvasMode, MechanismCanvas
 
-from quino.gui.panels.poses_panel import PosesPanel
+from quino.gui.panels.pose_constraints_strip import PoseConstraintsStrip
 from quino.gui.panels.workflow_tree_panel import WorkflowTreePanel
 from quino.pose.geometry import assembled_reference_mechanism, marker_world_position, pose_to_state_overlay
 from quino.pose.kinematics import _pose_at_angle, build_drag_initial_pose, get_drag_driver, has_ground_revolute
@@ -371,14 +371,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._right_panel_tabs = right_panel
 
-        # Poses panel is kept as attribute for backward compatibility / tests,
-        # but no longer shown in the right-side tab widget.
-        self.poses_panel = PosesPanel(self.app_service)
-        self.poses_panel.current_pose_changed.connect(self._on_poses_panel_current_changed)
-        self.poses_panel.simulation_pose_changed.connect(self._on_poses_panel_sim_initial_changed)
-        self.poses_panel.poses_mutated.connect(self._on_poses_panel_mutated)
-        self.poses_panel.pose_constraint_selected.connect(self._on_pose_constraint_selected)
-        self.poses_panel.pose_constraint_delete_requested.connect(self._delete_pose_constraint)
+        # PoseConstraintsStrip: shown only in pose mode as a compact side strip.
+        self.pose_constraints_strip = PoseConstraintsStrip(self.app_service)
+        self.pose_constraints_strip.setVisible(False)
+        self.pose_constraints_strip.constraint_selected.connect(self._on_pose_constraint_selected)
+        self.pose_constraints_strip.constraint_delete_requested.connect(self._delete_pose_constraint)
+        splitter.addWidget(self.pose_constraints_strip)
 
         splitter.setSizes([280, 720, 440])
         self.tree.setMinimumWidth(200)
@@ -1022,8 +1020,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._set_block_editor_visible(False)
             self._ensure_pose_session()
             self._load_pose_constraints_from_current_pose()
-            if hasattr(self, "poses_panel"):
-                self.poses_panel.refresh()
+            self.pose_constraints_strip.setVisible(True)
+            self.pose_constraints_strip.refresh()
             self.refresh_all()
         elif mode == "analysis":
             self._mode_sketch_btn.setChecked(False)
@@ -1065,6 +1063,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self.canvas.set_pose_readonly(False)
             self.refresh_all()
 
+        # Sync pose_constraints_strip visibility (visible only in pose mode)
+        if mode != "pose":
+            self.pose_constraints_strip.setVisible(False)
+
         # Force select mode when switching
         self.action_select_tool.setChecked(True)
         self.canvas.set_mode(CanvasMode.SELECT)
@@ -1084,8 +1086,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._apply_case_delta_highlights()
         self._populate_parameters(project)
         self._populate_inspector()
-        if hasattr(self, "poses_panel"):
-            self.poses_panel.refresh()
+        if hasattr(self, "pose_constraints_strip") and self._app_mode == "pose":
+            self.pose_constraints_strip.refresh()
         if hasattr(self, "workflow_panel"):
             self.workflow_panel.refresh()
         self.action_toggle_sketch_visible.setChecked(project.sketch.visible if project.sketch is not None else False)
@@ -2436,8 +2438,8 @@ class MainWindow(QtWidgets.QMainWindow):
         ]
         self.canvas.set_pose_constraints(self._pose_constraints.values())
         self._mark_project_dirty()
-        if hasattr(self, "poses_panel"):
-            self.poses_panel.refresh()
+        if hasattr(self, "pose_constraints_strip"):
+            self.pose_constraints_strip.refresh()
 
     def _load_pose_constraints_from_current_pose(self) -> None:
         pose = self.app_service.get_current_pose()

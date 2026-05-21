@@ -898,19 +898,18 @@ def test_pose_prescribe_is_listed_under_current_pose_and_can_be_deleted(monkeypa
     window.canvas.poseMarkerPicked.emit(marker_p)
     qt_app.processEvents()
 
-    root = window.poses_panel._list.topLevelItem(0)
-    assert root is not None
-    assert root.childCount() == 1
-    child = root.child(0)
-    assert "Prescribe X" in child.text(0)
+    strip = window.pose_constraints_strip
+    assert strip._list.count() == 1
+    item = strip._list.item(0)
+    assert "Prescribe X" in item.text()
     assert window.app_service.get_current_pose().metadata.values["pose_constraints"]
     assert window.canvas._pose_constraints
 
-    window.poses_panel._list.setCurrentItem(child)
-    window.poses_panel._on_delete()
+    strip._list.setCurrentItem(item)
+    strip._on_delete_clicked()
     qt_app.processEvents()
 
-    assert window.poses_panel._list.topLevelItem(0).childCount() == 0
+    assert strip._list.count() == 0
     assert window._pose_constraints == {}
     assert window.app_service.get_current_pose().metadata.values["pose_constraints"] == []
     assert window.canvas._pose_constraints == []
@@ -2653,3 +2652,26 @@ def test_model_tree_has_blocks_section(qtbot):
             found_blocks_section = True
             break
     assert found_blocks_section
+
+
+def test_pose_constraints_strip_visible_only_in_pose_mode(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.main_window import MainWindow
+    app = ApplicationService()
+    app.new_project("test")
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window.show()
+    QtWidgets.QApplication.processEvents()
+    # In initial (model) mode, strip should be hidden
+    assert window.pose_constraints_strip.isVisible() is False
+    # In pose mode, strip should be visible
+    window._set_app_mode("pose")
+    QtWidgets.QApplication.processEvents()
+    assert window.pose_constraints_strip.isVisible() is True
+    # Back to model mode — hidden again
+    window._set_app_mode("model")
+    QtWidgets.QApplication.processEvents()
+    assert window.pose_constraints_strip.isVisible() is False
