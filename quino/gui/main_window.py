@@ -165,6 +165,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.workflow_panel.run_analysis_requested.connect(self._on_run_analysis_requested)
         self.workflow_panel.pose_selected.connect(self._on_workflow_pose_selected)
         self.workflow_panel.analysis_selected.connect(self._on_analysis_selected)
+        self.workflow_panel.selection_changed.connect(self._on_workflow_selection_changed)
         self.left_column.addWidget(self.workflow_panel)
         self.left_column.addWidget(self.tree)
         self.left_column.setSizes([180, 180])
@@ -1060,6 +1061,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._center_stack.setCurrentIndex(0)
             if self._has_simulation_frames():
                 self._rewind_simulation_to_start()
+            self.canvas.set_pose_readonly(False)
             self.refresh_all()
 
         # Force select mode when switching
@@ -1225,6 +1227,52 @@ class MainWindow(QtWidgets.QMainWindow):
         # Non-default pose -> enter pose mode
         self.app_service.set_selected_pose(pose_id)
         self._set_app_mode("pose")
+
+    def _on_workflow_selection_changed(self, kind: str, obj_id: str) -> None:
+        ws = self.app_service.project.workspace if self.app_service.project else None
+        if ws is None:
+            return
+        if kind == "baseline":
+            ws.active_baseline_id = obj_id
+            ws.active_case_id = None
+            self._set_app_mode("model")
+        elif kind == "case":
+            case = next((c for c in ws.cases if c.id == obj_id), None)
+            if case is None:
+                return
+            ws.active_baseline_id = case.baseline_id
+            ws.active_case_id = obj_id
+            self._set_app_mode("model")
+        elif kind == "pose":
+            pose = next((p for p in ws.poses if p.id == obj_id), None)
+            if pose is None:
+                return
+            if pose.case_id is not None:
+                case = next((c for c in ws.cases if c.id == pose.case_id), None)
+                if case is not None:
+                    ws.active_baseline_id = case.baseline_id
+                    ws.active_case_id = case.id
+            elif pose.baseline_id is not None:
+                ws.active_baseline_id = pose.baseline_id
+                ws.active_case_id = None
+            ws.selected_pose_id = obj_id
+            self.canvas.set_pose_readonly(pose.is_default)
+            self._set_app_mode("pose")
+        elif kind == "analysis":
+            analysis = next((a for a in ws.analyses if a.id == obj_id), None)
+            if analysis is None:
+                return
+            if analysis.case_id is not None:
+                case = next((c for c in ws.cases if c.id == analysis.case_id), None)
+                if case is not None:
+                    ws.active_baseline_id = case.baseline_id
+                    ws.active_case_id = case.id
+            elif analysis.baseline_id is not None:
+                ws.active_baseline_id = analysis.baseline_id
+                ws.active_case_id = None
+            ws.selected_analysis_id = obj_id
+            self._set_app_mode("analysis")
+        self.refresh_all()
 
     def _update_window_title(self) -> None:
         project = self.app_service.project

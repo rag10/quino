@@ -2485,3 +2485,25 @@ def test_workflow_tree_emits_selection_changed_on_single_click(qtbot) -> None:
     panel._tree.setCurrentItem(item)
 
     assert ("baseline", "b") in received
+
+
+def test_workflow_single_click_on_case_enters_model_mode(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.main_window import MainWindow
+    from quino.domain.workspace import Workspace, Baseline, Case
+    app = ApplicationService()
+    app.new_project("test")
+    app.project.workspace = Workspace(
+        baselines=[Baseline(id="b", name="base")],
+        cases=[Case(id="c", name="C1", baseline_id="b")],
+        active_baseline_id="b",
+    )
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window.workflow_panel.refresh()
+    item = window.workflow_panel._item_map["c"]
+    window.workflow_panel._tree.setCurrentItem(item)
+    assert window._app_mode == "model"
+    assert app.project.workspace.active_case_id == "c"
