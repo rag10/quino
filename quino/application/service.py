@@ -65,6 +65,7 @@ class ApplicationService:
         self._undo_stack: list[Project] = []
         self._redo_stack: list[Project] = []
         self._in_operation = False
+        self._structural_case_warning_acknowledged: bool = False
         self.sketch_solver = SketchSolver(
             self.expression_service,
             self.unit_service,
@@ -140,6 +141,7 @@ class ApplicationService:
         self._undo_stack.clear()
         self._redo_stack.clear()
         self.poses.clear_current()
+        self._structural_case_warning_acknowledged = False
         return self.project
 
     def load_project(self, path: str) -> Project:
@@ -148,6 +150,7 @@ class ApplicationService:
         self._undo_stack.clear()
         self._redo_stack.clear()
         self.poses.clear_current()
+        self._structural_case_warning_acknowledged = False
         self._sync_all_special_com_markers()
         if self.project is not None and self.project.sketch is not None:
             self.project.sketch.solve_error = None
@@ -164,6 +167,13 @@ class ApplicationService:
             self.workspace.create_baseline(self.project.name)
         elif ws.active_baseline_id is None:
             ws.active_baseline_id = ws.baselines[0].id
+
+    @property
+    def structural_case_warning_acknowledged(self) -> bool:
+        return self._structural_case_warning_acknowledged
+
+    def acknowledge_structural_case_warning(self) -> None:
+        self._structural_case_warning_acknowledged = True
 
     def save_project(self, path: str) -> None:
         project = self._require_project()

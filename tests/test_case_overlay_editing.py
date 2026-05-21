@@ -84,3 +84,24 @@ def test_display_project_reflects_overlay(svc_with_case):
     dp = svc.display_project
     composed_body = next(b for b in dp.model.bodies if b.id == body.id)
     assert "9" in (composed_body.mass.expression or "")
+
+
+def test_structural_case_warning_flag_starts_false():
+    svc = ApplicationService()
+    svc.new_project("test")
+    assert svc.structural_case_warning_acknowledged is False
+
+
+def test_structural_case_warning_can_be_acknowledged():
+    svc = ApplicationService()
+    svc.new_project("test")
+    svc.acknowledge_structural_case_warning()
+    assert svc.structural_case_warning_acknowledged is True
+
+
+def test_new_project_resets_structural_warning():
+    svc = ApplicationService()
+    svc.new_project("test")
+    svc.acknowledge_structural_case_warning()
+    svc.new_project("second")
+    assert svc.structural_case_warning_acknowledged is False
