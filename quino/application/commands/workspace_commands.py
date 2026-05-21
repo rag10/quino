@@ -364,18 +364,32 @@ class WorkspaceCommands:
         ws.selected_pose_id = pose_id
         # Sync the project-level current_pose so the canvas displays the
         # geometry of the chosen WorkspacePose. Default poses (no project
-        # backing) are left as-is — the resolver handles them.
+        # backing) clear the current pose so the canvas falls back to the
+        # composed-project geometry.
         if pose_id is None:
-            return
-        pose = next((p for p in ws.poses if p.id == pose_id), None)
-        if pose is None or pose.project_pose_id is None:
-            return
-        project = self._ctx.project_provider()
-        if project is not None and any(p.id == pose.project_pose_id for p in project.poses):
             try:
-                self._ctx.set_current_pose_id(pose.project_pose_id)
+                self._ctx.set_current_pose_id(None)
             except Exception:
                 pass
+            return
+        pose = next((p for p in ws.poses if p.id == pose_id), None)
+        if pose is None:
+            return
+        project = self._ctx.project_provider()
+        if pose.project_pose_id is None or project is None or not any(
+            p.id == pose.project_pose_id for p in project.poses
+        ):
+            # Default poses (or stale references) — clear current_pose so
+            # the read-only canvas shows the underlying composed model.
+            try:
+                self._ctx.set_current_pose_id(None)
+            except Exception:
+                pass
+            return
+        try:
+            self._ctx.set_current_pose_id(pose.project_pose_id)
+        except Exception:
+            pass
 
     def set_selected_analysis(self, analysis_id: str | None) -> None:
         self._ctx.snapshot()

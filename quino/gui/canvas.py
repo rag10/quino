@@ -1111,32 +1111,49 @@ class MechanismCanvas(QtWidgets.QWidget):
             painter.fillRect(self.rect(), QtGui.QColor(180, 180, 180, 45))
 
     def _draw_active_case_badge(self, painter: QtGui.QPainter) -> None:
-        """Top-left badge showing the active case name (if any), so the user
-        always knows whether they're editing the baseline or a case overlay."""
+        """Top-left stack of badges showing the active context.
+
+        - ``Case: <name>`` when a case is the working scope.
+        - ``Pose: <name>`` when a workspace pose is selected (i.e. pose mode).
+        Badges stack vertically with a small gap so they don't overlap.
+        """
         project = self.app_service.project
         if project is None or project.workspace is None:
             return
         ws = project.workspace
-        if ws.active_case_id is None:
-            return
-        case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
-        if case is None:
+        badges: list[tuple[str, str]] = []  # (text, color)
+        if ws.active_case_id is not None:
+            case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
+            if case is not None:
+                badges.append((f"Case: {case.name}", "#2255aa"))
+        if self._interaction_mode == "pose" and ws.selected_pose_id:
+            wp = next((p for p in ws.poses if p.id == ws.selected_pose_id), None)
+            if wp is not None:
+                tag = " [default]" if wp.is_default else ""
+                badges.append((f"Pose: {wp.name}{tag}", "#c75b12"))
+        if not badges:
             return
         painter.save()
         font = painter.font()
         font.setPointSize(9)
         font.setBold(True)
         painter.setFont(font)
-        text = f"Case: {case.name}"
         metrics = painter.fontMetrics()
-        text_rect = metrics.boundingRect(text)
         pad = 6
-        rect = QtCore.QRectF(8, 8, text_rect.width() + pad * 2, text_rect.height() + pad)
-        painter.setPen(QtGui.QPen(QtGui.QColor("#2255aa"), 1.0))
-        painter.setBrush(QtGui.QBrush(QtGui.QColor(34, 85, 170, 30)))
-        painter.drawRoundedRect(rect, 4, 4)
-        painter.setPen(QtGui.QPen(QtGui.QColor("#2255aa")))
-        painter.drawText(rect, QtCore.Qt.AlignmentFlag.AlignCenter, text)
+        x = 8
+        y = 8
+        for text, color_hex in badges:
+            text_rect = metrics.boundingRect(text)
+            rect = QtCore.QRectF(x, y, text_rect.width() + pad * 2, text_rect.height() + pad)
+            color = QtGui.QColor(color_hex)
+            painter.setPen(QtGui.QPen(color, 1.0))
+            translucent = QtGui.QColor(color)
+            translucent.setAlpha(30)
+            painter.setBrush(QtGui.QBrush(translucent))
+            painter.drawRoundedRect(rect, 4, 4)
+            painter.setPen(QtGui.QPen(color))
+            painter.drawText(rect, QtCore.Qt.AlignmentFlag.AlignCenter, text)
+            y += rect.height() + 4
         painter.restore()
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # pragma: no cover - UI behavior

@@ -112,7 +112,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _build_ui(self) -> None:
         self._app_mode = "model"
         self._build_actions()
-        self._mode_selector_widget = self._build_mode_selector()
+        self._mode_selector_widget = self._build_mode_indicator()
         self._build_menu()
         self._build_common_toolbar()
         self._build_sketch_toolbar()
@@ -202,8 +202,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._mode_selector_widget.setParent(self._center_stack)
         self._mode_selector_widget.adjustSize()
         self._mode_selector_widget.setFixedSize(self._mode_selector_widget.sizeHint())
-        self._mode_selector_widget.move(12, 12)
         self._mode_selector_widget.raise_()
+        # Anchor the indicator to the top-right; reposition on resize.
+        self._center_stack.installEventFilter(self)
+        self._position_mode_indicator()
 
         center_panel.addWidget(self._center_stack)
 
@@ -774,63 +776,76 @@ class MainWindow(QtWidgets.QMainWindow):
         wa.setDefaultWidget(sep)
         toolbar.addAction(wa)
 
-    def _build_mode_selector(self) -> QtWidgets.QWidget:
-        """Create a pill-style mode selector (Sketch / Model / Pose / Sim)."""
+    def _position_mode_indicator(self) -> None:
+        """Anchor the mode indicator pill to the top-right of the central
+        canvas stack."""
+        if not hasattr(self, "_mode_selector_widget") or not hasattr(self, "_center_stack"):
+            return
+        pad = 12
+        cw = self._center_stack.width()
+        w = self._mode_selector_widget.width()
+        self._mode_selector_widget.move(max(pad, cw - w - pad), pad)
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj is getattr(self, "_center_stack", None) and event.type() == QtCore.QEvent.Type.Resize:
+            self._position_mode_indicator()
+        return super().eventFilter(obj, event)
+
+    def _build_mode_indicator(self) -> QtWidgets.QWidget:
+        """Top-right pill showing the active mode.
+
+        Model↔Sketch is the only user-changeable pair (the modes that
+        belong to the same canvas). Pose and Analysis are entered by
+        selecting a pose/analysis in the workflow tree; we present them
+        as read-only indicators that light up when active.
+        """
         container = QtWidgets.QWidget()
-        container.setObjectName("modeSelectorOverlay")
+        container.setObjectName("modeIndicatorOverlay")
         layout = QtWidgets.QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         container.setStyleSheet(
-            "QWidget#modeSelectorOverlay {"
-            " background: transparent;"
-            " border: none;"
-            "}"
+            "QWidget#modeIndicatorOverlay { background: transparent; border: none; }"
         )
 
-        self._mode_sketch_btn = QtWidgets.QToolButton()
-        self._mode_sketch_btn.setText("Sketch")
-        self._mode_sketch_btn.setCheckable(True)
-        self._mode_sketch_btn.setFixedSize(70, 32)
-        self._mode_sketch_btn.setStyleSheet(
-            "QToolButton { border: 1px solid #ccc; border-top-left-radius: 14px; border-bottom-left-radius: 14px; background: #f0f0f0; color: #666; font-weight: bold; font-size: 11px; }"
-            "QToolButton:checked { background: #31556f; color: white; border-color: #31556f; }"
-            "QToolButton:hover:!checked { background: #e0e0e0; }"
-        )
+        def _pill(text: str, role: str, *, position: str) -> QtWidgets.QToolButton:
+            btn = QtWidgets.QToolButton()
+            btn.setText(text)
+            btn.setCheckable(True)
+            btn.setFixedSize(70, 28)
+            radii = {
+                "left": "border-top-left-radius: 14px; border-bottom-left-radius: 14px;",
+                "right": "border-top-right-radius: 14px; border-bottom-right-radius: 14px;",
+                "middle": "",
+            }[position]
+            btn.setStyleSheet(
+                "QToolButton { border: 1px solid #ccc; %s background: #f0f0f0;"
+                " color: #666; font-weight: bold; font-size: 11px; }"
+                "QToolButton:checked { background: #31556f; color: white; border-color: #31556f; }"
+                "QToolButton:disabled { background: #f6f6f6; color: #aaa; }"
+                % radii
+            )
+            btn.setProperty("mode_role", role)
+            return btn
+
+        self._mode_sketch_btn = _pill("Sketch", "sketch", position="left")
+        self._mode_model_btn = _pill("Model", "model", position="middle")
+        self._mode_pose_btn = _pill("Pose", "pose", position="middle")
+        self._mode_analysis_btn = _pill("Analysis", "analysis", position="right")
+
+        # Model/Sketch are interactive (user toggles); Pose/Analysis are
+        # informational only — they reflect what was selected in the tree.
         self._mode_sketch_btn.clicked.connect(lambda: self._set_app_mode("sketch"))
-
-        self._mode_model_btn = QtWidgets.QToolButton()
-        self._mode_model_btn.setText("Model")
-        self._mode_model_btn.setCheckable(True)
-        self._mode_model_btn.setFixedSize(70, 32)
-        self._mode_model_btn.setStyleSheet(
-            "QToolButton { border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; border-left: none; border-right: none; background: #f0f0f0; color: #666; font-weight: bold; font-size: 11px; }"
-            "QToolButton:checked { background: #31556f; color: white; border-color: #31556f; }"
-            "QToolButton:hover:!checked { background: #e0e0e0; }"
-        )
         self._mode_model_btn.clicked.connect(lambda: self._set_app_mode("model"))
-
-        self._mode_pose_btn = QtWidgets.QToolButton()
-        self._mode_pose_btn.setText("Pose")
-        self._mode_pose_btn.setCheckable(True)
-        self._mode_pose_btn.setFixedSize(70, 32)
-        self._mode_pose_btn.setStyleSheet(
-            "QToolButton { border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; border-left: none; border-right: none; background: #f0f0f0; color: #666; font-weight: bold; font-size: 11px; }"
-            "QToolButton:checked { background: #31556f; color: white; border-color: #31556f; }"
-            "QToolButton:hover:!checked { background: #e0e0e0; }"
-        )
-        self._mode_pose_btn.clicked.connect(lambda: self._set_app_mode("pose"))
-
-        self._mode_analysis_btn = QtWidgets.QToolButton()
-        self._mode_analysis_btn.setText("Analysis")
-        self._mode_analysis_btn.setCheckable(True)
-        self._mode_analysis_btn.setFixedSize(70, 32)
-        self._mode_analysis_btn.setStyleSheet(
-            "QToolButton { border: 1px solid #ccc; border-top-right-radius: 14px; border-bottom-right-radius: 14px; background: #f0f0f0; color: #666; font-weight: bold; font-size: 11px; }"
-            "QToolButton:checked { background: #31556f; color: white; border-color: #31556f; }"
-            "QToolButton:hover:!checked { background: #e0e0e0; }"
-        )
-        self._mode_analysis_btn.clicked.connect(lambda: self._set_app_mode("analysis"))
+        self._mode_pose_btn.setEnabled(False)
+        self._mode_analysis_btn.setEnabled(False)
+        # Make the disabled buttons still readable when checked.
+        for btn in (self._mode_pose_btn, self._mode_analysis_btn):
+            btn.setStyleSheet(
+                btn.styleSheet()
+                + "QToolButton:checked:disabled { background: #31556f; color: white;"
+                " border-color: #31556f; }"
+            )
 
         layout.addWidget(self._mode_sketch_btn)
         layout.addWidget(self._mode_model_btn)
@@ -1143,6 +1158,16 @@ class MainWindow(QtWidgets.QMainWindow):
         project = self.app_service.project
         if project is None:
             return
+        # If the active selection is a default WorkspacePose, do NOT create a
+        # backing project Pose: the canvas should simply render the composed
+        # geometry of the current scope as a read-only snapshot.
+        ws = project.workspace
+        if ws is not None and ws.selected_pose_id is not None:
+            wp = next((p for p in ws.poses if p.id == ws.selected_pose_id), None)
+            if wp is not None and wp.is_default:
+                self._pose_constraints.clear()
+                self.canvas.set_pose_constraints([])
+                return
         if self.app_service.get_current_pose() is not None:
             if not self._pose_constraints:
                 self._load_pose_constraints_from_current_pose()
@@ -1232,12 +1257,10 @@ class MainWindow(QtWidgets.QMainWindow):
         pose = next((p for p in ws.poses if p.id == pose_id), None)
         if pose is None:
             return
-        if pose.is_default:
-            # Default pose is read-only; just select it for future analysis creation
-            self.app_service.set_selected_pose(pose_id)
-            return
-        # Non-default pose -> enter pose mode
+        # Default poses show the model geometry in a read-only viewport,
+        # non-default poses enter the editable pose mode.
         self.app_service.set_selected_pose(pose_id)
+        self.canvas.set_pose_readonly(pose.is_default)
         self._set_app_mode("pose")
 
     def _on_workflow_selection_changed(self, kind: str, obj_id: str) -> None:
@@ -5380,11 +5403,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_status_message()
 
     def _update_mode_button_enable_rules(self) -> None:
-        ws = self.app_service.project.workspace if self.app_service.project else None
-        has_pose = ws is not None and ws.selected_pose_id is not None
-        has_analysis = ws is not None and ws.selected_analysis_id is not None
-        self._mode_pose_btn.setEnabled(has_pose)
-        self._mode_analysis_btn.setEnabled(has_analysis)
+        """Pose/Analysis indicators are always disabled (informational).
+        Model/Sketch stay enabled so the user can flip between the two
+        canvases that share the geometry. We keep the hook for callers
+        and use it to re-anchor the indicator pill in case the central
+        widget resized while no resize event was forwarded."""
+        self._position_mode_indicator()
 
     def _update_status_message(self) -> None:
         mode = self.canvas.mode()

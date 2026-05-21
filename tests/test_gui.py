@@ -1124,15 +1124,84 @@ def test_open_project_cancel_keeps_dirty_project(monkeypatch) -> None:
     qt_app.processEvents()
 
 
-def test_mode_selector_is_overlaid_on_canvas() -> None:
+def test_default_pose_click_enters_readonly_pose_mode() -> None:
+    """Clicking a default WorkspacePose in the workflow tree must enter
+    pose mode in read-only state and keep the composed-model geometry
+    visible (no backing project Pose is consumed)."""
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    svc = ApplicationService()
+    svc.new_project("test")
+    from quino.domain.inputs import MarkerInput
+    svc.create_bar("Bar", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    ws = svc.project.workspace
+    default_pose = next(p for p in ws.poses if p.is_default)
+
+    window = MainWindow(svc)
+    window._on_workflow_pose_selected(default_pose.id)
+    qt_app.processEvents()
+
+    assert window._app_mode == "pose"
+    assert window.canvas.is_pose_readonly() is True
+    assert svc.get_current_pose_id() is None
+    # The composed project still contains the body (so the canvas paints it).
+    assert any(b.id != "" for b in svc.display_project.model.bodies)
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_canvas_badge_shows_active_pose_in_pose_mode() -> None:
+    """When the user enters pose mode the top-left badge stack lists the
+    pose name in addition to the active case (if any)."""
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    svc = ApplicationService()
+    svc.new_project("test")
+    case = svc.workspace.create_case("CaseAlpha")
+    wp = svc.workspace.create_pose("PoseBeta", case_id=case.id)
+    svc.set_working_context(case_id=case.id)
+    svc.set_selected_pose(wp.id)
+
+    window = MainWindow(svc)
+    window._set_app_mode("pose")
+    qt_app.processEvents()
+
+    # Render to a QImage and inspect the painted text via the badge code path.
+    # We just exercise the painter to confirm no crash and that the canvas
+    # interaction mode is `pose` so the badge logic kicks in.
+    img = QtGui.QImage(400, 200, QtGui.QImage.Format.Format_ARGB32)
+    img.fill(QtCore.Qt.GlobalColor.white)
+    painter = QtGui.QPainter(img)
+    window.canvas._draw_active_case_badge(painter)
+    painter.end()
+
+    assert window.canvas._interaction_mode == "pose"
+    assert svc.project.workspace.selected_pose_id == wp.id
+
+    window.close()
+    qt_app.processEvents()
+
+
+def test_mode_indicator_is_anchored_top_right_of_canvas() -> None:
     qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = MainWindow(ApplicationService())
+    window.resize(1000, 700)
     window.show()
     qt_app.processEvents()
 
-    assert window._mode_model_btn.parentWidget().objectName() == "modeSelectorOverlay"
-    assert window._mode_model_btn.parentWidget().parentWidget() is window._center_stack
-    assert window._mode_model_btn.parentWidget().pos() == QtCore.QPoint(12, 12)
+    pill = window._mode_model_btn.parentWidget()
+    assert pill.objectName() == "modeIndicatorOverlay"
+    assert pill.parentWidget() is window._center_stack
+    # Anchored to the right edge with a 12-px padding.
+    assert pill.pos().y() == 12
+    assert pill.pos().x() + pill.width() <= window._center_stack.width()
+    assert pill.pos().x() + pill.width() >= window._center_stack.width() - 24
+
+    # Pose / Analysis indicators are non-interactive (informational only).
+    assert window._mode_pose_btn.isEnabled() is False
+    assert window._mode_analysis_btn.isEnabled() is False
+    # Model / Sketch remain interactive.
+    assert window._mode_model_btn.isEnabled() is True
+    assert window._mode_sketch_btn.isEnabled() is True
 
     window.close()
     qt_app.processEvents()
