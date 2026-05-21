@@ -559,6 +559,56 @@ class ApplicationService:
         result.messages = [*validation_messages, *result.messages]
         return result
 
+    def run_analysis(self, analysis_id: str):
+        """Dispatch an Analysis to the appropriate runner and return an AnalysisResult."""
+        from quino.analysis.registry import get_runner_for_type
+        from quino.analysis.runner import AnalysisResult
+        from quino.services.workspace_composition import compose_project as _compose_project
+
+        ws = self.project.workspace if self.project else None
+        if ws is None:
+            return AnalysisResult(
+                analysis_id=analysis_id,
+                analysis_type="dynamic",
+                status="failed",
+                error_message="No workspace",
+            )
+        analysis = next((a for a in ws.analyses if a.id == analysis_id), None)
+        if analysis is None:
+            return AnalysisResult(
+                analysis_id=analysis_id,
+                analysis_type="dynamic",
+                status="failed",
+                error_message=f"Analysis {analysis_id!r} not found",
+            )
+        case = next((c for c in ws.cases if c.id == analysis.case_id), None) if analysis.case_id else None
+        composed = _compose_project(self.project, case=case)
+        try:
+            runner = get_runner_for_type(analysis.analysis_type)
+            errors = runner.validate(composed, analysis)
+            if errors:
+                return AnalysisResult(
+                    analysis_id=analysis_id,
+                    analysis_type=analysis.analysis_type,
+                    status="failed",
+                    error_message="; ".join(errors),
+                )
+            return runner.run(composed, analysis, initial_pose=None)
+        except NotImplementedError as exc:
+            return AnalysisResult(
+                analysis_id=analysis_id,
+                analysis_type=analysis.analysis_type,
+                status="failed",
+                error_message=str(exc),
+            )
+        except Exception as exc:
+            return AnalysisResult(
+                analysis_id=analysis_id,
+                analysis_type=analysis.analysis_type,
+                status="failed",
+                error_message=str(exc),
+            )
+
     def undo(self) -> bool:
         if not self._undo_stack:
             return False
