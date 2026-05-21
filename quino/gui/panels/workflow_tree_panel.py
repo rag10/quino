@@ -49,6 +49,23 @@ def _build_delta_summary(case: _Case) -> str:
     return ", ".join(parts)
 
 
+def _badge_string(case: _Case) -> str:
+    """Compact +N -M ~K  P:p A:a B:b badge tail used in node labels."""
+    added = sum(len(v) for v in case.added_entities.values())
+    removed = len(case.removed_entity_ids) + len(case.removed_connections)
+    overrides = len(case.invariant_values) + sum(
+        len(refs) for refs in case.reference_overrides.values()
+    )
+    parts: list[str] = []
+    if added:
+        parts.append(f"+{added}")
+    if removed:
+        parts.append(f"-{removed}")
+    if overrides:
+        parts.append(f"~{overrides}")
+    return "  " + " ".join(parts) if parts else ""
+
+
 class WorkflowTreePanel(QtWidgets.QWidget):
     working_context_changed = QtCore.Signal()
     run_analysis_requested = QtCore.Signal(str)  # analysis_id
@@ -121,11 +138,15 @@ class WorkflowTreePanel(QtWidgets.QWidget):
 
         ws = project.workspace
         for baseline in ws.baselines:
-            b_item = self._make_item(baseline.id, "baseline", baseline.name)
+            label = f"Baseline: {baseline.name}"
+            counts = self._scope_counts(baseline_id=baseline.id, case_id=None)
+            label += counts
+            b_item = self._make_item(baseline.id, "baseline", label)
+            self._style_node(b_item, "baseline")
             self._item_map[baseline.id] = b_item
             self._tree.addTopLevelItem(b_item)
-            self._populate_analyses(b_item, baseline_id=baseline.id)
-            self._populate_poses(b_item, baseline_id=baseline.id)
+            # Subgroups under baseline (no diffs section: baseline holds no overrides)
+            self._populate_scope_groups(b_item, baseline_id=baseline.id, case_id=None)
             self._populate_child_cases(b_item, parent_case_id=None, baseline_id=baseline.id)
 
         if not ws.baselines:
@@ -151,15 +172,132 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             if c.baseline_id == baseline_id and c.parent_case_id == parent_case_id
         ]
         for case in children:
-            c_item = self._make_item(case.id, "case", case.name)
+            kind_label = "Subcase" if parent_case_id else "Case"
+            label = f"{kind_label}: {case.name}{_badge_string(case)}"
+            c_item = self._make_item(case.id, "case", label)
+            self._style_node(c_item, "subcase" if parent_case_id else "case")
             summary = _build_delta_summary(case)
             if summary:
                 c_item.setToolTip(0, summary)
             self._item_map[case.id] = c_item
             parent_item.addChild(c_item)
-            self._populate_analyses(c_item, case_id=case.id)
-            self._populate_poses(c_item, case_id=case.id)
+            self._populate_scope_groups(c_item, case_id=case.id, baseline_id=baseline_id, case=case)
             self._populate_child_cases(c_item, parent_case_id=case.id, baseline_id=baseline_id)
+
+    def _populate_scope_groups(
+        self,
+        parent_item: QtWidgets.QTreeWidgetItem,
+        *,
+        baseline_id: str | None = None,
+        case_id: str | None = None,
+        case: _Case | None = None,
+    ) -> None:
+        """Insert non-selectable subgroup nodes under a baseline or case
+        (Diffs / Poses / Analyses / Blocks). Empty groups are omitted to
+        keep the tree compact."""
+        ws = self.app_service.project.workspace
+        # Diffs subgroup: only meaningful for cases.
+        if case is not None:
+            additions = sum(len(v) for v in case.added_entities.values())
+            removals = len(case.removed_entity_ids) + len(case.removed_connections)
+            overrides = len(case.invariant_values) + sum(
+                len(refs) for refs in case.reference_overrides.values()
+            )
+            if additions or removals or overrides:
+                diffs_node = QtWidgets.QTreeWidgetItem(
+                    [f"Diffs  (+{additions}  -{removals}  ~{overrides})"]
+                )
+                diffs_node.setFlags(diffs_node.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
+                font = diffs_node.font(0)
+                font.setItalic(True)
+                diffs_node.setFont(0, font)
+                diffs_node.setForeground(0, QtGui.QBrush(QtGui.QColor("#888888")))
+                parent_item.addChild(diffs_node)
+
+        # Poses subgroup. For case scope, match by case_id only (baseline_id
+        # on a case-scoped pose may be None, since the case owns the link).
+        if case_id is not None:
+            poses = [p for p in ws.poses if p.case_id == case_id]
+        else:
+            poses = [p for p in ws.poses if p.case_id is None and p.baseline_id == baseline_id]
+        if poses:
+            poses_node = QtWidgets.QTreeWidgetItem([f"Poses  ({len(poses)})"])
+            poses_node.setFlags(poses_node.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
+            poses_node.setForeground(0, QtGui.QBrush(QtGui.QColor("#666666")))
+            parent_item.addChild(poses_node)
+            self._populate_poses(poses_node, baseline_id=baseline_id, case_id=case_id)
+
+        # Analyses subgroup (only those NOT attached to a pose; pose-attached
+        # ones appear under the pose itself courtesy of _populate_poses).
+        if case_id is not None:
+            free_analyses = [
+                a for a in ws.analyses
+                if a.case_id == case_id and a.workspace_pose_id is None
+            ]
+            all_analyses = [a for a in ws.analyses if a.case_id == case_id]
+        else:
+            free_analyses = [
+                a for a in ws.analyses
+                if a.case_id is None and a.baseline_id == baseline_id and a.workspace_pose_id is None
+            ]
+            all_analyses = [
+                a for a in ws.analyses
+                if a.case_id is None and a.baseline_id == baseline_id
+            ]
+        if all_analyses:
+            an_node = QtWidgets.QTreeWidgetItem([f"Analyses  ({len(all_analyses)})"])
+            an_node.setFlags(an_node.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
+            an_node.setForeground(0, QtGui.QBrush(QtGui.QColor("#666666")))
+            parent_item.addChild(an_node)
+            for analysis in free_analyses:
+                self._add_analysis_item(an_node, analysis)
+
+        # Blocks subgroup: only for cases that added blocks; for baseline,
+        # blocks live in project.model and are handled in the model tree.
+        if case is not None:
+            block_adds = case.added_entities.get("blocks", [])
+            if block_adds:
+                blocks_node = QtWidgets.QTreeWidgetItem([f"Blocks  ({len(block_adds)})"])
+                blocks_node.setFlags(blocks_node.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
+                blocks_node.setForeground(0, QtGui.QBrush(QtGui.QColor("#666666")))
+                parent_item.addChild(blocks_node)
+                for ent in block_adds:
+                    bid = ent.get("id") or ent.get("instance_id") or "?"
+                    btype = ent.get("block_type", "block")
+                    blk_item = self._make_item(bid, "block", f"{bid}  [{btype}]")
+                    self._item_map[bid] = blk_item
+                    blocks_node.addChild(blk_item)
+
+    def _scope_counts(self, *, baseline_id: str | None, case_id: str | None) -> str:
+        """Return a compact 'P:p A:a' badge tail for a baseline/case scope."""
+        ws = self.app_service.project.workspace
+        if case_id is not None:
+            poses = sum(1 for p in ws.poses if p.case_id == case_id)
+            analyses = sum(1 for a in ws.analyses if a.case_id == case_id)
+        else:
+            poses = sum(1 for p in ws.poses if p.case_id is None and p.baseline_id == baseline_id)
+            analyses = sum(1 for a in ws.analyses if a.case_id is None and a.baseline_id == baseline_id)
+        parts: list[str] = []
+        if poses:
+            parts.append(f"P:{poses}")
+        if analyses:
+            parts.append(f"A:{analyses}")
+        return "  " + " ".join(parts) if parts else ""
+
+    def _style_node(self, item: QtWidgets.QTreeWidgetItem, kind: str) -> None:
+        """Apply a consistent foreground/font per node kind so baseline,
+        case and subcase are visually distinguishable at a glance."""
+        font = item.font(0)
+        if kind == "baseline":
+            font.setBold(True)
+            item.setForeground(0, QtGui.QBrush(QtGui.QColor("#1a3a6e")))
+        elif kind == "case":
+            font.setBold(True)
+            item.setForeground(0, QtGui.QBrush(QtGui.QColor("#214d8a")))
+        elif kind == "subcase":
+            font.setBold(False)
+            item.setForeground(0, QtGui.QBrush(QtGui.QColor("#3a6aaa")))
+        item.setFont(0, font)
 
     def _populate_poses(
         self,
@@ -169,10 +307,10 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         case_id: str | None = None,
     ) -> None:
         ws = self.app_service.project.workspace
-        poses = [
-            p for p in ws.poses
-            if p.baseline_id == baseline_id and p.case_id == case_id
-        ]
+        if case_id is not None:
+            poses = [p for p in ws.poses if p.case_id == case_id]
+        else:
+            poses = [p for p in ws.poses if p.case_id is None and p.baseline_id == baseline_id]
         for pose in poses:
             label = pose.name + (" [default]" if pose.is_default else "")
             p_item = self._make_item(pose.id, "pose", label)
@@ -248,7 +386,14 @@ class WorkflowTreePanel(QtWidgets.QWidget):
 
     def _build_breadcrumb(self, ws) -> str:
         parts: list[str] = []
-        baseline = next((b for b in ws.baselines if b.id == ws.active_baseline_id), None)
+        # Resolve baseline either from the active context or, when only a
+        # case is active, from the case's baseline_id chain.
+        baseline_id = ws.active_baseline_id
+        if ws.active_case_id is not None and baseline_id is None:
+            case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
+            if case is not None:
+                baseline_id = case.baseline_id
+        baseline = next((b for b in ws.baselines if b.id == baseline_id), None)
         if baseline is not None:
             parts.append(baseline.name)
         if ws.active_case_id is not None:
@@ -376,6 +521,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
                 menu.addSeparator()
                 menu.addAction("Set As Working Context", lambda: self._action_set_working(case_id=obj_id))
                 menu.addSeparator()
+                menu.addAction("Duplicate Case", lambda: self._action_duplicate_case(obj_id))
                 menu.addAction("Rename", lambda: self._action_rename(kind, obj_id))
                 menu.addAction("Delete", lambda: self._delete_item(kind, obj_id, item.text(0)))
                 menu.addSeparator()
@@ -425,6 +571,14 @@ class WorkflowTreePanel(QtWidgets.QWidget):
                 name, baseline_id=baseline_id, parent_case_id=parent_case_id
             )
             self.refresh()
+
+    def _action_duplicate_case(self, case_id: str) -> None:
+        try:
+            self.app_service.workspace.duplicate_case(case_id)
+        except Exception as exc:  # pragma: no cover - UI feedback
+            QtWidgets.QMessageBox.warning(self, "Duplicate failed", str(exc))
+            return
+        self.refresh()
 
     def _action_add_pose(self, *, baseline_id: str | None = None, case_id: str | None = None) -> None:
         name, ok = QtWidgets.QInputDialog.getText(self, "New Pose", "Name:")

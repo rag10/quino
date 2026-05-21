@@ -112,6 +112,35 @@ class WorkspaceCommands:
         self._resolve_default_pose_for_case(ws, case.id)
         return case
 
+    def duplicate_case(self, case_id: str, *, new_name: str | None = None) -> Case:
+        """Create a sibling case that copies all diffs from the source.
+
+        The duplicate sits next to ``case_id`` (same parent_case_id and
+        baseline_id) and inherits a deep copy of invariant_values,
+        added_entities, removed_entity_ids, reference_overrides and
+        removed_connections. A default pose is created automatically.
+        """
+        import copy as _copy
+        self._ctx.snapshot()
+        ws = self._ensure_workspace()
+        source = self._find_case(case_id)
+        target_name = new_name or f"{source.name} copy"
+        new_case = Case(
+            id=self._next_id("case"),
+            name=target_name,
+            baseline_id=source.baseline_id,
+            parent_case_id=source.parent_case_id,
+            invariant_values=_copy.deepcopy(source.invariant_values),
+            added_entities=_copy.deepcopy(source.added_entities),
+            removed_entity_ids=list(source.removed_entity_ids),
+            reference_overrides=_copy.deepcopy(source.reference_overrides),
+            removed_connections=list(source.removed_connections),
+        )
+        ws.cases.append(new_case)
+        self._ensure_default_pose(case_id=new_case.id)
+        self._resolve_default_pose_for_case(ws, new_case.id)
+        return new_case
+
     def rename_case(self, case_id: str, name: str) -> None:
         self._ctx.snapshot()
         case = self._find_case(case_id)
