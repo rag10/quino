@@ -317,6 +317,33 @@ def _next_id(workspace: Workspace, prefix: str) -> str:
     return f"{prefix}_{seq:03d}"
 
 
+def load_result_artifact(project_dir: Path, entry: RunEntry) -> SimulationResult | None:
+    """Re-hydrate the SimulationResult that a RunEntry produced.
+
+    Returns ``None`` when the entry has no result_ref, when the artifact
+    file is missing, or when the JSON is corrupt.
+    """
+    if entry.result_ref is None or project_dir is None:
+        return None
+    artifact_path = project_dir / entry.result_ref.artifact_path
+    if not artifact_path.exists():
+        return None
+    try:
+        data = json.loads(artifact_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    return SimulationResult(
+        success=bool(data.get("success", False)),
+        time=list(data.get("time", [])),
+        frames=list(data.get("frames", [])),
+        states=list(data.get("states", [])),
+        warnings=list(data.get("warnings", [])),
+        messages=list(data.get("messages", [])),
+        error=data.get("error"),
+        backend=data.get("backend"),
+    )
+
+
 def _save_result_artifact(project_dir: Path, entry: RunEntry, result: SimulationResult) -> Path:
     artifact_dir = project_dir / "artifacts" / f"run_{entry.id}" / entry.id
     artifact_dir.mkdir(parents=True, exist_ok=True)

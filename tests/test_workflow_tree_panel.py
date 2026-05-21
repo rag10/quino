@@ -15,8 +15,10 @@ def panel_with_workspace():
     svc.new_project("test")
     baseline = svc.workspace.create_baseline("Baseline 1")
     case = svc.workspace.create_case("Case 1", baseline_id=baseline.id)
-    svc.workspace.create_pose("Pose A", case_id=case.id)
-    svc.workspace.create_analysis("Dyn", analysis_type="dynamic", case_id=case.id)
+    pose = svc.workspace.create_pose("Pose A", case_id=case.id)
+    svc.workspace.create_analysis(
+        "Dyn", analysis_type="dynamic", case_id=case.id, workspace_pose_id=pose.id,
+    )
     panel = WorkflowTreePanel(svc)
     panel.refresh()
     return panel, svc, baseline, case
@@ -88,11 +90,49 @@ def test_case_node_shows_poses_subgroup(panel_with_workspace):
     assert any("Poses" in l for l in labels)
 
 
-def test_case_node_shows_analyses_subgroup(panel_with_workspace):
+def test_case_node_does_not_show_standalone_analyses_subgroup(panel_with_workspace):
+    """Analyses no longer have a top-level subgroup under the case; they
+    appear under the pose they were created against."""
     panel, svc, baseline, case = panel_with_workspace
     case_item = panel._item_map[case.id]
     labels = [case_item.child(i).text(0) for i in range(case_item.childCount())]
-    assert any("Analyses" in l for l in labels)
+    assert not any(l.startswith("Analyses ") for l in labels)
+
+
+def test_analysis_hangs_off_its_pose(panel_with_workspace):
+    panel, svc, baseline, case = panel_with_workspace
+    pose = next(p for p in svc.project.workspace.poses if p.case_id == case.id and not p.is_default)
+    pose_item = panel._item_map[pose.id]
+    labels = [pose_item.child(i).text(0) for i in range(pose_item.childCount())]
+    assert any("Dyn" in l for l in labels)
+
+
+def test_create_analysis_without_pose_raises():
+    svc = ApplicationService()
+    svc.new_project("test")
+    case = svc.workspace.create_case("C1")
+    with pytest.raises(ValueError, match="workspace_pose_id"):
+        svc.workspace.create_analysis("BadAnalysis", case_id=case.id)
+
+
+def test_load_drops_dangling_analyses(tmp_path):
+    """Legacy analyses with workspace_pose_id=None must be dropped on load."""
+    from quino.domain.workspace import Analysis
+    svc = ApplicationService()
+    svc.new_project("test")
+    case = svc.workspace.create_case("C1")
+    # Force-create a dangling analysis via direct mutation (bypassing the
+    # new validation) to simulate a legacy project.
+    svc.project.workspace.analyses.append(
+        Analysis(id="legacy_001", name="Legacy", case_id=case.id, workspace_pose_id=None)
+    )
+    path = tmp_path / "legacy.quino.json"
+    svc.save_project(str(path))
+
+    svc2 = ApplicationService()
+    svc2.load_project(str(path))
+    assert all(a.workspace_pose_id is not None for a in svc2.project.workspace.analyses)
+    assert not any(a.id == "legacy_001" for a in svc2.project.workspace.analyses)
 
 
 def test_case_with_diffs_shows_diffs_subgroup_with_counts():
@@ -122,7 +162,9 @@ def test_case_with_diffs_shows_diffs_subgroup_with_counts():
     assert "~1" in label  # one invariant override
 
 
-def test_case_node_label_carries_delta_badges():
+def test_case_node_label_is_plain_name():
+    """Cases use plain names in the workflow tree — counters live in the
+    Diffs subgroup, not in the node label."""
     _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     from quino.domain.workspace import ScalarValue
     svc = ApplicationService()
@@ -135,8 +177,7 @@ def test_case_node_label_carries_delta_badges():
     panel.refresh()
 
     case_item = panel._item_map[case.id]
-    label = case_item.text(0)
-    assert "~1" in label, f"Expected ~1 badge in case label, got: {label!r}"
+    assert case_item.text(0) == "C1"
 
 
 def test_duplicate_case_copies_diffs():
@@ -188,9 +229,9 @@ def test_rename_dialog_uses_undecorated_logical_name():
     panel = WorkflowTreePanel(svc)
     panel.refresh()
     item = panel._item_map[case.id]
-    # The tree label is decorated (◆  Case · MyCase  P:1, etc.).
-    assert "MyCase" in item.text(0) and item.text(0) != "MyCase"
-    # The logical-name helper must return only "MyCase".
+    # Display label is now plain — no glyph or "Case · " prefix.
+    assert item.text(0) == "MyCase"
+    # The logical-name helper must also return "MyCase" (no decorations).
     assert panel._logical_name("case", case.id) == "MyCase"
 
 
@@ -202,8 +243,8 @@ def test_tree_items_carry_type_icons():
     svc.new_project("test")
     baseline = svc.project.workspace.baselines[0]
     case = svc.workspace.create_case("C1", baseline_id=baseline.id)
-    svc.workspace.create_pose("PoseA", case_id=case.id)
-    svc.workspace.create_analysis("AnalysisA", case_id=case.id)
+    pose = svc.workspace.create_pose("PoseA", case_id=case.id)
+    svc.workspace.create_analysis("AnalysisA", case_id=case.id, workspace_pose_id=pose.id)
     panel = WorkflowTreePanel(svc)
     panel.refresh()
 

@@ -310,6 +310,12 @@ class WorkspaceCommands:
         workspace_pose_id: str | None = None,
         config: StudyConfig | None = None,
     ) -> Analysis:
+        # Every analysis must hang off a workspace pose.
+        if workspace_pose_id is None:
+            raise ValueError(
+                "create_analysis requires a workspace_pose_id (every analysis "
+                "must hang off a workspace pose)"
+            )
         self._ctx.snapshot()
         analysis = Analysis(
             id=self._next_id("analysis"),

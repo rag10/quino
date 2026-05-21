@@ -1076,7 +1076,11 @@ class MechanismCanvas(QtWidgets.QWidget):
             painter.restore()
             self._draw_sketch(painter, sketch_points, sketch_entities, transform, invalid=sketch_invalid)
             self._draw_sketch_constraints(painter, project, sketch_points, transform, invalid=sketch_invalid)
-            if self._show_trajectories and self._trajectories:
+            if (
+                self._show_trajectories
+                and self._trajectories
+                and self._interaction_mode == "analysis"
+            ):
                 self._draw_trajectories(painter, transform)
             if not sketch_points and not sketch_entities and not project.model.bodies:
                 self._draw_empty_state(painter)
@@ -1099,7 +1103,11 @@ class MechanismCanvas(QtWidgets.QWidget):
             elif not sketch_points and not sketch_entities:
                 self._draw_empty_state(painter)
             self._draw_springs(painter, project, assembled, transform)
-            if self._show_trajectories and self._trajectories:
+            if (
+                self._show_trajectories
+                and self._trajectories
+                and self._interaction_mode == "analysis"
+            ):
                 self._draw_trajectories(painter, transform)
 
         self._draw_creation_overlay(painter, transform)

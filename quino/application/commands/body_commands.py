@@ -491,6 +491,10 @@ class BodyCommands:
         self._ctx.invalidate_pose_state()
 
     def move_marker(self, marker_id: str, x_expression: str, y_expression: str) -> None:
+        # Geometry change → may invalidate simulation runs of the active case.
+        if not self._ctx.confirm_invalidation_if_runs_exist():
+            return
+        self._ctx.discard_runs_for_active_case()
         marker = self._ctx.find_entity(marker_id)
         if not isinstance(marker, Marker):
             raise ValueError("move_marker requires a marker entity")

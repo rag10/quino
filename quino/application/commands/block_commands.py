@@ -67,6 +67,10 @@ class BlockCommands:
                 diagram.connections.append(conn)
 
     def set_block_parameter(self, instance_id: str, key: str, value: Any) -> None:
+        # Block parameter edits change simulation results — confirm first.
+        if not self._ctx.confirm_invalidation_if_runs_exist():
+            return
+        self._ctx.discard_runs_for_active_case()
         with self._ctx.operation():
             case = self._ctx.get_active_case()
             path = f"model/control_graph/instances/{instance_id}/parameters/{key}"

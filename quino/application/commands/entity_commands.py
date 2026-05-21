@@ -634,6 +634,13 @@ class EntityCommands:
     def update_property(
         self, entity_id: str, property_path: str, value: PropertyValueInput
     ) -> None:
+        # Cosmetic edits (style.color / style.line_width / style.marker_size)
+        # never invalidate simulation results. Anything else might, so we
+        # ask the user before silently nuking persisted runs.
+        if not property_path.startswith("style."):
+            if not self._ctx.confirm_invalidation_if_runs_exist():
+                return
+            self._ctx.discard_runs_for_active_case()
         if entity_id == "__gravity__":
             self._update_gravity_property(property_path, value)
             return
@@ -754,6 +761,10 @@ class EntityCommands:
     # ------------------------------------------------------------------
 
     def delete_entity(self, entity_id: str) -> None:
+        # Structural change → confirm before nuking persisted runs.
+        if not self._ctx.confirm_invalidation_if_runs_exist():
+            return
+        self._ctx.discard_runs_for_active_case()
         if entity_id == "__gravity__":
             self.delete_gravity()
             return

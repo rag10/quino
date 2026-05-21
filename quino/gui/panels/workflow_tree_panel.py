@@ -163,10 +163,9 @@ class WorkflowTreePanel(QtWidgets.QWidget):
 
         ws = project.workspace
         for baseline in ws.baselines:
-            label = f"■  Baseline · {baseline.name}"
-            counts = self._scope_counts(baseline_id=baseline.id, case_id=None)
-            label += counts
-            b_item = self._make_item(baseline.id, "baseline", label)
+            # Plain name only — the type icon already conveys what kind of
+            # node this is (Inventor-style browser).
+            b_item = self._make_item(baseline.id, "baseline", baseline.name)
             self._style_node(b_item, "baseline")
             self._item_map[baseline.id] = b_item
             self._tree.addTopLevelItem(b_item)
@@ -201,11 +200,8 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             if c.baseline_id == baseline_id and c.parent_case_id == parent_case_id
         ]
         for case in children:
-            glyph = "◇" if parent_case_id else "◆"
-            kind_label = "Subcase" if parent_case_id else "Case"
-            counts = self._scope_counts(baseline_id=None, case_id=case.id)
-            label = f"{glyph}  {kind_label} · {case.name}{_badge_string(case)}{counts}"
-            c_item = self._make_item(case.id, "case", label)
+            # Plain name only: icon disambiguates case vs subcase.
+            c_item = self._make_item(case.id, "case", case.name)
             # Subcases get a distinct glyph (hollow diamond) over top cases.
             if parent_case_id:
                 c_item.setIcon(0, get_icon("workspace-subcase", size=16))
@@ -239,7 +235,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             )
             if additions or removals or overrides:
                 diffs_node = QtWidgets.QTreeWidgetItem(
-                    [f"✱  Diffs  +{additions}  -{removals}  ~{overrides}"]
+                    [f"Diffs  (+{additions}  -{removals}  ~{overrides})"]
                 )
                 diffs_node.setFlags(diffs_node.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
                 font = diffs_node.font(0)
@@ -256,45 +252,24 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         else:
             poses = [p for p in ws.poses if p.case_id is None and p.baseline_id == baseline_id]
         if poses:
-            poses_node = QtWidgets.QTreeWidgetItem([f"📐  Poses  ({len(poses)})"])
+            poses_node = QtWidgets.QTreeWidgetItem([f"Poses  ({len(poses)})"])
             poses_node.setFlags(poses_node.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
             poses_node.setForeground(0, QtGui.QBrush(QtGui.QColor("#666666")))
             poses_node.setIcon(0, get_icon("workspace-poses", size=16))
             parent_item.addChild(poses_node)
             self._populate_poses(poses_node, baseline_id=baseline_id, case_id=case_id)
 
-        # Analyses subgroup (only those NOT attached to a pose; pose-attached
-        # ones appear under the pose itself courtesy of _populate_poses).
-        if case_id is not None:
-            free_analyses = [
-                a for a in ws.analyses
-                if a.case_id == case_id and a.workspace_pose_id is None
-            ]
-            all_analyses = [a for a in ws.analyses if a.case_id == case_id]
-        else:
-            free_analyses = [
-                a for a in ws.analyses
-                if a.case_id is None and a.baseline_id == baseline_id and a.workspace_pose_id is None
-            ]
-            all_analyses = [
-                a for a in ws.analyses
-                if a.case_id is None and a.baseline_id == baseline_id
-            ]
-        if all_analyses:
-            an_node = QtWidgets.QTreeWidgetItem([f"⚙  Analyses  ({len(all_analyses)})"])
-            an_node.setFlags(an_node.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
-            an_node.setForeground(0, QtGui.QBrush(QtGui.QColor("#666666")))
-            an_node.setIcon(0, get_icon("workspace-analyses", size=16))
-            parent_item.addChild(an_node)
-            for analysis in free_analyses:
-                self._add_analysis_item(an_node, analysis)
+        # No standalone "Analyses" subgroup: every analysis hangs off the
+        # pose it was created against and shows up under that pose via
+        # _populate_poses. Dropping the duplicate listing keeps the tree
+        # compact and unambiguous.
 
         # Blocks subgroup: only for cases that added blocks; for baseline,
         # blocks live in project.model and are handled in the model tree.
         if case is not None:
             block_adds = case.added_entities.get("blocks", [])
             if block_adds:
-                blocks_node = QtWidgets.QTreeWidgetItem([f"🧩  Blocks  ({len(block_adds)})"])
+                blocks_node = QtWidgets.QTreeWidgetItem([f"Blocks  ({len(block_adds)})"])
                 blocks_node.setFlags(blocks_node.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
                 blocks_node.setForeground(0, QtGui.QBrush(QtGui.QColor("#666666")))
                 blocks_node.setIcon(0, get_icon("workspace-blocks", size=16))
@@ -560,7 +535,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             if kind == "baseline":
                 menu.addAction("Add Subcase", lambda: self._action_add_case(baseline_id=obj_id))
                 menu.addAction("Add Pose", lambda: self._action_add_pose(baseline_id=obj_id))
-                menu.addAction("Add Analysis", lambda: self._action_add_analysis(baseline_id=obj_id))
+                # Analyses hang off poses — added from the pose context menu.
                 menu.addSeparator()
                 menu.addAction("Set As Working Context", lambda: self._action_set_working(baseline_id=obj_id))
                 menu.addSeparator()
@@ -569,7 +544,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             elif kind == "case":
                 menu.addAction("Add Subcase", lambda: self._action_add_case(parent_case_id=obj_id))
                 menu.addAction("Add Pose", lambda: self._action_add_pose(case_id=obj_id))
-                menu.addAction("Add Analysis", lambda: self._action_add_analysis(case_id=obj_id))
+                # Analyses hang off poses — added from the pose context menu.
                 menu.addSeparator()
                 menu.addAction("Set As Working Context", lambda: self._action_set_working(case_id=obj_id))
                 menu.addSeparator()

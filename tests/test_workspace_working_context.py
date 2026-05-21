@@ -42,7 +42,10 @@ def test_set_working_context_clears_invalid_pose(svc_with_workspace):
 
 def test_set_working_context_clears_invalid_analysis(svc_with_workspace):
     svc, baseline, case = svc_with_workspace
-    analysis_b = svc.workspace.create_analysis("AnalysisB", baseline_id=baseline.id)
+    pose_b = svc.workspace.create_pose("PoseB", baseline_id=baseline.id)
+    analysis_b = svc.workspace.create_analysis(
+        "AnalysisB", baseline_id=baseline.id, workspace_pose_id=pose_b.id,
+    )
     svc.workspace.set_selected_analysis(analysis_b.id)
     svc.set_working_context(case_id=case.id)
     ws = svc.project.workspace
@@ -66,7 +69,10 @@ def test_set_selected_pose(svc_with_workspace):
 
 def test_set_selected_analysis(svc_with_workspace):
     svc, baseline, case = svc_with_workspace
-    analysis = svc.workspace.create_analysis("A1", case_id=case.id)
+    pose = svc.workspace.create_pose("P1", case_id=case.id)
+    analysis = svc.workspace.create_analysis(
+        "A1", case_id=case.id, workspace_pose_id=pose.id,
+    )
     svc.workspace.set_selected_analysis(analysis.id)
     assert svc.project.workspace.selected_analysis_id == analysis.id
 

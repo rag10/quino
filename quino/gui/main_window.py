@@ -1229,6 +1229,45 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_analysis_selected(self, analysis_id: str) -> None:
         self._set_app_mode("analysis")
+        # Recover the latest "ok" run for this analysis so the timeline /
+        # canvas pick up the persisted result instead of staying empty.
+        result = self._load_latest_run_result(analysis_id)
+        self._last_simulation_result = result
+        self._current_frame_index = 0
+        self._update_timeline_controls()
+        self._apply_current_frame()
+        self._update_trajectories(result=result)
+        if result is None:
+            self._append_message("No persisted runs for this analysis yet.")
+
+    def _load_latest_run_result(self, analysis_id: str) -> "SimulationResult | None":
+        """Return the SimulationResult of the latest ok run for *analysis_id*,
+        loaded from disk via load_result_artifact. Returns None if there are
+        no runs, no ok entries, or no on-disk artifact path is known."""
+        project = self.app_service.project
+        if project is None or project.workspace is None:
+            return None
+        ws = project.workspace
+        # Walk runs newest-first; pick the most recent run with an ok entry.
+        candidate_entry = None
+        for run in reversed(ws.runs):
+            if getattr(run, "analysis_id", None) != analysis_id:
+                continue
+            for entry in run.entries:
+                if entry.status == "ok" and entry.result_ref is not None:
+                    candidate_entry = entry
+                    break
+            if candidate_entry is not None:
+                break
+        if candidate_entry is None:
+            return None
+        from quino.services.workspace_runner import load_result_artifact
+        project_dir = (
+            self._current_project_path.parent
+            if self._current_project_path is not None
+            else None
+        )
+        return load_result_artifact(project_dir, candidate_entry)
 
     def _on_run_analysis_requested(self, analysis_id: str) -> None:
         project_dir = self._current_project_path.parent if self._current_project_path else None
@@ -1856,21 +1895,44 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_toggle_origin.setChecked(show_axes)
             self.action_toggle_grid.setChecked(self.canvas.show_grid())
 
-    def _update_trajectories(self) -> None:
+    def _update_trajectories(self, *, result: SimulationResult | None = None) -> None:
+        """Refresh canvas trajectories.
+
+        When *result* is given, we derive trajectories from its frames so
+        the canvas shows the points produced by THAT specific run (used
+        when the user selects an analysis in the tree). When *result* is
+        None we fall back to project.sensor_outputs, which holds the
+        most recent live simulation.
+        """
         project = self.app_service.project
         if project is None:
             return
-        trajectories = []
-        for sensor in project.model.sensors:
-            if sensor.type.value != "point":
-                continue
-            output = project.sensor_outputs.get(sensor.id)
-            if output is None or not output.data:
-                continue
-            # Columns: time, x, y, vx, vy, v, ax, ay, a  →  x=col1, y=col2
-            pts = [(row[0], row[1]) for row in output.data]
-            if len(pts) >= 2:
-                trajectories.append(pts)
+        trajectories: list[list[tuple[float, float]]] = []
+        if result is not None and result.frames:
+            # Build per-sensor trajectories straight from the frame stream.
+            for sensor in project.model.sensors:
+                if sensor.type.value != "point" or not sensor.marker_ids:
+                    continue
+                marker_id = sensor.marker_ids[0]
+                key_x = f"marker:{marker_id}:x"
+                key_y = f"marker:{marker_id}:y"
+                pts: list[tuple[float, float]] = []
+                for frame in result.frames:
+                    if key_x in frame and key_y in frame:
+                        pts.append((float(frame[key_x]), float(frame[key_y])))
+                if len(pts) >= 2:
+                    trajectories.append(pts)
+        if not trajectories:
+            for sensor in project.model.sensors:
+                if sensor.type.value != "point":
+                    continue
+                output = project.sensor_outputs.get(sensor.id)
+                if output is None or not output.data:
+                    continue
+                # Columns: time, x, y, vx, vy, v, ax, ay, a  →  x=col1, y=col2
+                pts = [(row[0], row[1]) for row in output.data]
+                if len(pts) >= 2:
+                    trajectories.append(pts)
         self.canvas.set_trajectories(trajectories)
         self.action_show_trajectories.setEnabled(bool(trajectories))
         if trajectories:

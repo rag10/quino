@@ -14,15 +14,16 @@ from PySide6 import QtCore, QtGui
 
 
 _CACHE_DIR: Path | None = None
-_LINE_COLOR = QtGui.QColor("#9aa0a6")
-_TRIANGLE_COLOR = QtGui.QColor("#555")
+_CACHE_TOKEN = "v2-black-1px"  # bump to invalidate cached PNGs after restyle
+_LINE_COLOR = QtGui.QColor("#000000")
+_TRIANGLE_COLOR = QtGui.QColor("#333")
 _SIZE = 16
 
 
 def _ensure_cache() -> Path:
     global _CACHE_DIR
     if _CACHE_DIR is None:
-        _CACHE_DIR = Path(tempfile.mkdtemp(prefix="quino_branches_"))
+        _CACHE_DIR = Path(tempfile.mkdtemp(prefix=f"quino_branches_{_CACHE_TOKEN}_"))
         _render_all(_CACHE_DIR)
     return _CACHE_DIR
 
@@ -83,6 +84,8 @@ def _draw(path: Path, fn) -> None:
     pix = QtGui.QPixmap(_SIZE, _SIZE)
     pix.fill(QtCore.Qt.GlobalColor.transparent)
     painter = QtGui.QPainter(pix)
+    # Triangles benefit from AA; the line helpers turn it off locally for
+    # crisp 1-px guides (no half-pixel smearing).
     painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
     fn(painter)
     painter.end()
@@ -90,17 +93,25 @@ def _draw(path: Path, fn) -> None:
 
 
 def _vline(painter: QtGui.QPainter, x: int, y0: int, y1: int) -> None:
+    painter.save()
+    painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, False)
     pen = QtGui.QPen(_LINE_COLOR)
     pen.setWidth(1)
+    pen.setCosmetic(True)
     painter.setPen(pen)
     painter.drawLine(x, y0, x, y1)
+    painter.restore()
 
 
 def _hline(painter: QtGui.QPainter, x0: int, x1: int, y: int) -> None:
+    painter.save()
+    painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, False)
     pen = QtGui.QPen(_LINE_COLOR)
     pen.setWidth(1)
+    pen.setCosmetic(True)
     painter.setPen(pen)
     painter.drawLine(x0, y, x1, y)
+    painter.restore()
 
 
 def _triangle(painter: QtGui.QPainter, cx: int, cy: int, *, closed: bool) -> None:

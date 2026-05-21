@@ -157,7 +157,20 @@ class ApplicationService:
             self.project.sketch.solve_error = None
             self.sketch._apply_sketch_constraints(set())
         self._ensure_baseline()
+        self._drop_dangling_analyses()
         return self.project
+
+    def _drop_dangling_analyses(self) -> None:
+        """Analyses must hang off a workspace pose. Drop any legacy entry
+        with workspace_pose_id == None (also remove runs that reference it)."""
+        if self.project is None or self.project.workspace is None:
+            return
+        ws = self.project.workspace
+        dangling = {a.id for a in ws.analyses if a.workspace_pose_id is None}
+        if not dangling:
+            return
+        ws.analyses = [a for a in ws.analyses if a.id not in dangling]
+        ws.runs = [r for r in ws.runs if getattr(r, "analysis_id", None) not in dangling]
 
     def _ensure_baseline(self) -> None:
         """Guarantee the workspace always has at least one baseline."""
