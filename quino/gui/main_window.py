@@ -184,6 +184,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.set_structural_edit_guard(self._check_structural_edit_allowed)
         self.action_fit_view.triggered.connect(self.canvas.fit_view)
         self._block_editor = BlockEditorWidget()
+        self._block_editor.set_app_service(self.app_service)
         self._block_editor.diagramChanged.connect(self._on_block_diagram_changed)
         self._block_editor._scene.validationError.connect(self._on_block_validation_error)
         self._block_editor.blockSelected.connect(self._select_block)
@@ -1120,13 +1121,21 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_block_diagram_changed(self) -> None:
         project = self.app_service.project
-        if project is not None:
-            project.model.control_graph = self._block_editor.diagram()
-            self.app_service._snapshot()
-            if project.workspace is not None:
+        if project is None:
+            return
+        ws = project.workspace
+        # In case mode, mutations already went through ApplicationService.blocks
+        # (snapshot + case overlay). Do NOT overwrite the baseline control_graph.
+        if ws is not None and ws.active_case_id is not None:
+            if ws is not None:
                 from quino.services.workspace_invalidation import invalidate_on_model_change
-
                 invalidate_on_model_change(project)
+            return
+        project.model.control_graph = self._block_editor.diagram()
+        self.app_service._snapshot()
+        if ws is not None:
+            from quino.services.workspace_invalidation import invalidate_on_model_change
+            invalidate_on_model_change(project)
 
     def _on_block_validation_error(self, message: str) -> None:
         self.statusBar().showMessage(f"Block diagram: {message}", 5000)

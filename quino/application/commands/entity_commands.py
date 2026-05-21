@@ -546,6 +546,13 @@ class EntityCommands:
 
     def rename_entity(self, entity_id: str, new_name: str) -> None:
         entity = self._find_entity(entity_id)
+        # Sketch entities live only in the baseline: reject renames in case mode.
+        if isinstance(entity, (Sketch, SketchPoint, SketchLineSegment, SketchCircle, SketchArc, SketchInfiniteLine, SketchConstraint)):
+            if self._ctx.get_active_case() is not None:
+                raise RuntimeError(
+                    "Sketch editing is disabled while a case is active. "
+                    "Switch to baseline to modify the sketch."
+                )
         self._validate_entity_name(entity, new_name)
         self._ctx.snapshot()
         case = self._ctx.get_active_case()

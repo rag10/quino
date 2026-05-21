@@ -1027,3 +1027,22 @@ class ApplicationService:
     def set_block_name(self, instance_id: str, name: str) -> None:
         self.blocks.set_block_name(instance_id, name)
 
+    def remove_block(self, instance_id: str) -> None:
+        self.blocks.remove_block(instance_id)
+
+    def remove_connection(
+        self,
+        *,
+        src_instance: str,
+        src_port: str,
+        dst_instance: str,
+        dst_port: str,
+    ) -> None:
+        self.blocks.remove_connection(
+            src_instance=src_instance, src_port=src_port,
+            dst_instance=dst_instance, dst_port=dst_port,
+        )
+
+    def set_block_position(self, instance_id: str, position: tuple[float, float]) -> None:
+        self.blocks.set_block_position(instance_id, position)
+

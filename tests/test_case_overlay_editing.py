@@ -157,6 +157,20 @@ def test_marker_overlay_visible_in_display_project(svc_with_bar):
     assert "200" in composed_marker.x.expression
 
 
+def test_sketch_edits_blocked_in_case_mode(svc_with_case):
+    svc, body, baseline, case = svc_with_case
+    svc.set_working_context(case_id=case.id)
+    with pytest.raises(RuntimeError, match="Sketch editing is disabled"):
+        svc.create_sketch_point("0 mm", "0 mm")
+
+
+def test_sketch_edits_allowed_in_baseline_mode(svc_with_case):
+    svc, body, baseline, case = svc_with_case
+    # No active case
+    pid = svc.create_sketch_point("10 mm", "10 mm")
+    assert pid is not None
+
+
 def test_entity_index_does_not_mutate_baseline_after_overlay_lookup(svc_with_case):
     """Regression: entering a case with mass override used to mutate baseline body.mass."""
     svc, body, baseline, case = svc_with_case

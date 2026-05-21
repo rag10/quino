@@ -24,6 +24,13 @@ class BlockEditorWidget(QtWidgets.QWidget):
         super().__init__(parent)
         self._setup_ui()
         self._diagram: BlockDiagram | None = None
+        self._app_service = None
+
+    def set_app_service(self, app_service) -> None:
+        """Wire the editor to an ApplicationService so mutations route through
+        BlockCommands (which routes to the active case when set)."""
+        self._app_service = app_service
+        self._scene.set_app_service(app_service)
 
     def _setup_ui(self) -> None:
         layout = QtWidgets.QHBoxLayout(self)

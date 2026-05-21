@@ -40,8 +40,14 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
         self._drag_line: QtWidgets.QGraphicsPathItem | None = None
         self._drag_src_port: PortItem | None = None
         self._temp_connection: ConnectionItem | None = None
+        self._app_service = None
         self.setSceneRect(-5000, -5000, 10000, 10000)
         self._build_from_diagram()
+
+    def set_app_service(self, app_service) -> None:
+        """When set, all mutating operations route through ApplicationService
+        (snapshot + case overlay). When None, the scene mutates its own diagram."""
+        self._app_service = app_service
 
     # -- accessors ----------------------------------------------------------
 
@@ -169,6 +175,20 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
         if block_type not in BLOCK_REGISTRY:
             return None
         block_def = get_block_def(block_type)
+
+        # Route through ApplicationService when wired (snapshot + case overlay).
+        if self._app_service is not None:
+            default_params = copy.deepcopy(_BLOCK_DEFAULT_PARAMETERS.get(block_type, {}))
+            default_params["_position"] = [position.x(), position.y()]
+            new_id = self._app_service.add_block(
+                block_type=block_type,
+                name=block_type,
+                position=(position.x(), position.y()),
+                parameters=default_params,
+            )
+            self._sync_from_app_service()
+            return self._block_items.get(new_id)
+
         if instance_id is None:
             instance_id = self._generate_instance_id(block_type)
         if instance_id in self._diagram.instances:
@@ -201,7 +221,29 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
         self.sync_to_diagram()
         return item
 
+    def _sync_from_app_service(self) -> None:
+        """Rebuild scene from app_service.display_project's control_graph."""
+        if self._app_service is None:
+            return
+        dp = self._app_service.display_project
+        cg = dp.model.control_graph if dp is not None else None
+        if cg is None:
+            from quino.domain.blocks import BlockDiagram as _BD
+            cg = _BD()
+        self.clear()
+        self._block_items.clear()
+        self._connection_items.clear()
+        self._diagram = cg
+        self._build_from_diagram()
+        self.diagramChanged.emit()
+        self.validate_and_highlight()
+
     def delete_block(self, instance_id: str) -> None:
+        if self._app_service is not None:
+            self._app_service.remove_block(instance_id)
+            self._sync_from_app_service()
+            self.selectionCleared.emit()
+            return
         item = self._block_items.pop(instance_id, None)
         if item is None:
             return
@@ -215,6 +257,15 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
         self.selectionCleared.emit()
 
     def delete_connection(self, conn_item: ConnectionItem) -> None:
+        if self._app_service is not None:
+            self._app_service.remove_connection(
+                src_instance=conn_item.src_port.parent_block.instance_id,
+                src_port=conn_item.src_port.port_name,
+                dst_instance=conn_item.dst_port.parent_block.instance_id,
+                dst_port=conn_item.dst_port.port_name,
+            )
+            self._sync_from_app_service()
+            return
         conn_item.remove_from_ports()
         if conn_item in self._connection_items:
             self._connection_items.remove(conn_item)
@@ -365,6 +416,14 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
             self.blockSelected.emit(selected[0].instance_id)
         elif not selected:
             self.selectionCleared.emit()
+        # Persist any positional changes for selected blocks (drag-end).
+        if self._app_service is not None:
+            for item in selected:
+                pos = item.pos()
+                try:
+                    self._app_service.set_block_position(item.instance_id, (pos.x(), pos.y()))
+                except Exception:
+                    pass
 
     def _start_drag_connection(self, port: PortItem, pos: QtCore.QPointF) -> None:
         if port.is_input and port.connections:
@@ -413,6 +472,15 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
             for conn in list(dst.connections):
                 self.delete_connection(conn)
 
+        if self._app_service is not None:
+            self._app_service.add_connection(
+                src_instance=src.parent_block.instance_id,
+                src_port=src.port_name,
+                dst_instance=dst.parent_block.instance_id,
+                dst_port=dst.port_name,
+            )
+            self._sync_from_app_service()
+            return
         conn_item = ConnectionItem(src, dst)
         self.addItem(conn_item)
         self._connection_items.append(conn_item)

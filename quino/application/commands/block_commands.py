@@ -68,6 +68,85 @@ class BlockCommands:
                 raise KeyError(f"Block instance {instance_id!r} not found")
             inst.parameters[key] = float(value)
 
+    def remove_block(self, instance_id: str) -> None:
+        """Remove a block instance and any connections that reference it."""
+        with self._ctx.operation():
+            case = self._ctx.get_active_case()
+            if case is not None:
+                # If the block was added by this case (or chain), drop from added_entities.
+                removed_from_added = False
+                blocks_added = case.added_entities.get("blocks", [])
+                for i, ent in enumerate(blocks_added):
+                    if ent.get("id") == instance_id:
+                        blocks_added.pop(i)
+                        if not blocks_added:
+                            case.added_entities.pop("blocks", None)
+                        removed_from_added = True
+                        break
+                if not removed_from_added:
+                    if instance_id not in case.removed_entity_ids:
+                        case.removed_entity_ids.append(instance_id)
+                # Also drop any pending added connections that reference this block
+                conns = case.added_entities.get("connections", [])
+                case.added_entities["connections"] = [
+                    c for c in conns
+                    if c.get("src_instance") != instance_id and c.get("dst_instance") != instance_id
+                ]
+                if not case.added_entities["connections"]:
+                    case.added_entities.pop("connections", None)
+                return
+            diagram = self._ensure_diagram()
+            diagram.instances.pop(instance_id, None)
+            diagram.connections = [
+                c for c in diagram.connections
+                if c.src_instance != instance_id and c.dst_instance != instance_id
+            ]
+
+    def remove_connection(
+        self,
+        *,
+        src_instance: str,
+        src_port: str,
+        dst_instance: str,
+        dst_port: str,
+    ) -> None:
+        with self._ctx.operation():
+            case = self._ctx.get_active_case()
+            key = (src_instance, src_port, dst_instance, dst_port)
+            if case is not None:
+                # If this exact connection was added by the case, drop it from added.
+                conns = case.added_entities.get("connections", [])
+                for i, c in enumerate(conns):
+                    if (c.get("src_instance"), c.get("src_port"), c.get("dst_instance"), c.get("dst_port")) == key:
+                        conns.pop(i)
+                        if not conns:
+                            case.added_entities.pop("connections", None)
+                        return
+                if key not in case.removed_connections:
+                    case.removed_connections.append(key)
+                return
+            diagram = self._ensure_diagram()
+            diagram.connections = [
+                c for c in diagram.connections
+                if (c.src_instance, c.src_port, c.dst_instance, c.dst_port) != key
+            ]
+
+    def set_block_position(self, instance_id: str, position: tuple[float, float]) -> None:
+        """Update a block's visual position. Position lives in parameters["_position"]
+        so it follows the same routing as set_block_parameter."""
+        with self._ctx.operation():
+            case = self._ctx.get_active_case()
+            if case is not None:
+                # Store position override under a reserved key in reference_overrides
+                # to avoid polluting invariant_values (positions aren't scalars).
+                case.reference_overrides.setdefault(instance_id, {})["_position"] = list(position)
+                return
+            diagram = self._ensure_diagram()
+            inst = diagram.instances.get(instance_id)
+            if inst is None:
+                raise KeyError(f"Block instance {instance_id!r} not found")
+            inst.parameters["_position"] = [float(position[0]), float(position[1])]
+
     def set_block_name(self, instance_id: str, new_name: str) -> None:
         """Rename a block instance.
 

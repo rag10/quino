@@ -947,6 +947,8 @@ class JsonMapper:
             result["removed_entity_ids"] = case.removed_entity_ids
         if case.reference_overrides:
             result["reference_overrides"] = case.reference_overrides
+        if case.removed_connections:
+            result["removed_connections"] = [list(t) for t in case.removed_connections]
         return result
 
     def _entity_to_dict_by_domain(self, domain: str, entity: dict) -> dict:
@@ -967,6 +969,7 @@ class JsonMapper:
             added_entities=data.get("added_entities", {}),
             removed_entity_ids=data.get("removed_entity_ids", []),
             reference_overrides=data.get("reference_overrides", {}),
+            removed_connections=[tuple(t) for t in data.get("removed_connections", [])],
             metadata=data.get("metadata", {}),
         )
 

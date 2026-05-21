@@ -203,14 +203,31 @@ def _apply_structural_deltas(project: Project, case: Case) -> None:
             entity = deserializer(entity_data)
             target_list(project).append(entity)
 
+    # 2b. Remove explicit connections by 4-tuple.
+    if case.removed_connections and project.model.control_graph is not None:
+        kill = {tuple(t) for t in case.removed_connections}
+        project.model.control_graph.connections = [
+            c for c in project.model.control_graph.connections
+            if (c.src_instance, c.src_port, c.dst_instance, c.dst_port) not in kill
+        ]
+
     # 3. Apply reference overrides
+    from quino.domain.blocks import BlockInstance as _BlockInstance
     for entity_id, overrides in case.reference_overrides.items():
         entity = _find_entity_in_project(project, entity_id)
         if entity is None:
             continue
         for prop, value in overrides.items():
+            # Block-specific: _position lives in parameters, not as an attribute.
+            if isinstance(entity, _BlockInstance) and prop == "_position":
+                entity.parameters["_position"] = list(value)
+                continue
             if hasattr(entity, prop):
-                setattr(entity, prop, value)
+                try:
+                    setattr(entity, prop, value)
+                except Exception:
+                    # frozen dataclass etc — ignore silently for non-critical overrides
+                    pass
 
 
 def _find_entity_in_project(project: Project, entity_id: str) -> Any | None:

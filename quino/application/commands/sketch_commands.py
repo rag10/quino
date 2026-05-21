@@ -53,9 +53,18 @@ class SketchCommands:
     def invalidate_cache(self) -> None:
         """No-op: solve cache removed. Kept for API compatibility."""
 
+    def _guard_no_case(self) -> None:
+        """Sketch lives only in the baseline; reject mutations in case mode."""
+        if self._ctx.get_active_case() is not None:
+            raise RuntimeError(
+                "Sketch editing is disabled while a case is active. "
+                "Switch to baseline to modify the sketch."
+            )
+
     # --- public sketch API ---------------------------------------------------
 
     def create_sketch(self, name: str = "Main Sketch") -> str:
+        self._guard_no_case()
         project = self._project
         if project.sketch is not None:
             return project.sketch.id
@@ -71,6 +80,7 @@ class SketchCommands:
         return project.sketch.id
 
     def delete_sketch(self) -> None:
+        self._guard_no_case()
         project = self._project
         if project.sketch is None:
             return
@@ -78,6 +88,7 @@ class SketchCommands:
         project.sketch = None
 
     def create_sketch_point(self, x: str, y: str, name: str | None = None, visible: bool = True) -> str:
+        self._guard_no_case()
         project = self._project
         sketch = self._require_sketch(create_if_missing=True)
         point = SketchPoint(
@@ -96,6 +107,7 @@ class SketchCommands:
         return point.id
 
     def move_sketch_point(self, point_id: str, x: str, y: str) -> None:
+        self._guard_no_case()
         project = self._project
         point = self._find_sketch_point(point_id)
         x_expr = Expression(x)
@@ -113,6 +125,7 @@ class SketchCommands:
         end_point_id: str,
         name: str | None = None,
     ) -> str:
+        self._guard_no_case()
         self._ensure_sketch_point_exists(start_point_id)
         self._ensure_sketch_point_exists(end_point_id)
         if start_point_id == end_point_id:
@@ -137,6 +150,7 @@ class SketchCommands:
         name: str | None = None,
         edge_point_id: str | None = None,
     ) -> str:
+        self._guard_no_case()
         project = self._project
         self._ensure_sketch_point_exists(center_point_id)
         entity = SketchCircle(
@@ -166,6 +180,7 @@ class SketchCommands:
         point_c_id: str,
         name: str | None = None,
     ) -> str:
+        self._guard_no_case()
         refs = [point_a_id, point_b_id, point_c_id]
         if len(set(refs)) < 3:
             raise ValueError("Arc requires three distinct points")
@@ -192,6 +207,7 @@ class SketchCommands:
         ex: float, ey: float,
         name: str | None = None,
     ) -> str:
+        self._guard_no_case()
         """Create an arc defined by center + start + end points (arc_center_mode=True)."""
         sketch = self._require_sketch(create_if_missing=True)
         with self._ctx.operation():
@@ -217,6 +233,7 @@ class SketchCommands:
         point_b_id: str,
         name: str | None = None,
     ) -> str:
+        self._guard_no_case()
         self._ensure_sketch_point_exists(point_a_id)
         self._ensure_sketch_point_exists(point_b_id)
         if point_a_id == point_b_id:
@@ -240,6 +257,7 @@ class SketchCommands:
         corner_b: tuple[float, float],
         name: str | None = None,
     ) -> list[str]:
+        self._guard_no_case()
         """Create an axis-aligned rectangle as points, line segments and H/V constraints."""
         if abs(corner_a[0] - corner_b[0]) <= 1e-9 or abs(corner_a[1] - corner_b[1]) <= 1e-9:
             raise ValueError("Rectangle requires non-zero width and height")
@@ -261,6 +279,7 @@ class SketchCommands:
         return [p1, p2, p3, p4, l1, l2, l3, l4]
 
     def move_sketch_point_with_solver(self, point_id: str, x: str, y: str) -> None:
+        self._guard_no_case()
         """Move a sketch point while treating the drag target as locked for the solver."""
         project = self._project
         point = self._find_sketch_point(point_id)
@@ -274,6 +293,7 @@ class SketchCommands:
             self._apply_sketch_constraints({point_id})
 
     def toggle_sketch_construction(self, entity_ids: list[str] | set[str]) -> bool:
+        self._guard_no_case()
         sketch = self._require_sketch()
         target_ids = [entity_id for entity_id in entity_ids if entity_id in sketch.entities]
         if not target_ids:
@@ -291,6 +311,7 @@ class SketchCommands:
         *,
         label_position: tuple[float, float] | None = None,
     ) -> None:
+        self._guard_no_case()
         constraint = self._find_sketch_constraint(constraint_id)
         if constraint.type not in {
             SketchConstraintType.DISTANCE,
@@ -315,6 +336,7 @@ class SketchCommands:
         entity_ids: list[str],
         value: str | None = None,
     ) -> str:
+        self._guard_no_case()
         """Create a sketch constraint using selected points/curves when their types are compatible."""
         ctype = SketchConstraintType(constraint_type)
         refs: list[str] = []
@@ -365,6 +387,7 @@ class SketchCommands:
         name: str | None = None,
         entity_references: list[str] | None = None,
     ) -> str:
+        self._guard_no_case()
         project = self._project
         sketch = self._require_sketch(create_if_missing=True)
         constraint_enum = SketchConstraintType(constraint_type)
@@ -451,6 +474,7 @@ class SketchCommands:
         return constraint.id
 
     def update_sketch_constraint(self, constraint_id: str, property_path: str, value: PropertyValueInput) -> None:
+        self._guard_no_case()
         project = self._project
         constraint = self._find_sketch_constraint(constraint_id)
         if property_path == "name":
@@ -513,6 +537,7 @@ class SketchCommands:
         raise ValueError(f"Unsupported sketch constraint property path: {property_path}")
 
     def delete_sketch_constraint(self, constraint_id: str) -> None:
+        self._guard_no_case()
         sketch = self._require_sketch()
         self._find_sketch_constraint(constraint_id)
         self._ctx.snapshot()
@@ -521,6 +546,7 @@ class SketchCommands:
         self._apply_sketch_constraints(set())
 
     def solve_sketch(self) -> ValidationReport:
+        self._guard_no_case()
         report = ValidationReport()
         result = self._apply_sketch_constraints(set(), strict=True)
         if result.success:
@@ -558,6 +584,7 @@ class SketchCommands:
         return report
 
     def update_sketch_entity(self, entity_id: str, property_path: str, value: PropertyValueInput) -> None:
+        self._guard_no_case()
         entity = self._find_sketch_entity(entity_id)
         if property_path == "name":
             if value.kind != "expression" or not isinstance(value.value, str):
@@ -615,6 +642,7 @@ class SketchCommands:
         raise ValueError(f"Unsupported sketch property path: {property_path}")
 
     def delete_sketch_entity(self, entity_id: str) -> None:
+        self._guard_no_case()
         sketch = self._require_sketch()
         entity = self._find_sketch_entity(entity_id)
         self._ctx.snapshot()
@@ -655,6 +683,7 @@ class SketchCommands:
         self._apply_sketch_constraints(set())
 
     def set_sketch_visible(self, visible: bool) -> None:
+        self._guard_no_case()
         project = self._project
         if project.sketch is None:
             return

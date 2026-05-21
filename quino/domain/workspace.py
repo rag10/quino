@@ -67,6 +67,9 @@ class Case:
     removed_entity_ids: list[str] = field(default_factory=list)
     reference_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
     #   key: entity_id, value: {property_name: new_value}
+    # Connections have no id, so removals are recorded as 4-tuples of
+    # (src_instance, src_port, dst_instance, dst_port).
+    removed_connections: list[tuple[str, str, str, str]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
