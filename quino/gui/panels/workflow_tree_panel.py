@@ -547,7 +547,13 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             elif kind == "pose":
                 ws = self.app_service.project.workspace
                 pose = next((p for p in ws.poses if p.id == obj_id), None)
-                menu.addAction("Add Analysis", lambda: self._action_add_analysis(pose_id=obj_id))
+                # Add Analysis under this specific pose. We propagate the
+                # pose's owning scope so the new analysis can be filtered by
+                # case/baseline (it still hangs under the pose in the tree).
+                menu.addAction(
+                    "Add Analysis",
+                    lambda: self._action_add_analysis_to_pose(obj_id),
+                )
                 if pose and not pose.is_default:
                     menu.addAction("Use As Initial Pose", lambda: self._action_use_as_initial_pose(obj_id))
                 menu.addSeparator()

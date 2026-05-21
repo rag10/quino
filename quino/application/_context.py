@@ -34,6 +34,7 @@ class ServiceContext:
     connect_marker_to_ground: Callable[..., str]
     joints_for_marker: Callable[[str], list]
     translate_direct_joint_counterparts: Callable[..., set]
+    set_current_pose_id: Callable[[str | None], None] = lambda _pid: None
 
     def get_active_case(self):
         """Return the active Case if one is set, otherwise None."""

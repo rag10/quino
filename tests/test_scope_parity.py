@@ -100,6 +100,98 @@ def test_subcase_can_create_joint_to_ground_anchor_inherited_from_parent_case(
     assert any(joint.id == joint_id for joint in svc.display_project.model.joints)
 
 
+def test_create_pose_allocates_backing_project_pose() -> None:
+    """A non-default WorkspacePose must allocate a backing project Pose
+    automatically so the canvas/IK solver can mutate it."""
+    svc = ApplicationService()
+    svc.new_project("test")
+    case = svc.workspace.create_case("C1")
+    wp = svc.workspace.create_pose("PA", case_id=case.id)
+    assert wp.project_pose_id is not None
+    assert any(p.id == wp.project_pose_id for p in svc.project.poses)
+
+
+def test_set_selected_pose_syncs_current_pose() -> None:
+    """Selecting a WorkspacePose must update project.current_pose_id so the
+    canvas displays the right geometry."""
+    svc = ApplicationService()
+    svc.new_project("test")
+    case = svc.workspace.create_case("C1")
+    p1 = svc.workspace.create_pose("PA", case_id=case.id)
+    p2 = svc.workspace.create_pose("PB", case_id=case.id)
+    svc.set_selected_pose(p1.id)
+    assert svc.get_current_pose_id() == p1.project_pose_id
+    svc.set_selected_pose(p2.id)
+    assert svc.get_current_pose_id() == p2.project_pose_id
+
+
+def test_delete_pose_clears_selection_and_backing() -> None:
+    svc = ApplicationService()
+    svc.new_project("test")
+    case = svc.workspace.create_case("C1")
+    wp = svc.workspace.create_pose("PA", case_id=case.id)
+    svc.set_selected_pose(wp.id)
+    assert svc.get_current_pose_id() == wp.project_pose_id
+
+    svc.workspace.delete_pose(wp.id)
+
+    assert svc.project.workspace.selected_pose_id is None
+    assert svc.get_current_pose_id() is None
+    assert all(p.id != wp.project_pose_id for p in svc.project.poses)
+
+
+def test_multiple_analyses_per_pose() -> None:
+    """A single pose may host several analyses; they all live under it
+    in workspace.analyses."""
+    svc = ApplicationService()
+    svc.new_project("test")
+    case = svc.workspace.create_case("C1")
+    wp = svc.workspace.create_pose("PA", case_id=case.id)
+    a1 = svc.workspace.create_analysis("A1", case_id=case.id, workspace_pose_id=wp.id)
+    a2 = svc.workspace.create_analysis("A2", case_id=case.id, workspace_pose_id=wp.id)
+    a3 = svc.workspace.create_analysis("A3", case_id=case.id, workspace_pose_id=wp.id)
+    attached = [a.id for a in svc.project.workspace.analyses if a.workspace_pose_id == wp.id]
+    assert attached == [a1.id, a2.id, a3.id]
+
+
+def test_move_marker_in_case_keeps_rigid_joint_assembled(svc_with_case_chain) -> None:
+    """A rigid joint connecting two markers must stay coincident when one
+    of the markers is dragged in case mode. The case must emit overrides
+    for BOTH endpoints, not just the dragged one."""
+    svc, body_id, parent_id, child_id = svc_with_case_chain
+    body = svc.get_body(body_id)
+    marker_b = next(m for m in body.markers if m.name == "B")
+    b2 = svc.create_bar(
+        "B2",
+        MarkerInput("100 mm", "0 mm", "C"),
+        MarkerInput("200 mm", "0 mm", "D"),
+    )
+    body2 = svc.get_body(b2)
+    marker_c = next(m for m in body2.markers if m.name == "C")
+    svc.create_joint(
+        "J_BC",
+        "rigid",
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body_id, marker_id=marker_b.id),
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=b2, marker_id=marker_c.id),
+    )
+
+    svc.set_working_context(case_id=parent_id)
+    svc.move_marker(marker_b.id, "150 mm", "0 mm")
+
+    parent = _case(svc, parent_id)
+    # Both markers must have overrides.
+    assert f"markers/{marker_b.id}/x" in parent.invariant_values
+    assert f"markers/{marker_c.id}/x" in parent.invariant_values
+    assert parent.invariant_values[f"markers/{marker_b.id}/x"].value == pytest.approx(150.0)
+    assert parent.invariant_values[f"markers/{marker_c.id}/x"].value == pytest.approx(150.0)
+    # Composed view: both endpoints coincident again.
+    dp = svc.display_project
+    mb = next(m for m in next(b for b in dp.model.bodies if b.id == body_id).markers if m.id == marker_b.id)
+    mc = next(m for m in next(b for b in dp.model.bodies if b.id == b2).markers if m.id == marker_c.id)
+    assert "150" in mb.x.expression
+    assert "150" in mc.x.expression
+
+
 def test_case_can_add_gravity_without_mutating_baseline(svc_with_case_chain) -> None:
     svc, _body_id, parent_id, _child_id = svc_with_case_chain
 

@@ -401,6 +401,95 @@ class BodyCommands:
         marker_name = name or f"M{len(self._find_body(body_id).structural_markers()) + 1}"
         return self.add_marker_to_body(body_id, MarkerInput(x_expression, y_expression, marker_name))
 
+    def _move_marker_into_case(
+        self,
+        case,
+        marker: Marker,
+        marker_id: str,
+        x_expression: str,
+        y_expression: str,
+    ) -> None:
+        """Apply a marker move as a case overlay, dragging joint counterparts.
+
+        Joints (especially rigid ones) require both endpoints to stay
+        coincident. In case mode we don't mutate baseline markers; instead
+        we compute the geometric delta and emit one ``markers/<id>/{x,y}``
+        override for the moved marker AND each marker directly linked to
+        it via a joint that already had coincident endpoints. This mirrors
+        the baseline behaviour of ``_translate_direct_joint_counterparts``.
+        """
+        from quino.domain.workspace import ScalarValue as _WsScalarValue
+        from quino.domain.types import JointEndpointKind
+
+        project = self._project
+        new_x = ScalarProperty(expression=x_expression, unit=marker.x.unit, expected_dimension=Dimension.LENGTH)
+        new_y = ScalarProperty(expression=y_expression, unit=marker.y.unit, expected_dimension=Dimension.LENGTH)
+        target_x_eval = self._ctx.expressions.evaluate_property(new_x, project.parameters)
+        target_y_eval = self._ctx.expressions.evaluate_property(new_y, project.parameters)
+        current_x_eval = self._ctx.expressions.evaluate_property(marker.x, project.parameters)
+        current_y_eval = self._ctx.expressions.evaluate_property(marker.y, project.parameters)
+        target_x = self._ctx.units.convert(self._ctx.units.quantity(target_x_eval.value, target_x_eval.unit), "mm")
+        target_y = self._ctx.units.convert(self._ctx.units.quantity(target_y_eval.value, target_y_eval.unit), "mm")
+        current_x = self._ctx.units.convert(self._ctx.units.quantity(current_x_eval.value, current_x_eval.unit), "mm")
+        current_y = self._ctx.units.convert(self._ctx.units.quantity(current_y_eval.value, current_y_eval.unit), "mm")
+        delta_x = target_x - current_x
+        delta_y = target_y - current_y
+
+        self._ctx.snapshot()
+        # Primary override for the dragged marker.
+        case.invariant_values[f"markers/{marker_id}/x"] = _WsScalarValue(
+            value=float(target_x), unit="mm"
+        )
+        case.invariant_values[f"markers/{marker_id}/y"] = _WsScalarValue(
+            value=float(target_y), unit="mm"
+        )
+
+        # Propagate to counterparts of joints that were already coincident
+        # with this marker. Look up joints through the effective (composed)
+        # project so joints added by the case chain are also considered.
+        if abs(delta_x) > 1e-12 or abs(delta_y) > 1e-12:
+            eff = self._ctx.effective_project()
+            for joint in eff.model.joints:
+                ep_a, ep_b = joint.endpoint_a, joint.endpoint_b
+                counterpart_id: str | None = None
+                if ep_a.kind is JointEndpointKind.MARKER and ep_a.marker_id == marker_id:
+                    if ep_b.kind is JointEndpointKind.MARKER:
+                        counterpart_id = ep_b.marker_id
+                elif ep_b.kind is JointEndpointKind.MARKER and ep_b.marker_id == marker_id:
+                    if ep_a.kind is JointEndpointKind.MARKER:
+                        counterpart_id = ep_a.marker_id
+                if counterpart_id is None or counterpart_id == marker_id:
+                    continue
+                # Resolve the counterpart marker in the effective (composed)
+                # project so we read its already-composed coordinates.
+                counterpart = None
+                for b in eff.model.bodies:
+                    for m in b.markers:
+                        if m.id == counterpart_id:
+                            counterpart = m
+                            break
+                    if counterpart is not None:
+                        break
+                if counterpart is None:
+                    continue
+                # Were the two markers coincident? If not, the joint was
+                # already disassembled; don't drag.
+                cx_eval = self._ctx.expressions.evaluate_property(counterpart.x, project.parameters)
+                cy_eval = self._ctx.expressions.evaluate_property(counterpart.y, project.parameters)
+                cx_mm = self._ctx.units.convert(self._ctx.units.quantity(cx_eval.value, cx_eval.unit), "mm")
+                cy_mm = self._ctx.units.convert(self._ctx.units.quantity(cy_eval.value, cy_eval.unit), "mm")
+                if abs(cx_mm - current_x) > 1e-6 or abs(cy_mm - current_y) > 1e-6:
+                    continue
+                # Emit override for the counterpart so the joint stays
+                # assembled after composition.
+                case.invariant_values[f"markers/{counterpart_id}/x"] = _WsScalarValue(
+                    value=float(cx_mm + delta_x), unit="mm"
+                )
+                case.invariant_values[f"markers/{counterpart_id}/y"] = _WsScalarValue(
+                    value=float(cy_mm + delta_y), unit="mm"
+                )
+        self._ctx.invalidate_pose_state()
+
     def move_marker(self, marker_id: str, x_expression: str, y_expression: str) -> None:
         marker = self._ctx.find_entity(marker_id)
         if not isinstance(marker, Marker):
@@ -408,16 +497,7 @@ class BodyCommands:
         body = self._find_body_by_marker(marker_id)
         case = self._ctx.get_active_case()
         if case is not None and marker.type is not MarkerType.COM:
-            project = self._project
-            new_x = ScalarProperty(expression=x_expression, unit=marker.x.unit, expected_dimension=Dimension.LENGTH)
-            new_y = ScalarProperty(expression=y_expression, unit=marker.y.unit, expected_dimension=Dimension.LENGTH)
-            ev_x = self._ctx.expressions.evaluate_property(new_x, project.parameters)
-            ev_y = self._ctx.expressions.evaluate_property(new_y, project.parameters)
-            from quino.domain.workspace import ScalarValue as _WsScalarValue
-            self._ctx.snapshot()
-            case.invariant_values[f"markers/{marker_id}/x"] = _WsScalarValue(value=float(ev_x.value), unit=ev_x.unit or marker.x.unit)
-            case.invariant_values[f"markers/{marker_id}/y"] = _WsScalarValue(value=float(ev_y.value), unit=ev_y.unit or marker.y.unit)
-            self._ctx.invalidate_pose_state()
+            self._move_marker_into_case(case, marker, marker_id, x_expression, y_expression)
             return
         if marker.type is MarkerType.COM:
             if body.type is BodyType.POINT_MASS:

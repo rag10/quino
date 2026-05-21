@@ -120,6 +120,7 @@ class ApplicationService:
         self._service_context.find_entity = self.entities._find_entity
         self._service_context.sync_all_special_com_markers = self.bodies.sync_all_special_com_markers
         self._service_context.connect_marker_to_ground = self.joints.connect_marker_to_ground
+        self._service_context.set_current_pose_id = self.poses.set_current_pose_id
         self._service_context.joints_for_marker = self.joints._joints_for_marker
         self._service_context.translate_direct_joint_counterparts = self.joints._translate_direct_joint_counterparts
         self._service_context.build_validated_scalar_property = self.entities._build_validated_scalar_property

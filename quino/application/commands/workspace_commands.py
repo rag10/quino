@@ -246,6 +246,15 @@ class WorkspaceCommands:
     ) -> WorkspacePose:
         self._ctx.snapshot()
         ws = self._ensure_workspace()
+        # Auto-materialise a project-level Pose for non-default workspace poses
+        # so the canvas / IK solver have a backing Pose to mutate. Default
+        # poses are computed by the resolver and don't need pre-allocation.
+        if project_pose_id is None and not is_default:
+            project = self._project
+            from quino.domain.model import Pose as _Pose
+            new_proj_pose = _Pose(id=self._ctx.ids.new("pose"), name=name)
+            project.poses.append(new_proj_pose)
+            project_pose_id = new_proj_pose.id
         pose = WorkspacePose(
             id=self._next_id("wpose"),
             name=name,
@@ -268,9 +277,23 @@ class WorkspaceCommands:
     def delete_pose(self, workspace_pose_id: str) -> None:
         self._ctx.snapshot()
         ws = self._ensure_workspace()
+        target = next((p for p in ws.poses if p.id == workspace_pose_id), None)
         analysis_ids = [a.id for a in ws.analyses if a.workspace_pose_id == workspace_pose_id]
         ws.poses = [p for p in ws.poses if p.id != workspace_pose_id]
         ws.analyses = [a for a in ws.analyses if a.workspace_pose_id != workspace_pose_id]
+        # Clear dangling selection.
+        if ws.selected_pose_id == workspace_pose_id:
+            ws.selected_pose_id = None
+        # Tear down the backing project Pose, if any, so the pose list stays
+        # in sync. Clear the current pose first to avoid dangling references.
+        project = self._project
+        if target is not None and target.project_pose_id is not None and project is not None:
+            backing_id = target.project_pose_id
+            try:
+                self._ctx.set_current_pose_id(None)
+            except Exception:
+                pass
+            project.poses = [p for p in project.poses if p.id != backing_id]
         invalidate_on_pose_change(self._project, workspace_pose_id)
         for analysis_id in analysis_ids:
             invalidate_on_analysis_change(self._project, analysis_id)
@@ -339,6 +362,20 @@ class WorkspaceCommands:
         self._ctx.snapshot()
         ws = self._ensure_workspace()
         ws.selected_pose_id = pose_id
+        # Sync the project-level current_pose so the canvas displays the
+        # geometry of the chosen WorkspacePose. Default poses (no project
+        # backing) are left as-is — the resolver handles them.
+        if pose_id is None:
+            return
+        pose = next((p for p in ws.poses if p.id == pose_id), None)
+        if pose is None or pose.project_pose_id is None:
+            return
+        project = self._ctx.project_provider()
+        if project is not None and any(p.id == pose.project_pose_id for p in project.poses):
+            try:
+                self._ctx.set_current_pose_id(pose.project_pose_id)
+            except Exception:
+                pass
 
     def set_selected_analysis(self, analysis_id: str | None) -> None:
         self._ctx.snapshot()
