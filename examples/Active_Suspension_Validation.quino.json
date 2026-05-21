@@ -37,6 +37,30 @@
       "unit": "mm",
       "description": "Free length of the strut spring.",
       "metadata": {}
+    },
+    {
+      "id": "param_005",
+      "name": "RoadAmp",
+      "expression": "1500 N",
+      "unit": "N",
+      "description": "Peak vertical force the road profile applies to the wheel.",
+      "metadata": {}
+    },
+    {
+      "id": "param_006",
+      "name": "RoadFreq",
+      "expression": "2.5 unitless",
+      "unit": "unitless",
+      "description": "Excitation frequency of the rolling-road profile, in Hz.",
+      "metadata": {}
+    },
+    {
+      "id": "param_007",
+      "name": "QuarterCarLoad",
+      "expression": "4000 N",
+      "unit": "N",
+      "description": "Static load representing the quarter-car weight on this corner.",
+      "metadata": {}
     }
   ],
   "sketch": {
@@ -761,7 +785,7 @@
     "loads": [
       {
         "id": "load_001",
-        "name": "RoadBump",
+        "name": "RoadProfile",
         "target_marker_id": "marker_010",
         "fx": {
           "expression": "0 N",
@@ -769,7 +793,7 @@
           "expected_dimension": "force"
         },
         "fy": {
-          "expression": "2500 N * sin(180 deg * t / 0.1 s)",
+          "expression": "RoadAmp * sin(360 deg * RoadFreq * t / 1 s)",
           "unit": "N",
           "expected_dimension": "force"
         },
@@ -777,6 +801,22 @@
       },
       {
         "id": "load_002",
+        "name": "QuarterCarLoad",
+        "target_marker_id": "marker_009",
+        "fx": {
+          "expression": "0 N",
+          "unit": "N",
+          "expected_dimension": "force"
+        },
+        "fy": {
+          "expression": "-QuarterCarLoad",
+          "unit": "N",
+          "expected_dimension": "force"
+        },
+        "metadata": {}
+      },
+      {
+        "id": "load_003",
         "name": "ActuatorForce",
         "target_marker_id": "marker_009",
         "fx": {
@@ -819,6 +859,24 @@
         "marker_ids": [
           "marker_005",
           "marker_006"
+        ],
+        "metadata": {}
+      },
+      {
+        "id": "sensor_004",
+        "name": "RideAccelerometer",
+        "type": "point",
+        "marker_ids": [
+          "marker_008"
+        ],
+        "metadata": {}
+      },
+      {
+        "id": "sensor_005",
+        "name": "ContactPatchPos",
+        "type": "point",
+        "marker_ids": [
+          "marker_010"
         ],
         "metadata": {}
       }
@@ -947,7 +1005,7 @@
           "id": "blk_004",
           "block_type": "LoadCommand",
           "parameters": {
-            "load_id": "load_002",
+            "load_id": "load_003",
             "component": "fy"
           },
           "input_ports": [
@@ -1059,7 +1117,7 @@
     "cases": [
       {
         "id": "case_006",
-        "name": "Stiffer spring",
+        "name": "Rally setup (stiffer spring)",
         "baseline_id": "baseline_001",
         "parent_case_id": null,
         "model_snapshot_id": null,
@@ -1071,12 +1129,60 @@
           "springs_meta/spring_001/damping": {
             "value": 1900.0,
             "unit": ""
+          },
+          "parameters/param_005": {
+            "value": 1200.0,
+            "unit": "N"
+          },
+          "parameters/param_006": {
+            "value": 4.0,
+            "unit": ""
           }
         },
         "metadata": {}
       },
       {
         "id": "case_010",
+        "name": "Pothole strike",
+        "baseline_id": "baseline_001",
+        "parent_case_id": null,
+        "model_snapshot_id": null,
+        "invariant_values": {
+          "parameters/param_005": {
+            "value": 4000.0,
+            "unit": "N"
+          },
+          "parameters/param_006": {
+            "value": 6.0,
+            "unit": ""
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "case_013",
+        "name": "Resonance sweep",
+        "baseline_id": "baseline_001",
+        "parent_case_id": null,
+        "model_snapshot_id": null,
+        "invariant_values": {
+          "parameters/param_005": {
+            "value": 800.0,
+            "unit": "N"
+          },
+          "parameters/param_006": {
+            "value": 4.7,
+            "unit": ""
+          },
+          "springs_meta/spring_001/damping": {
+            "value": 300.0,
+            "unit": ""
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "case_016",
         "name": "Active suspension",
         "baseline_id": "baseline_001",
         "parent_case_id": null,
@@ -1105,20 +1211,58 @@
           "model/control_graph/instances/blk_003/parameters/kd": {
             "value": 120.0,
             "unit": ""
+          },
+          "parameters/param_005": {
+            "value": 2200.0,
+            "unit": "N"
+          },
+          "parameters/param_006": {
+            "value": 3.0,
+            "unit": ""
           }
         },
         "metadata": {}
       },
       {
-        "id": "case_014",
+        "id": "case_020",
         "name": "Heavy passenger",
         "baseline_id": "baseline_001",
-        "parent_case_id": "case_010",
+        "parent_case_id": "case_016",
         "model_snapshot_id": null,
         "invariant_values": {
           "bodies/body_004/mass": {
             "value": 70.0,
             "unit": "kg"
+          },
+          "parameters/param_007": {
+            "value": 6500.0,
+            "unit": "N"
+          }
+        },
+        "metadata": {}
+      },
+      {
+        "id": "case_025",
+        "name": "Actuator failure",
+        "baseline_id": "baseline_001",
+        "parent_case_id": "case_016",
+        "model_snapshot_id": null,
+        "invariant_values": {
+          "model/control_graph/instances/blk_002/parameters/k": {
+            "value": 0.0,
+            "unit": ""
+          },
+          "model/control_graph/instances/blk_003/parameters/kp": {
+            "value": 0.0,
+            "unit": ""
+          },
+          "model/control_graph/instances/blk_003/parameters/ki": {
+            "value": 0.0,
+            "unit": ""
+          },
+          "model/control_graph/instances/blk_003/parameters/kd": {
+            "value": 0.0,
+            "unit": ""
           }
         },
         "metadata": {}
@@ -1190,10 +1334,38 @@
         }
       },
       {
-        "id": "wpose_012",
+        "id": "wpose_014",
+        "name": "Pose default",
+        "baseline_id": null,
+        "case_id": "case_013",
+        "project_pose_id": null,
+        "is_default": true,
+        "parent_pose_id": "wpose_002",
+        "requires_recompute": false,
+        "solve_failed": false,
+        "metadata": {
+          "solved_state": {}
+        }
+      },
+      {
+        "id": "wpose_017",
+        "name": "Pose default",
+        "baseline_id": null,
+        "case_id": "case_016",
+        "project_pose_id": null,
+        "is_default": true,
+        "parent_pose_id": "wpose_002",
+        "requires_recompute": false,
+        "solve_failed": false,
+        "metadata": {
+          "solved_state": {}
+        }
+      },
+      {
+        "id": "wpose_018",
         "name": "Settled (active)",
         "baseline_id": null,
-        "case_id": "case_010",
+        "case_id": "case_016",
         "project_pose_id": "pose_003",
         "is_default": false,
         "parent_pose_id": null,
@@ -1202,13 +1374,13 @@
         "metadata": {}
       },
       {
-        "id": "wpose_015",
+        "id": "wpose_021",
         "name": "Pose default",
         "baseline_id": null,
-        "case_id": "case_014",
+        "case_id": "case_020",
         "project_pose_id": null,
         "is_default": true,
-        "parent_pose_id": "wpose_011",
+        "parent_pose_id": "wpose_017",
         "requires_recompute": false,
         "solve_failed": false,
         "metadata": {
@@ -1216,22 +1388,36 @@
         }
       },
       {
-        "id": "wpose_016",
+        "id": "wpose_022",
         "name": "Static load - heavy",
         "baseline_id": null,
-        "case_id": "case_014",
+        "case_id": "case_020",
         "project_pose_id": "pose_004",
         "is_default": false,
         "parent_pose_id": null,
         "requires_recompute": true,
         "solve_failed": false,
         "metadata": {}
+      },
+      {
+        "id": "wpose_026",
+        "name": "Pose default",
+        "baseline_id": null,
+        "case_id": "case_025",
+        "project_pose_id": null,
+        "is_default": true,
+        "parent_pose_id": "wpose_017",
+        "requires_recompute": false,
+        "solve_failed": false,
+        "metadata": {
+          "solved_state": {}
+        }
       }
     ],
     "analyses": [
       {
         "id": "analysis_004",
-        "name": "Bump @ rest",
+        "name": "Smooth road @ 2.5 Hz",
         "analysis_type": "dynamic",
         "baseline_id": "baseline_001",
         "case_id": null,
@@ -1246,7 +1432,7 @@
       },
       {
         "id": "analysis_005",
-        "name": "Bump @ static load",
+        "name": "Smooth road under load",
         "analysis_type": "dynamic",
         "baseline_id": "baseline_001",
         "case_id": null,
@@ -1261,7 +1447,7 @@
       },
       {
         "id": "analysis_009",
-        "name": "Bump @ stiff",
+        "name": "Rally washboard run",
         "analysis_type": "dynamic",
         "baseline_id": null,
         "case_id": "case_006",
@@ -1275,12 +1461,12 @@
         "metadata": {}
       },
       {
-        "id": "analysis_013",
-        "name": "Bump with PID",
+        "id": "analysis_012",
+        "name": "Single pothole impact",
         "analysis_type": "dynamic",
         "baseline_id": null,
         "case_id": "case_010",
-        "workspace_pose_id": "wpose_012",
+        "workspace_pose_id": null,
         "config": {
           "duration": 1.0,
           "steps": 100,
@@ -1290,12 +1476,12 @@
         "metadata": {}
       },
       {
-        "id": "analysis_017",
-        "name": "Bump heavy passenger",
+        "id": "analysis_015",
+        "name": "Drive at natural frequency",
         "analysis_type": "dynamic",
         "baseline_id": null,
-        "case_id": "case_014",
-        "workspace_pose_id": "wpose_016",
+        "case_id": "case_013",
+        "workspace_pose_id": null,
         "config": {
           "duration": 1.0,
           "steps": 100,
@@ -1305,12 +1491,57 @@
         "metadata": {}
       },
       {
-        "id": "analysis_018",
-        "name": "Bump heavy passenger - long",
+        "id": "analysis_019",
+        "name": "Comfort cruise (PID on)",
         "analysis_type": "dynamic",
         "baseline_id": null,
-        "case_id": "case_014",
-        "workspace_pose_id": "wpose_016",
+        "case_id": "case_016",
+        "workspace_pose_id": "wpose_018",
+        "config": {
+          "duration": 1.0,
+          "steps": 100,
+          "translation_driver_mode": "constraint",
+          "solver_settings": {}
+        },
+        "metadata": {}
+      },
+      {
+        "id": "analysis_023",
+        "name": "Heavy comfort cruise",
+        "analysis_type": "dynamic",
+        "baseline_id": null,
+        "case_id": "case_020",
+        "workspace_pose_id": "wpose_022",
+        "config": {
+          "duration": 1.0,
+          "steps": 100,
+          "translation_driver_mode": "constraint",
+          "solver_settings": {}
+        },
+        "metadata": {}
+      },
+      {
+        "id": "analysis_024",
+        "name": "Heavy + pothole",
+        "analysis_type": "dynamic",
+        "baseline_id": null,
+        "case_id": "case_020",
+        "workspace_pose_id": "wpose_022",
+        "config": {
+          "duration": 1.0,
+          "steps": 100,
+          "translation_driver_mode": "constraint",
+          "solver_settings": {}
+        },
+        "metadata": {}
+      },
+      {
+        "id": "analysis_027",
+        "name": "Failure on rough road",
+        "analysis_type": "dynamic",
+        "baseline_id": null,
+        "case_id": "case_025",
+        "workspace_pose_id": null,
         "config": {
           "duration": 1.0,
           "steps": 100,
@@ -1364,6 +1595,36 @@
         "entity_id": "param_004",
         "property_name": "expression"
       },
+      "parameters/param_005": {
+        "path": "parameters/param_005",
+        "tag": "invariant",
+        "display_name": "RoadAmp",
+        "unit": "N",
+        "dimension": "",
+        "default_value": null,
+        "entity_id": "param_005",
+        "property_name": "expression"
+      },
+      "parameters/param_006": {
+        "path": "parameters/param_006",
+        "tag": "invariant",
+        "display_name": "RoadFreq",
+        "unit": "unitless",
+        "dimension": "",
+        "default_value": null,
+        "entity_id": "param_006",
+        "property_name": "expression"
+      },
+      "parameters/param_007": {
+        "path": "parameters/param_007",
+        "tag": "invariant",
+        "display_name": "QuarterCarLoad",
+        "unit": "N",
+        "dimension": "",
+        "default_value": null,
+        "entity_id": "param_007",
+        "property_name": "expression"
+      },
       "bodies/body_003/mass": {
         "path": "bodies/body_003/mass",
         "tag": "invariant",
@@ -1387,7 +1648,7 @@
       "loads/load_001/fx": {
         "path": "loads/load_001/fx",
         "tag": "invariant",
-        "display_name": "RoadBump Fx",
+        "display_name": "RoadProfile Fx",
         "unit": "N",
         "dimension": "force",
         "default_value": null,
@@ -1397,7 +1658,7 @@
       "loads/load_001/fy": {
         "path": "loads/load_001/fy",
         "tag": "invariant",
-        "display_name": "RoadBump Fy",
+        "display_name": "RoadProfile Fy",
         "unit": "N",
         "dimension": "force",
         "default_value": null,
@@ -1407,7 +1668,7 @@
       "loads/load_002/fx": {
         "path": "loads/load_002/fx",
         "tag": "invariant",
-        "display_name": "ActuatorForce Fx",
+        "display_name": "QuarterCarLoad Fx",
         "unit": "N",
         "dimension": "force",
         "default_value": null,
@@ -1417,11 +1678,31 @@
       "loads/load_002/fy": {
         "path": "loads/load_002/fy",
         "tag": "invariant",
-        "display_name": "ActuatorForce Fy",
+        "display_name": "QuarterCarLoad Fy",
         "unit": "N",
         "dimension": "force",
         "default_value": null,
         "entity_id": "load_002",
+        "property_name": "fy"
+      },
+      "loads/load_003/fx": {
+        "path": "loads/load_003/fx",
+        "tag": "invariant",
+        "display_name": "ActuatorForce Fx",
+        "unit": "N",
+        "dimension": "force",
+        "default_value": null,
+        "entity_id": "load_003",
+        "property_name": "fx"
+      },
+      "loads/load_003/fy": {
+        "path": "loads/load_003/fy",
+        "tag": "invariant",
+        "display_name": "ActuatorForce Fy",
+        "unit": "N",
+        "dimension": "force",
+        "default_value": null,
+        "entity_id": "load_003",
         "property_name": "fy"
       },
       "springs/spring_001/rest_value": {
@@ -1677,6 +1958,6 @@
     },
     "model_snapshots": {},
     "promotion_history": [],
-    "next_sequence": 19
+    "next_sequence": 28
   }
 }
