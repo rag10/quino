@@ -1092,6 +1092,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.set_show_sensors(project.view_state.show_sensors)
         self.canvas.set_selection(self._selected_entity_id)
         self._update_interaction_state()
+        self._update_mode_button_enable_rules()
         self._update_status_message()
 
     def _refresh_block_editor(self) -> None:
@@ -4975,6 +4976,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self.parameters_table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
             self.parameters_table.clearFocus()
         self._update_status_message()
+
+    def _update_mode_button_enable_rules(self) -> None:
+        ws = self.app_service.project.workspace if self.app_service.project else None
+        has_pose = ws is not None and ws.selected_pose_id is not None
+        has_analysis = ws is not None and ws.selected_analysis_id is not None
+        self._mode_pose_btn.setEnabled(has_pose)
+        self._mode_analysis_btn.setEnabled(has_analysis)
 
     def _update_status_message(self) -> None:
         mode = self.canvas.mode()

@@ -2507,3 +2507,70 @@ def test_workflow_single_click_on_case_enters_model_mode(qtbot):
     window.workflow_panel._tree.setCurrentItem(item)
     assert window._app_mode == "model"
     assert app.project.workspace.active_case_id == "c"
+
+
+def test_pose_mode_button_disabled_when_no_pose_selected(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.main_window import MainWindow
+    from quino.domain.workspace import Workspace, Baseline
+    app = ApplicationService()
+    app.new_project("test")
+    app.project.workspace = Workspace(
+        baselines=[Baseline(id="b", name="base")],
+        active_baseline_id="b",
+    )
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window.refresh_all()
+    ws = app.project.workspace
+    assert ws.selected_pose_id is None
+    assert not window._mode_pose_btn.isEnabled()
+    assert not window._mode_analysis_btn.isEnabled()
+
+
+def test_analysis_mode_button_disabled_when_no_analysis_selected(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.main_window import MainWindow
+    from quino.domain.workspace import Workspace, Baseline
+    app = ApplicationService()
+    app.new_project("test")
+    app.project.workspace = Workspace(
+        baselines=[Baseline(id="b", name="base")],
+        active_baseline_id="b",
+    )
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window.refresh_all()
+    ws = app.project.workspace
+    assert ws.selected_analysis_id is None
+    assert not window._mode_analysis_btn.isEnabled()
+
+
+def test_workflow_badge_shows_breadcrumb(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.panels.workflow_tree_panel import WorkflowTreePanel
+    from quino.domain.workspace import Workspace, Baseline, Case
+    app = ApplicationService()
+    app.new_project("test")
+    app.project.workspace = Workspace(
+        baselines=[Baseline(id="b", name="Baseline 1")],
+        cases=[
+            Case(id="c1", name="Caso 3", baseline_id="b"),
+            Case(id="c2", name="Caso 3D", baseline_id="b", parent_case_id="c1"),
+        ],
+        active_baseline_id="b",
+        active_case_id="c2",
+    )
+    panel = WorkflowTreePanel(app)
+    qtbot.addWidget(panel)
+    panel.refresh()
+    badge_text = panel._badge.text()
+    assert "Caso 3D" in badge_text
+    assert "Caso 3" in badge_text
+    assert "Baseline 1" in badge_text
