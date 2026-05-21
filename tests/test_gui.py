@@ -3455,6 +3455,73 @@ def test_connection_has_tooltip_and_arrow_renders(qtbot):
     assert found_pixel
 
 
+def test_block_editor_set_selected_does_not_scroll_viewport(qtbot):
+    """Plain set_selected must not move the viewport — selections from
+    within the canvas (or after an edit) should keep the view stable."""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.gui.blocks.editor_widget import BlockEditorWidget
+    from quino.domain.blocks import BlockDiagram, BlockInstance, PortSpec
+
+    diagram = BlockDiagram(
+        instances={
+            "b1": BlockInstance(
+                instance_id="b1", block_type="Constant",
+                parameters={"value": 1.0, "_position": [400, 300]},
+                input_ports=[], output_ports=[PortSpec("out")],
+            ),
+        },
+    )
+    widget = BlockEditorWidget()
+    qtbot.addWidget(widget)
+    widget.show()
+    widget.set_diagram(diagram)
+    widget._canvas.centerOn(0.0, 0.0)
+    QtWidgets.QApplication.processEvents()
+    h0 = widget._canvas.horizontalScrollBar().value()
+    v0 = widget._canvas.verticalScrollBar().value()
+
+    widget.set_selected("b1")
+    QtWidgets.QApplication.processEvents()
+
+    assert widget._canvas.horizontalScrollBar().value() == h0
+    assert widget._canvas.verticalScrollBar().value() == v0
+
+
+def test_block_editor_reveal_centers_offscreen_block(qtbot):
+    """reveal() must scroll the viewport when the target block is off
+    screen (selection coming from the model tree)."""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.gui.blocks.editor_widget import BlockEditorWidget
+    from quino.domain.blocks import BlockDiagram, BlockInstance, PortSpec
+
+    diagram = BlockDiagram(
+        instances={
+            "far": BlockInstance(
+                instance_id="far", block_type="Constant",
+                parameters={"value": 1.0, "_position": [3000, 3000]},
+                input_ports=[], output_ports=[PortSpec("out")],
+            ),
+        },
+    )
+    widget = BlockEditorWidget()
+    qtbot.addWidget(widget)
+    widget.resize(400, 300)
+    widget.show()
+    widget.set_diagram(diagram)
+    widget._canvas.centerOn(0.0, 0.0)
+    QtWidgets.QApplication.processEvents()
+
+    widget.reveal("far")
+    QtWidgets.QApplication.processEvents()
+
+    # Now the block's scene rect should be inside the viewport-mapped rect.
+    visible = widget._canvas.mapToScene(widget._canvas.viewport().rect()).boundingRect()
+    item = widget._scene._block_items["far"]
+    assert visible.intersects(item.sceneBoundingRect())
+
+
 def test_block_editor_set_selected_centers_view(qtbot):
     import os
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

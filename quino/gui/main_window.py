@@ -2684,7 +2684,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if isinstance(entity_id, tuple):
             kind = entity_id[0]
             if kind == "block_param" and len(entity_id) >= 3:
-                self._select_block(entity_id[1])
+                self._select_block(entity_id[1], reveal=True)
                 return
             if kind == "block_connection":
                 self._selected_entity_id = entity_id
@@ -2699,7 +2699,7 @@ class MainWindow(QtWidgets.QMainWindow):
             and project.model.control_graph is not None
             and entity_id in project.model.control_graph.instances
         ):
-            self._select_block(entity_id)
+            self._select_block(entity_id, reveal=True)
             return
         if entity_id is not None and self.canvas.mode() in self._CREATION_MODES:
             # In a creation workflow: route the selection to the canvas without
@@ -2712,14 +2712,23 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._app_mode == "pose" and self._pose_pick_state is not None and entity_id is not None:
             self._advance_pose_pick(entity_id)
 
-    def _select_block(self, instance_id: str | None) -> None:
-        """Select a block diagram instance, clearing mechanism canvas selection."""
+    def _select_block(self, instance_id: str | None, *, reveal: bool = False) -> None:
+        """Select a block diagram instance, clearing mechanism canvas selection.
+
+        When ``reveal`` is True (selection coming from the model tree or
+        elsewhere outside the block canvas), the canvas scrolls to bring
+        the block on screen if needed. When False (selection originated in
+        the canvas itself), the viewport stays put.
+        """
         self._selected_entity_id = instance_id
         try:
             self.canvas.set_selection(None)
         except Exception:
             pass
-        self._block_editor.set_selected(instance_id)
+        if reveal:
+            self._block_editor.reveal(instance_id)
+        else:
+            self._block_editor.set_selected(instance_id)
         item = self._tree_items.get(instance_id) if instance_id else None
         if item is not None:
             self._suspend_tree_injection = True

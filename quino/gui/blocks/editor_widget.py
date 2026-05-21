@@ -119,10 +119,33 @@ class BlockEditorWidget(QtWidgets.QWidget):
         """No-op stub kept for call-site compatibility (inspector removed)."""
 
     def set_selected(self, instance_id: str | None) -> None:
-        """Highlight an instance in the diagram (called from main inspector)."""
+        """Highlight an instance in the diagram WITHOUT scrolling the view.
+
+        Use ``reveal(instance_id)`` to also bring the block on-screen (e.g.
+        after a model-tree click). Recentering on every selection felt
+        intrusive while editing, so the default is "highlight in place".
+        """
         self._scene.set_selected(instance_id)
-        if instance_id is not None:
-            self._canvas.center_block(instance_id)
+
+    def reveal(self, instance_id: str | None) -> None:
+        """Select *and* scroll the view so the named block is visible.
+
+        Used when a selection originates from outside the canvas (model
+        tree, search) and the block may not currently be on screen.
+        Triggers no movement if the block is already fully visible.
+        """
+        self._scene.set_selected(instance_id)
+        if instance_id is None:
+            return
+        item = self._scene._block_items.get(instance_id)
+        if item is None:
+            return
+        visible_rect = self._canvas.mapToScene(
+            self._canvas.viewport().rect()
+        ).boundingRect()
+        if visible_rect.contains(item.sceneBoundingRect()):
+            return
+        self._canvas.center_block(instance_id)
 
     def fit_blocks(self) -> None:
         self._canvas.fit_blocks()
