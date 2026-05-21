@@ -60,6 +60,8 @@ class ServiceContext:
             "loads": mapper._load_to_dict,
             "sensors": mapper._sensor_to_dict,
             "springs": mapper._spring_to_dict,
+            "blocks": mapper._block_instance_to_dict,
+            "connections": mapper._block_connection_to_dict,
         }.get(domain)
         if serializer is None:
             return False

@@ -36,6 +36,7 @@ from quino.application.commands.body_commands import BodyCommands
 from quino.application.commands.joint_commands import JointCommands
 from quino.application.commands.entity_commands import EntityCommands
 from quino.application.commands.workspace_commands import WorkspaceCommands
+from quino.application.commands.block_commands import BlockCommands
 from quino.serialization.json_io import JsonMapper
 from quino.pose.model import PoseConstraint, PoseSolveResult, PoseSolveSettings
 from quino.pose.runner import PoseRunner
@@ -113,6 +114,7 @@ class ApplicationService:
             poses=self.poses,
         )
         self.workspace = WorkspaceCommands(self._service_context)
+        self.blocks = BlockCommands(self._service_context)
         # Rewire context callables to their canonical implementations
         self._service_context.find_entity = self.entities._find_entity
         self._service_context.sync_all_special_com_markers = self.bodies.sync_all_special_com_markers
@@ -929,4 +931,39 @@ class ApplicationService:
 
     def set_selected_analysis(self, analysis_id: str | None) -> None:
         self.workspace.set_selected_analysis(analysis_id)
+
+    # ------------------------------------------------------------------ blocks
+
+    def add_block(
+        self,
+        *,
+        block_type: str,
+        name: str,
+        position: tuple[float, float],
+        parameters: dict | None = None,
+    ) -> str:
+        return self.blocks.add_block(
+            block_type=block_type, name=name, position=position, parameters=parameters
+        )
+
+    def add_connection(
+        self,
+        *,
+        src_instance: str,
+        src_port: str,
+        dst_instance: str,
+        dst_port: str,
+    ) -> None:
+        return self.blocks.add_connection(
+            src_instance=src_instance,
+            src_port=src_port,
+            dst_instance=dst_instance,
+            dst_port=dst_port,
+        )
+
+    def set_block_parameter(self, instance_id: str, key: str, value: float) -> None:
+        self.blocks.set_block_parameter(instance_id, key, value)
+
+    def set_block_name(self, instance_id: str, name: str) -> None:
+        self.blocks.set_block_name(instance_id, name)
 
