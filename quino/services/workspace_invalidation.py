@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from quino.domain.model import Project
 from quino.domain.workspace import Workspace
+from quino.services.workspace_staleness import mark_descendants_stale
 
 
 def _mark_stale(entry, reason: str) -> None:
@@ -27,12 +28,17 @@ def invalidate_on_model_change(project: Project) -> None:
 
 
 def invalidate_on_case_change(project: Project, case_id: str) -> None:
-    """Mark entries that belong to *case_id* as stale."""
+    """Mark entries that belong to *case_id* and descendant cases as stale."""
     workspace = _ensure_workspace(project)
+
+    # Mark the case itself and its direct entries
     for run in workspace.runs:
         for entry in run.entries:
             if entry.case_id == case_id:
                 _mark_stale(entry, f"case_changed:{case_id}")
+
+    # Mark all descendant cases' analyses as stale (propagate staleness down the hierarchy)
+    mark_descendants_stale(workspace, case_id)
 
 
 def invalidate_on_study_change(project: Project, study_id: str) -> None:
