@@ -2574,3 +2574,13 @@ def test_workflow_badge_shows_breadcrumb(qtbot):
     assert "Caso 3D" in badge_text
     assert "Caso 3" in badge_text
     assert "Baseline 1" in badge_text
+
+
+def test_block_editor_widget_no_inspector(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.gui.blocks.editor_widget import BlockEditorWidget
+    widget = BlockEditorWidget()
+    qtbot.addWidget(widget)
+    assert not hasattr(widget, "_inspector")
+    widget.set_selected("nonexistent")  # should not raise

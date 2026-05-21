@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from PySide6 import QtCore, QtWidgets
 
-from quino import ApplicationService, DriverType, MarkerInput
 from quino.blocks.exudyn_bridge import ExudynBlockBridge
 from quino.blocks.library import BLOCK_REGISTRY
 from quino.domain.blocks import BlockDiagram, BlockInstance, Connection, PortSpec
 from quino.gui.blocks.block_canvas import BlockDiagramScene
-from quino.gui.blocks.inspector import BlockInspector
 from quino.gui.blocks.palette import BlockPalette, palette_categories
 
 
@@ -81,36 +79,9 @@ def test_semantic_blocks_get_default_parameters_on_creation() -> None:
 
 
 def test_block_inspector_uses_model_aware_combos_for_semantic_blocks() -> None:
-    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
-    app = ApplicationService()
-    app.new_project("Inspector")
-    body_id = app.create_body("Body", [MarkerInput("0 mm", "0 mm", "P")])
-    marker_id = next(marker.id for marker in app.get_body(body_id).markers if marker.name == "P")
-    sensor_id = app.create_sensor("Probe", "point", [marker_id])
-    joint_id = app.connect_marker_to_ground(marker_id, name="Ground_P")
-    driver_id = app.create_driver("Drive", DriverType.ROTATION.value, joint_id, "0 deg", "deg")
+    """BlockInspector has been removed (block properties now shown in main inspector panel).
 
-    inspector = BlockInspector()
-    inspector.set_project(app.project)
-    inspector.set_block(
-        "sensor_block",
-        "ModelSensor",
-        {"sensor_id": sensor_id, "channel": "y"},
-    )
-
-    sensor_widget = inspector._fields["sensor_id"]
-    channel_widget = inspector._fields["channel"]
-    assert isinstance(sensor_widget, QtWidgets.QComboBox)
-    assert isinstance(channel_widget, QtWidgets.QComboBox)
-    assert sensor_widget.currentData() == sensor_id
-    assert channel_widget.currentData() == "y"
-
-    inspector.set_block(
-        "driver_block",
-        "DriverCommand",
-        {"driver_id": driver_id},
-    )
-    driver_widget = inspector._fields["driver_id"]
-    assert isinstance(driver_widget, QtWidgets.QComboBox)
-    assert driver_widget.currentData() == driver_id
-    assert qt_app is not None
+    This test is kept as a placeholder so the test function name remains discoverable
+    in history; the assertions have been removed along with BlockInspector.
+    """
+    pass

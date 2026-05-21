@@ -418,6 +418,18 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
         self._connection_items.append(conn_item)
         self.sync_to_diagram()
 
+    # -- selection ----------------------------------------------------------
+
+    def set_selected(self, instance_id: str | None) -> None:
+        """Programmatically select a block by instance_id (None clears selection)."""
+        self.blockSignals(True)
+        self.clearSelection()
+        if instance_id is not None:
+            item = self._block_items.get(instance_id)
+            if item is not None:
+                item.setSelected(True)
+        self.blockSignals(False)
+
     # -- keyboard -----------------------------------------------------------
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
