@@ -367,3 +367,16 @@ def test_workspace_pose_roundtrip_with_inheritance_fields():
     assert restored_pose.requires_recompute is False
     assert restored_pose.solve_failed is True
     assert restored_pose.metadata["solved_state"]["m1"] == [1.0, 2.0]
+
+
+def test_analysis_type_enum_values():
+    from quino.domain.types import AnalysisType
+    assert AnalysisType.DYNAMIC.value == "dynamic"
+    assert AnalysisType.STATIC.value == "static"
+    assert AnalysisType.KINEMATIC.value == "kinematic"
+    assert AnalysisType.EQUILIBRIUM.value == "equilibrium"
+
+
+def test_analysis_type_from_string():
+    from quino.domain.types import AnalysisType
+    assert AnalysisType("dynamic") is AnalysisType.DYNAMIC

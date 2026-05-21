@@ -100,3 +100,10 @@ class SketchState(StrEnum):
     FULLY_CONSTRAINED = "fully_constrained"
     OVER_CONSTRAINED = "over_constrained"
     INCONSISTENT = "inconsistent"
+
+
+class AnalysisType(StrEnum):
+    DYNAMIC = "dynamic"
+    STATIC = "static"
+    KINEMATIC = "kinematic"
+    EQUILIBRIUM = "equilibrium"
