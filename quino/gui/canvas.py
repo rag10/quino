@@ -704,6 +704,37 @@ class MechanismCanvas(QtWidgets.QWidget):
         """
         return self._display_project if self._display_project is not None else self.app_service.project
 
+    def _case_delta_ids(self) -> tuple[set[str], set[str]]:
+        """Return (overridden_ids, added_ids) for the active case, empty if none.
+
+        Used to draw subtle visual markers (e.g. blue accent) on entities
+        whose properties were overridden in the active case, and a green
+        accent on entities added by the case.
+        """
+        project = self.app_service.project
+        if project is None or project.workspace is None:
+            return (set(), set())
+        ws = project.workspace
+        if ws.active_case_id is None:
+            return (set(), set())
+        case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
+        if case is None:
+            return (set(), set())
+        overridden: set[str] = set()
+        for path in case.invariant_values:
+            parts = path.split("/")
+            if len(parts) >= 2:
+                overridden.add(parts[1])
+        for entity_id, _ in case.reference_overrides.items():
+            overridden.add(entity_id)
+        added: set[str] = set()
+        for domain, entities in case.added_entities.items():
+            for ent in entities:
+                eid = ent.get("id") or ent.get("instance_id")
+                if eid:
+                    added.add(eid)
+        return (overridden, added)
+
     def set_editing_enabled(self, enabled: bool) -> None:
         self._editing_enabled = enabled
         if not enabled:
@@ -1074,9 +1105,39 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._draw_creation_overlay(painter, transform)
         self._draw_edge_rulers(painter, transform)
         self._draw_pose_dof_info(painter, project)
+        self._draw_active_case_badge(painter)
 
         if self._pose_readonly:
             painter.fillRect(self.rect(), QtGui.QColor(180, 180, 180, 45))
+
+    def _draw_active_case_badge(self, painter: QtGui.QPainter) -> None:
+        """Top-left badge showing the active case name (if any), so the user
+        always knows whether they're editing the baseline or a case overlay."""
+        project = self.app_service.project
+        if project is None or project.workspace is None:
+            return
+        ws = project.workspace
+        if ws.active_case_id is None:
+            return
+        case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
+        if case is None:
+            return
+        painter.save()
+        font = painter.font()
+        font.setPointSize(9)
+        font.setBold(True)
+        painter.setFont(font)
+        text = f"Case: {case.name}"
+        metrics = painter.fontMetrics()
+        text_rect = metrics.boundingRect(text)
+        pad = 6
+        rect = QtCore.QRectF(8, 8, text_rect.width() + pad * 2, text_rect.height() + pad)
+        painter.setPen(QtGui.QPen(QtGui.QColor("#2255aa"), 1.0))
+        painter.setBrush(QtGui.QBrush(QtGui.QColor(34, 85, 170, 30)))
+        painter.drawRoundedRect(rect, 4, 4)
+        painter.setPen(QtGui.QPen(QtGui.QColor("#2255aa")))
+        painter.drawText(rect, QtCore.Qt.AlignmentFlag.AlignCenter, text)
+        painter.restore()
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # pragma: no cover - UI behavior
         super().resizeEvent(event)
@@ -3058,6 +3119,7 @@ class MechanismCanvas(QtWidgets.QWidget):
     ) -> None:
         self._screen_bodies = []
         marker_map = {marker.entity_id: marker for marker in markers}
+        overridden_ids, added_ids = self._case_delta_ids()
         for body in project.model.bodies:
             if self._is_ground_anchor_body(body):
                 continue
@@ -3069,6 +3131,15 @@ class MechanismCanvas(QtWidgets.QWidget):
             base_width = body.style.line_width if body.style.line_width else 2.3
             pen = QtGui.QPen(base_color, base_width)
             fill = QtGui.QColor(base_color.red(), base_color.green(), base_color.blue(), 85)
+            # Case-delta accents: blue=overridden, green=added by case.
+            # Selected highlight wins on top.
+            marker_overridden = any(m.id in overridden_ids for m in body.markers)
+            if body.id in added_ids:
+                pen.setColor(QtGui.QColor("#228822"))
+                pen.setWidthF(base_width + 0.5)
+            elif body.id in overridden_ids or marker_overridden:
+                pen.setColor(QtGui.QColor("#2255aa"))
+                pen.setWidthF(base_width + 0.5)
             if selected:
                 pen.setColor(QtGui.QColor("#c75b12"))
                 pen.setWidthF(base_width + 1.0)
@@ -3143,6 +3214,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._screen_joints = []
         marker_map = {marker.entity_id: marker for marker in markers}
         slider_map = {slider.entity_id: slider for slider in sliders}
+        overridden_ids, added_ids = self._case_delta_ids()
         for joint in project.model.joints:
             if joint.metadata.values.get("internal_ground_anchor"):
                 continue
@@ -3152,6 +3224,10 @@ class MechanismCanvas(QtWidgets.QWidget):
             point = self._to_screen(position[0], position[1], transform)
             self._screen_joints.append((joint.id, point))
             pen_color = QtGui.QColor("#2f3a4b")
+            if joint.id in added_ids:
+                pen_color = QtGui.QColor("#228822")
+            elif joint.id in overridden_ids:
+                pen_color = QtGui.QColor("#2255aa")
             if self._selected_entity_id == joint.id:
                 pen_color = QtGui.QColor("#c75b12")
                 painter.setBrush(QtGui.QBrush(QtGui.QColor(231, 111, 81, 45)))
@@ -3522,6 +3598,7 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def _draw_markers(self, painter: QtGui.QPainter, markers: list[CanvasMarker], transform) -> None:
         self._screen_markers = []
+        overridden_ids, added_ids = self._case_delta_ids()
         for marker in markers:
             if not marker.visible:
                 continue
@@ -3533,6 +3610,15 @@ class MechanismCanvas(QtWidgets.QWidget):
             else:
                 fill = QtGui.QColor("#1e1e1e")
                 radius = 4.0
+            # Case-delta ring (drawn behind the marker fill).
+            if marker.entity_id in added_ids:
+                painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
+                painter.setBrush(QtGui.QBrush(QtGui.QColor(34, 136, 34, 80)))
+                painter.drawEllipse(point, radius + 4.0, radius + 4.0)
+            elif marker.entity_id in overridden_ids:
+                painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
+                painter.setBrush(QtGui.QBrush(QtGui.QColor(34, 85, 170, 80)))
+                painter.drawEllipse(point, radius + 4.0, radius + 4.0)
             if self._selected_entity_id == marker.entity_id:
                 painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
                 painter.setBrush(QtGui.QBrush(QtGui.QColor(199, 91, 18, 48)))

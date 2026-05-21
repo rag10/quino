@@ -126,6 +126,7 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
         """Add a small gray hint label below the property row for the given path.
 
         Typically used to show the baseline value when a case override is active.
+        Also tints the row's left edge blue to indicate the override visually.
         If the path is not found, this is a no-op.
         """
         outer_widget = self._row_widgets.get(path)
@@ -142,10 +143,14 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
                 if lbl.property("is_baseline_hint"):
                     outer_layout.removeWidget(lbl)
                     lbl.deleteLater()
+        # Apply a left-border accent to the outer widget to flag the override
+        outer_widget.setStyleSheet(
+            "QWidget { border-left: 3px solid #2255aa; padding-left: 4px; }"
+        )
         hint_label = QtWidgets.QLabel(hint)
         hint_label.setProperty("is_baseline_hint", True)
         hint_label.setStyleSheet(
-            "color: #888888; font-size: 8pt; margin-left: 108px; margin-top: 0px;"
+            "color: #888888; font-size: 8pt; margin-left: 108px; margin-top: 0px; border: none;"
         )
         hint_label.setWordWrap(False)
         outer_layout.addWidget(hint_label)

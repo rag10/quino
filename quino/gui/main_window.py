@@ -2147,6 +2147,78 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.tree.blockSignals(False)
 
+    def _baseline_value_for_path(self, project, path: str) -> str | None:
+        """Read the baseline (pre-override) value at *path* for the inspector hint.
+
+        Supports the same path domains as the composer's resolvers
+        (bodies/markers/sliders/joints/drivers/springs/loads/springs_meta).
+        Returns a formatted "<value> <unit>" string, or None if the path
+        cannot be resolved.
+        """
+        try:
+            parts = path.split("/")
+            if len(parts) < 3:
+                return None
+            domain, entity_id, prop = parts[0], parts[1], parts[2]
+            obj = None
+            if domain == "bodies":
+                obj = next((b for b in project.model.bodies if b.id == entity_id), None)
+            elif domain == "markers":
+                for body in project.model.bodies:
+                    for m in body.markers:
+                        if m.id == entity_id:
+                            obj = m
+                            break
+                    if obj is not None:
+                        break
+            elif domain == "sliders":
+                obj = next((s for s in project.model.sliders if s.id == entity_id), None)
+            elif domain == "joints":
+                joint = next((j for j in project.model.joints if j.id == entity_id), None)
+                if joint is None:
+                    return None
+                key = {
+                    "friction_coulomb": "friction_coulomb",
+                    "friction_viscous": "friction_viscous",
+                    "friction_pin_radius": "friction_pin_radius",
+                    "angle_limit_positive": "angle_limit_positive_deg",
+                    "angle_limit_negative": "angle_limit_negative_deg",
+                }.get(prop, prop)
+                val = joint.metadata.values.get(key)
+                if val is None:
+                    return "(unset)"
+                return f"{float(val):.4g}"
+            elif domain == "drivers":
+                obj = next((d for d in project.model.drivers if d.id == entity_id), None)
+            elif domain == "springs":
+                obj = next((s for s in project.model.springs if s.id == entity_id), None)
+            elif domain == "springs_meta":
+                spring = next((s for s in project.model.springs if s.id == entity_id), None)
+                if spring is None:
+                    return None
+                val = spring.metadata.values.get(prop)
+                if val is None:
+                    return "(unset)"
+                return f"{float(val):.4g}"
+            elif domain == "loads":
+                obj = next((l for l in project.model.loads if l.id == entity_id), None)
+            elif domain == "parameters":
+                p = next((p for p in project.parameters if p.id == entity_id), None)
+                if p is None:
+                    return None
+                return p.expression
+
+            if obj is None:
+                return None
+            scalar = getattr(obj, prop, None)
+            if scalar is None:
+                return "(unset)"
+            if hasattr(scalar, "expression"):
+                return scalar.expression
+            return str(scalar)
+        except Exception:
+            return None
+
     def _apply_case_delta_highlights(self) -> None:
         """Highlight model tree items for entities changed in the active case.
 
@@ -2174,14 +2246,13 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         changed_ids = _changed_entity_ids_for_case(case)
-        added_ids = {e.get("id") for e in case.added_entities.get("bodies", [])}
-        added_ids.update(e.get("id") for e in case.added_entities.get("joints", []))
-        added_ids.update(e.get("id") for e in case.added_entities.get("sliders", []))
-        added_ids.update(e.get("id") for e in case.added_entities.get("drivers", []))
-        added_ids.update(e.get("id") for e in case.added_entities.get("loads", []))
-        added_ids.update(e.get("id") for e in case.added_entities.get("sensors", []))
-        added_ids.update(e.get("id") for e in case.added_entities.get("springs", []))
-        added_ids.discard(None)
+        # Collect added entity ids across all domains (incl. blocks).
+        added_ids: set[str] = set()
+        for domain, entities in case.added_entities.items():
+            for ent in entities:
+                eid = ent.get("id") or ent.get("instance_id")
+                if eid:
+                    added_ids.add(eid)
         removed_ids = set(case.removed_entity_ids)
 
         override_brush = QtGui.QBrush(QtGui.QColor("#2255aa"))
@@ -4062,8 +4133,11 @@ class MainWindow(QtWidgets.QMainWindow):
                             # paths look like: category/entity_id/prop
                             if len(parts) >= 3 and parts[1] == self._selected_entity_id:
                                 prop_path = parts[2]
-                                unit = scalar.unit
-                                hint = f"Baseline: {scalar.value:.4g} {unit}".strip()
+                                baseline_str = self._baseline_value_for_path(project, iv_path)
+                                if baseline_str is None:
+                                    # Fall back to scalar value (no baseline definition)
+                                    baseline_str = f"{scalar.value:.4g} {scalar.unit}".strip()
+                                hint = f"Baseline: {baseline_str}"
                                 self.inspector.set_property_hint(prop_path, hint)
 
             # --- markers section for Body/Bar (consolidated with reordering) ---

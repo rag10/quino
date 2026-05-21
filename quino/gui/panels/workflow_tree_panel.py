@@ -19,24 +19,33 @@ _STATUS_COLORS = {
 
 _DELTA_LABELS = {
     "bodies": "bodies",
+    "markers": "markers",
+    "sliders": "sliders",
+    "joints": "joints",
     "drivers": "drivers",
     "springs": "springs",
+    "springs_meta": "springs",
     "loads": "loads",
     "parameters": "params",
     "model": "blocks",
+    "block_diagram": "blocks",
 }
 
 
 def _build_delta_summary(case: _Case) -> str:
-    """Return compact category summary like '2 bodies, 1 driver'."""
-    if not case.invariant_values:
-        return ""
+    """Return compact category summary, e.g. '2 bodies, 1 driver (+1 added, -1 removed)'."""
     counts: dict[str, int] = {}
     for path in case.invariant_values:
         domain = path.split("/")[0]
         label = _DELTA_LABELS.get(domain, domain)
         counts[label] = counts.get(label, 0) + 1
     parts = [f"{v} {k}" for k, v in counts.items()]
+    added_total = sum(len(v) for v in case.added_entities.values())
+    removed_total = len(case.removed_entity_ids) + len(case.removed_connections)
+    if added_total:
+        parts.append(f"+{added_total} added")
+    if removed_total:
+        parts.append(f"-{removed_total} removed")
     return ", ".join(parts)
 
 
