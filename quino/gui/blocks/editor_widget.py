@@ -42,17 +42,69 @@ class BlockEditorWidget(QtWidgets.QWidget):
         self._palette = BlockPalette(self)
         layout.addWidget(self._palette)
 
-        # Center: canvas
+        # Center: toolbar + canvas, stacked vertically.
+        center = QtWidgets.QWidget(self)
+        center_layout = QtWidgets.QVBoxLayout(center)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.setSpacing(0)
+
+        self._toolbar = self._build_toolbar()
+        center_layout.addWidget(self._toolbar)
+
         self._scene = BlockDiagramScene(parent=self)
         self._canvas = BlockEditorCanvas(self._scene, parent=self)
         self._canvas.setAcceptDrops(True)
-        layout.addWidget(self._canvas, stretch=1)
+        center_layout.addWidget(self._canvas, stretch=1)
+
+        layout.addWidget(center, stretch=1)
 
         # Wiring
         self._palette.blockTypeRequested.connect(self._add_block_from_palette)
         self._scene.blockSelected.connect(self.blockSelected.emit)
         self._scene.selectionCleared.connect(self.selectionCleared.emit)
         self._scene.diagramChanged.connect(self.diagramChanged.emit)
+
+    def _build_toolbar(self) -> QtWidgets.QToolBar:
+        bar = QtWidgets.QToolBar(self)
+        bar.setIconSize(QtCore.QSize(16, 16))
+        bar.setMovable(False)
+
+        def _add(name: str, tip: str, slot) -> QtWidgets.QToolButton:
+            btn = QtWidgets.QToolButton(bar)
+            btn.setText(name)
+            btn.setToolTip(tip)
+            btn.clicked.connect(slot)
+            bar.addWidget(btn)
+            return btn
+
+        self._btn_delete = _add("Delete", "Delete selected block(s) or connection(s) (Del)", self._delete_selected)
+        bar.addSeparator()
+        self._btn_fit = _add("Fit", "Fit diagram to view", lambda: self._canvas.fit_blocks())
+        self._btn_layout = _add("Auto layout", "Topologically lay out blocks left to right", lambda: self._scene.auto_layout())
+        bar.addSeparator()
+        self._btn_validate = _add("Validate", "Re-run validation (highlights cycles and unconnected inputs)", lambda: self._scene.validate_and_highlight())
+        self._btn_clear = _add("Clear", "Remove all blocks from the diagram", self._clear_with_confirm)
+        return bar
+
+    def _delete_selected(self) -> None:
+        # Reuse view-level delete (which calls back into scene)
+        try:
+            self._canvas._delete_selected()
+        except AttributeError:
+            pass
+
+    def _clear_with_confirm(self) -> None:
+        if not self._scene._block_items:
+            return
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Clear block diagram",
+            "Remove all blocks from the diagram? This cannot be undone via this dialog (use undo).",
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No,
+        )
+        if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+            self._scene.clear_diagram()
 
     # -- public API ---------------------------------------------------------
 
@@ -69,6 +121,14 @@ class BlockEditorWidget(QtWidgets.QWidget):
     def set_selected(self, instance_id: str | None) -> None:
         """Highlight an instance in the diagram (called from main inspector)."""
         self._scene.set_selected(instance_id)
+        if instance_id is not None:
+            self._canvas.center_block(instance_id)
+
+    def fit_blocks(self) -> None:
+        self._canvas.fit_blocks()
+
+    def center_block(self, instance_id: str) -> None:
+        self._canvas.center_block(instance_id)
 
     def diagram(self) -> BlockDiagram | None:
         self._scene.sync_to_diagram()

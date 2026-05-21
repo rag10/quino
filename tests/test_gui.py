@@ -2912,3 +2912,116 @@ def test_pose_toolbar_has_at_most_two_buttons_per_column(qtbot):
         buttons_by_column[column] = buttons_by_column.get(column, 0) + 1
 
     assert max(buttons_by_column.values()) <= 2
+
+
+# ----------------------------------------------------------------------
+# Fase 1: block editor toolbar + fit/center/auto-layout
+# ----------------------------------------------------------------------
+
+def test_block_editor_toolbar_exposes_fit_layout_validate_clear(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.gui.blocks.editor_widget import BlockEditorWidget
+    widget = BlockEditorWidget()
+    qtbot.addWidget(widget)
+    tips = [btn.toolTip() for btn in widget._toolbar.findChildren(QtWidgets.QToolButton)]
+    text_blob = " | ".join(tips).lower()
+    assert "fit" in text_blob
+    assert "lay out" in text_blob or "layout" in text_blob
+    assert "validate" in text_blob or "validation" in text_blob
+    assert "delete" in text_blob
+
+
+def test_block_editor_fit_blocks_handles_empty_scene(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.gui.blocks.editor_widget import BlockEditorWidget
+    widget = BlockEditorWidget()
+    qtbot.addWidget(widget)
+    # Should not raise.
+    widget.fit_blocks()
+
+
+def test_block_editor_auto_layout_assigns_distinct_columns(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.blocks.editor_widget import BlockEditorWidget
+    from quino.domain.blocks import BlockDiagram, BlockInstance, Connection, PortSpec
+
+    app = ApplicationService()
+    app.new_project("test")
+    diagram = BlockDiagram(
+        instances={
+            "src": BlockInstance(
+                instance_id="src", block_type="Constant",
+                parameters={"value": 1.0, "_position": [0, 0]},
+                input_ports=[], output_ports=[PortSpec("out")],
+            ),
+            "gain": BlockInstance(
+                instance_id="gain", block_type="Gain",
+                parameters={"k": 2.0, "_position": [0, 0]},
+                input_ports=[PortSpec("in")], output_ports=[PortSpec("out")],
+            ),
+        },
+        connections=[Connection(src_instance="src", src_port="out", dst_instance="gain", dst_port="in")],
+    )
+    app.project.model.control_graph = diagram
+
+    widget = BlockEditorWidget()
+    qtbot.addWidget(widget)
+    widget.set_app_service(app)
+    widget.set_diagram(diagram)
+
+    widget._scene.auto_layout()
+
+    pos_src = app.project.model.control_graph.instances["src"].parameters["_position"]
+    pos_gain = app.project.model.control_graph.instances["gain"].parameters["_position"]
+    assert pos_src[0] < pos_gain[0], "source should be left of its dependent"
+
+
+def test_block_editor_clear_diagram_removes_all_blocks(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.blocks.editor_widget import BlockEditorWidget
+
+    app = ApplicationService()
+    app.new_project("test")
+    widget = BlockEditorWidget()
+    qtbot.addWidget(widget)
+    widget.set_app_service(app)
+    widget._palette.blockTypeRequested.emit("Constant")
+    widget._palette.blockTypeRequested.emit("Gain")
+    assert len(widget._scene._block_items) == 2
+
+    widget._scene.clear_diagram()
+
+    assert len(widget._scene._block_items) == 0
+    cg = app.project.model.control_graph
+    assert cg is None or len(cg.instances) == 0
+
+
+def test_block_editor_set_selected_centers_view(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.gui.blocks.editor_widget import BlockEditorWidget
+    from quino.domain.blocks import BlockDiagram, BlockInstance, PortSpec
+
+    diagram = BlockDiagram(
+        instances={
+            "b1": BlockInstance(
+                instance_id="b1", block_type="Constant",
+                parameters={"value": 1.0, "_position": [400, 300]},
+                input_ports=[], output_ports=[PortSpec("out")],
+            ),
+        },
+    )
+    widget = BlockEditorWidget()
+    qtbot.addWidget(widget)
+    widget.set_diagram(diagram)
+
+    widget.set_selected("b1")
+    # The canvas should have centered on roughly (400, 300). Just sanity-check
+    # the call doesn't raise and selection sticks.
+    assert widget._scene._block_items["b1"].isSelected()

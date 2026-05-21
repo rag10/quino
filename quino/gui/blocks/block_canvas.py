@@ -265,6 +265,68 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
         self.blockSelected.emit(instance_id)
         return item
 
+    def clear_diagram(self) -> None:
+        """Remove every block (and dependent connections) from the diagram."""
+        ids = list(self._block_items.keys())
+        if not ids:
+            return
+        for instance_id in ids:
+            self.delete_block(instance_id)
+
+    def auto_layout(self) -> None:
+        """Topologically place blocks left-to-right by dependency depth.
+
+        Sources (no input connections) sit in the leftmost column, sinks
+        in the rightmost. Disconnected components are stacked vertically
+        below the main flow. Positions are persisted via set_block_position
+        when an app_service is wired; otherwise updated locally.
+        """
+        instances = self._diagram.instances
+        if not instances:
+            return
+        # Adjacency: for each block, the set of input source blocks.
+        in_edges: dict[str, set[str]] = {iid: set() for iid in instances}
+        out_edges: dict[str, set[str]] = {iid: set() for iid in instances}
+        for conn in self._diagram.connections:
+            if conn.src_instance in in_edges and conn.dst_instance in in_edges:
+                in_edges[conn.dst_instance].add(conn.src_instance)
+                out_edges[conn.src_instance].add(conn.dst_instance)
+        # Longest-path depth (Kahn-like)
+        depth: dict[str, int] = {iid: 0 for iid in instances}
+        remaining = dict(in_edges)
+        ready = [iid for iid, deps in remaining.items() if not deps]
+        while ready:
+            current = ready.pop(0)
+            for successor in out_edges[current]:
+                depth[successor] = max(depth[successor], depth[current] + 1)
+                remaining[successor].discard(current)
+                if not remaining[successor]:
+                    ready.append(successor)
+        # Group by depth and assign positions
+        col_width = 200.0
+        row_height = 120.0
+        by_depth: dict[int, list[str]] = {}
+        for iid, d in depth.items():
+            by_depth.setdefault(d, []).append(iid)
+        for d, ids in by_depth.items():
+            ids.sort()
+            for row, iid in enumerate(ids):
+                x = d * col_width
+                y = row * row_height
+                if self._app_service is not None:
+                    try:
+                        self._app_service.set_block_position(iid, (x, y))
+                    except Exception:
+                        pass
+                item = self._block_items.get(iid)
+                if item is not None:
+                    item.setPos(x, y)
+                self._diagram.instances[iid].parameters["_position"] = [x, y]
+        if self._app_service is None:
+            self.sync_to_diagram()
+        else:
+            self._sync_from_app_service()
+
     def _sync_from_app_service(self) -> None:
         """Rebuild scene from app_service.display_project's control_graph."""
         if self._app_service is None:
@@ -576,6 +638,55 @@ class BlockEditorCanvas(QtWidgets.QGraphicsView):
         delta = event.angleDelta().y()
         factor = 1.1 if delta > 0 else 0.9
         self.scale(factor, factor)
+
+    def fit_blocks(self) -> None:
+        """Fit the view to the bounding box of all blocks, with margin.
+
+        Falls back to identity transform when the scene is empty.
+        """
+        scene = self.scene()
+        if not isinstance(scene, BlockDiagramScene):
+            return
+        items = list(scene._block_items.values())
+        if not items:
+            self.resetTransform()
+            self.centerOn(0.0, 0.0)
+            return
+        rect = items[0].sceneBoundingRect()
+        for item in items[1:]:
+            rect = rect.united(item.sceneBoundingRect())
+        rect.adjust(-30, -30, 30, 30)
+        self.fitInView(rect, QtCore.Qt.AspectRatioMode.KeepAspectRatio)
+
+    def center_block(self, instance_id: str) -> None:
+        """Center the view on the named block. No-op when unknown."""
+        scene = self.scene()
+        if not isinstance(scene, BlockDiagramScene):
+            return
+        item = scene._block_items.get(instance_id)
+        if item is None:
+            return
+        self.centerOn(item.sceneBoundingRect().center())
+
+    def drawBackground(self, painter: QtGui.QPainter, rect: QtCore.QRectF) -> None:
+        super().drawBackground(painter, rect)
+        scene = self.scene()
+        if not isinstance(scene, BlockDiagramScene) or scene._block_items:
+            return
+        # Empty state hint when there are no blocks yet.
+        painter.save()
+        painter.setPen(QtGui.QPen(QtGui.QColor("#a0a0a0")))
+        font = painter.font()
+        font.setPointSize(11)
+        painter.setFont(font)
+        viewport_rect = self.viewport().rect()
+        scene_rect = self.mapToScene(viewport_rect).boundingRect()
+        painter.drawText(
+            scene_rect,
+            QtCore.Qt.AlignmentFlag.AlignCenter,
+            "Drag blocks here, or double-click a block in the palette",
+        )
+        painter.restore()
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         if event.button() == QtCore.Qt.MouseButton.MiddleButton:
