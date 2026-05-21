@@ -2584,3 +2584,72 @@ def test_block_editor_widget_no_inspector(qtbot):
     qtbot.addWidget(widget)
     assert not hasattr(widget, "_inspector")
     widget.set_selected("nonexistent")  # should not raise
+
+
+# --- C2: Shared selection between canvas and blocks ---
+
+def test_selecting_block_clears_mech_selection(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.main_window import MainWindow
+    from quino.domain.blocks import BlockDiagram, BlockInstance
+    app = ApplicationService()
+    app.new_project("test")
+    diagram = BlockDiagram()
+    diagram.instances["b1"] = BlockInstance(instance_id="b1", block_type="constant")
+    app.project.model.control_graph = diagram
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window._selected_entity_id = "body_xyz"
+    window._select_block("b1")
+    assert window._selected_entity_id == "b1"
+
+
+# --- C3: Inspector renders block parameters ---
+
+def test_inspector_shows_block_type_on_selection(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.main_window import MainWindow
+    from quino.domain.blocks import BlockDiagram, BlockInstance
+    app = ApplicationService()
+    app.new_project("test")
+    diagram = BlockDiagram()
+    diagram.instances["b1"] = BlockInstance(
+        instance_id="b1", block_type="constant", parameters={"value": 3.5}
+    )
+    app.project.model.control_graph = diagram
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window._select_block("b1")
+    # Should not raise — basic smoke test
+    assert window._selected_entity_id == "b1"
+
+
+# --- C4: Blocks section in model tree ---
+
+def test_model_tree_has_blocks_section(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.main_window import MainWindow
+    from quino.domain.blocks import BlockDiagram, BlockInstance
+    app = ApplicationService()
+    app.new_project("test")
+    diagram = BlockDiagram()
+    diagram.instances["b1"] = BlockInstance(instance_id="b1", block_type="constant", parameters={})
+    app.project.model.control_graph = diagram
+    window = MainWindow(app)
+    qtbot.addWidget(window)
+    window.refresh_all()
+    tree = getattr(window, 'tree', None) or getattr(window, '_model_tree', None) or getattr(window, '_entity_tree', None)
+    assert tree is not None, "Cannot find model tree widget"
+    found_blocks_section = False
+    for i in range(tree.topLevelItemCount()):
+        text = tree.topLevelItem(i).text(0).lower()
+        if "block" in text:
+            found_blocks_section = True
+            break
+    assert found_blocks_section

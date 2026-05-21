@@ -186,6 +186,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._block_editor = BlockEditorWidget()
         self._block_editor.diagramChanged.connect(self._on_block_diagram_changed)
         self._block_editor._scene.validationError.connect(self._on_block_validation_error)
+        self._block_editor.blockSelected.connect(self._select_block)
 
         self._canvas_stack = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self._canvas_stack.addWidget(self.canvas)
@@ -2318,7 +2319,25 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._app_mode == "pose" and self._pose_pick_state is not None and entity_id is not None:
             self._advance_pose_pick(entity_id)
 
+    def _select_block(self, instance_id: str | None) -> None:
+        """Select a block diagram instance, clearing mechanism canvas selection."""
+        self._selected_entity_id = instance_id
+        try:
+            self.canvas.set_selection(None)
+        except Exception:
+            pass
+        self._block_editor.set_selected(instance_id)
+        item = self._tree_items.get(instance_id) if instance_id else None
+        if item is not None:
+            self._suspend_tree_injection = True
+            try:
+                self.tree.setCurrentItem(item)
+            finally:
+                self._suspend_tree_injection = False
+        self._populate_inspector()
+
     def _select_entity_by_id(self, entity_id: str) -> None:
+        self._block_editor.set_selected(None)
         self._selected_entity_id = entity_id
         item = self._tree_items.get(entity_id)
         if item is not None:
