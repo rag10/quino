@@ -45,6 +45,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
     run_analysis_requested = QtCore.Signal(str)  # analysis_id
     pose_selected = QtCore.Signal(str)           # pose_id
     analysis_selected = QtCore.Signal(str)       # analysis_id
+    selection_changed = QtCore.Signal(str, str)  # (kind, id)
 
     def __init__(self, app_service: ApplicationService) -> None:
         super().__init__()
@@ -273,6 +274,15 @@ class WorkflowTreePanel(QtWidgets.QWidget):
 
     def _on_current_changed(self) -> None:
         self._update_toolbar_state()
+
+        item = self._selected_item()
+        if not item:
+            return
+        data = item.data(0, _USER_ROLE)
+        if not data:
+            return
+        kind, obj_id = data
+        self.selection_changed.emit(kind, obj_id)
 
     def _update_toolbar_state(self) -> None:
         item = self._selected_item()

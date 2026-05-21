@@ -2462,3 +2462,26 @@ def test_canvas_pose_readonly_blocks_drag() -> None:
     canvas.set_pose_readonly(True)
     assert canvas.is_pose_readonly() is True
     qt_app.processEvents()
+
+
+def test_workflow_tree_emits_selection_changed_on_single_click(qtbot) -> None:
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.panels.workflow_tree_panel import WorkflowTreePanel
+    from quino.domain.workspace import Workspace, Baseline
+
+    app = ApplicationService()
+    app.new_project("test")
+    app.project.workspace = Workspace(baselines=[Baseline(id="b", name="base")])
+    panel = WorkflowTreePanel(app)
+    qtbot.addWidget(panel)
+    panel.refresh()
+
+    received = []
+    panel.selection_changed.connect(lambda kind, oid: received.append((kind, oid)))
+
+    item = panel._item_map["b"]
+    panel._tree.setCurrentItem(item)
+
+    assert ("baseline", "b") in received
