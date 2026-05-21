@@ -698,29 +698,61 @@ class JsonMapper:
     # Block diagram serialization (Paso 2.7)
     # ------------------------------------------------------------------
 
+    def _block_instance_to_dict(self, inst: BlockInstance) -> dict:
+        """Serialize a BlockInstance to a dictionary."""
+        return {
+            "block_type": inst.block_type,
+            "parameters": inst.parameters,
+            "input_ports": [
+                {"name": p.name, "shape": p.shape} for p in inst.input_ports
+            ],
+            "output_ports": [
+                {"name": p.name, "shape": p.shape} for p in inst.output_ports
+            ],
+            "position": inst.position,
+        }
+
+    def _block_instance_from_dict(self, instance_id: str, data: dict) -> BlockInstance:
+        """Deserialize a BlockInstance from a dictionary."""
+        return BlockInstance(
+            instance_id=instance_id,
+            block_type=data["block_type"],
+            parameters=data.get("parameters", {}),
+            input_ports=[
+                PortSpec(p["name"], tuple(p["shape"])) for p in data.get("input_ports", [])
+            ],
+            output_ports=[
+                PortSpec(p["name"], tuple(p["shape"])) for p in data.get("output_ports", [])
+            ],
+            position=tuple(data.get("position", [0.0, 0.0])),
+        )
+
+    def _connection_to_dict(self, conn: Connection) -> dict:
+        """Serialize a Connection to a dictionary."""
+        return {
+            "src_instance": conn.src_instance,
+            "src_port": conn.src_port,
+            "dst_instance": conn.dst_instance,
+            "dst_port": conn.dst_port,
+        }
+
+    def _connection_from_dict(self, data: dict) -> Connection:
+        """Deserialize a Connection from a dictionary."""
+        return Connection(
+            src_instance=data["src_instance"],
+            src_port=data["src_port"],
+            dst_instance=data["dst_instance"],
+            dst_port=data["dst_port"],
+        )
+
     def _block_diagram_to_dict(self, diagram: BlockDiagram) -> dict:
         return {
             "instances": {
-                instance_id: {
-                    "block_type": instance.block_type,
-                    "parameters": instance.parameters,
-                    "input_ports": [
-                        {"name": p.name, "shape": p.shape} for p in instance.input_ports
-                    ],
-                    "output_ports": [
-                        {"name": p.name, "shape": p.shape} for p in instance.output_ports
-                    ],
-                    "position": instance.position,
-                }
+                instance_id: self._block_instance_to_dict(instance)
                 for instance_id, instance in diagram.instances.items()
             },
             "connections": [
-                {
-                    "src_instance": c.src_instance,
-                    "src_port": c.src_port,
-                    "dst_instance": c.dst_instance,
-                    "dst_port": c.dst_port,
-                }
+                self._connection_to_dict(c)
                 for c in diagram.connections
             ],
         }
@@ -729,27 +761,11 @@ class JsonMapper:
         if data is None:
             return None
         instances = {
-            instance_id: BlockInstance(
-                instance_id=instance_id,
-                block_type=item["block_type"],
-                parameters=item.get("parameters", {}),
-                input_ports=[
-                    PortSpec(p["name"], tuple(p["shape"])) for p in item.get("input_ports", [])
-                ],
-                output_ports=[
-                    PortSpec(p["name"], tuple(p["shape"])) for p in item.get("output_ports", [])
-                ],
-                position=tuple(item.get("position", [0.0, 0.0])),
-            )
+            instance_id: self._block_instance_from_dict(instance_id, item)
             for instance_id, item in data.get("instances", {}).items()
         }
         connections = [
-            Connection(
-                src_instance=c["src_instance"],
-                src_port=c["src_port"],
-                dst_instance=c["dst_instance"],
-                dst_port=c["dst_port"],
-            )
+            self._connection_from_dict(c)
             for c in data.get("connections", [])
         ]
         return BlockDiagram(instances=instances, connections=connections)
