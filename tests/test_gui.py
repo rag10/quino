@@ -97,11 +97,11 @@ def test_mode_switch_toggles_toolbars() -> None:
     assert window._mode_model_btn.isChecked()
     assert not window._mode_sketch_btn.isChecked()
     assert not window._mode_pose_btn.isChecked()
-    assert not window._mode_sim_btn.isChecked()
+    assert not window._mode_analysis_btn.isChecked()
     assert window._model_toolbar.isVisible()
     assert not window._sketch_toolbar.isVisible()
     assert not window._pose_toolbar.isVisible()
-    assert not window._sim_toolbar.isVisible()
+    assert not window._analysis_toolbar.isVisible()
 
     # Switch to Sketch mode
     window._set_app_mode("sketch")
@@ -110,11 +110,11 @@ def test_mode_switch_toggles_toolbars() -> None:
     assert window._mode_sketch_btn.isChecked()
     assert not window._mode_model_btn.isChecked()
     assert not window._mode_pose_btn.isChecked()
-    assert not window._mode_sim_btn.isChecked()
+    assert not window._mode_analysis_btn.isChecked()
     assert window._sketch_toolbar.isVisible()
     assert not window._model_toolbar.isVisible()
     assert not window._pose_toolbar.isVisible()
-    assert not window._sim_toolbar.isVisible()
+    assert not window._analysis_toolbar.isVisible()
     assert window.app_service.project.sketch is not None
     assert window.app_service.project.sketch.visible is True
 
@@ -125,21 +125,21 @@ def test_mode_switch_toggles_toolbars() -> None:
     assert window._mode_pose_btn.isChecked()
     assert not window._mode_sketch_btn.isChecked()
     assert not window._mode_model_btn.isChecked()
-    assert not window._mode_sim_btn.isChecked()
+    assert not window._mode_analysis_btn.isChecked()
     assert window._pose_toolbar.isVisible()
     assert not window._sketch_toolbar.isVisible()
     assert not window._model_toolbar.isVisible()
-    assert not window._sim_toolbar.isVisible()
+    assert not window._analysis_toolbar.isVisible()
 
     # Switch to Sim mode
-    window._set_app_mode("sim")
+    window._set_app_mode("analysis")
     qt_app.processEvents()
-    assert window._app_mode == "sim"
-    assert window._mode_sim_btn.isChecked()
+    assert window._app_mode == "analysis"
+    assert window._mode_analysis_btn.isChecked()
     assert not window._mode_sketch_btn.isChecked()
     assert not window._mode_model_btn.isChecked()
     assert not window._mode_pose_btn.isChecked()
-    assert window._sim_toolbar.isVisible()
+    assert window._analysis_toolbar.isVisible()
     assert not window._sketch_toolbar.isVisible()
     assert not window._model_toolbar.isVisible()
     assert not window._pose_toolbar.isVisible()
@@ -153,11 +153,11 @@ def test_mode_switch_toggles_toolbars() -> None:
     assert window._mode_model_btn.isChecked()
     assert not window._mode_sketch_btn.isChecked()
     assert not window._mode_pose_btn.isChecked()
-    assert not window._mode_sim_btn.isChecked()
+    assert not window._mode_analysis_btn.isChecked()
     assert window._model_toolbar.isVisible()
     assert not window._sketch_toolbar.isVisible()
     assert not window._pose_toolbar.isVisible()
-    assert not window._sim_toolbar.isVisible()
+    assert not window._analysis_toolbar.isVisible()
 
     window.close()
     qt_app.processEvents()
@@ -1264,7 +1264,7 @@ def test_switching_to_model_rewinds_to_t0_without_discarding_simulation() -> Non
         return
 
     frame0 = window._last_simulation_result.frames[0]
-    window._set_app_mode("sim")
+    window._set_app_mode("analysis")
     window.timeline_slider.setValue(1)
     qt_app.processEvents()
     assert window._current_frame_index == 1

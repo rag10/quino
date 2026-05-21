@@ -47,7 +47,8 @@ class ForceCommands:
             metadata=Metadata(),
         )
         self._ctx.snapshot()
-        project.model.sensors.append(sensor)
+        if not self._ctx.add_entity_to_case(sensor, "sensors"):
+            project.model.sensors.append(sensor)
         return sensor_id
 
     def delete_sensor(self, sensor_id: str) -> None:
@@ -91,7 +92,8 @@ class ForceCommands:
             metadata=Metadata(),
         )
         self._ctx.snapshot()
-        project.model.loads.append(load)
+        if not self._ctx.add_entity_to_case(load, "loads"):
+            project.model.loads.append(load)
         return load_id
 
     def delete_load(self, load_id: str) -> None:
@@ -155,7 +157,8 @@ class ForceCommands:
             metadata=Metadata({"stiffness": 0.0, "damping": 0.0}),
         )
         self._ctx.snapshot()
-        project.model.springs.append(spring)
+        if not self._ctx.add_entity_to_case(spring, "springs"):
+            project.model.springs.append(spring)
         return spring_id
 
     def delete_spring(self, spring_id: str) -> None:

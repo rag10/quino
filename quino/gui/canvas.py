@@ -231,6 +231,7 @@ class MechanismCanvas(QtWidgets.QWidget):
     def __init__(self, app_service: ApplicationService, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.app_service = app_service
+        self._display_project: Project | None = None
         self._selected_entity_id: str | None = None
         self._selected_entity_ids: set[str] = set()
         self._state_overlay: dict[str, float] | None = None
@@ -563,7 +564,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self.update()
 
     def center_on_entity(self, entity_id: str) -> None:
-        project = self.app_service.project
+        project = self._display_project if self._display_project is not None else self.app_service.project
         if project is None:
             return
         if project.sketch is not None:
@@ -680,6 +681,10 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def set_show_trajectories(self, show: bool) -> None:
         self._show_trajectories = show
+        self.update()
+
+    def set_display_project(self, project: Project | None) -> None:
+        self._display_project = project
         self.update()
 
     def set_editing_enabled(self, enabled: bool) -> None:
@@ -978,7 +983,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
         painter.fillRect(self.rect(), QtGui.QColor(self._background_color))
 
-        project = self.app_service.project
+        project = self._display_project if self._display_project is not None else self.app_service.project
         transform = self._current_transform()
         if project is None:
             if self._show_grid:
@@ -1900,8 +1905,8 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def _marker_at(self, screen_pos: QtCore.QPointF) -> CanvasMarker | None:
         screen_markers = self._screen_markers
-        if not screen_markers and self.app_service.project is not None:
-            project = self.app_service.project
+        project = self._display_project if self._display_project is not None else self.app_service.project
+        if not screen_markers and project is not None:
             assembled = self._assembled_mechanism(project)
             transform = self._current_transform()
             screen_markers = [
@@ -1916,8 +1921,8 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def _ground_at(self, screen_pos: QtCore.QPointF) -> CanvasGround | None:
         screen_grounds = self._screen_grounds
-        if not screen_grounds and self.app_service.project is not None:
-            project = self.app_service.project
+        project = self._display_project if self._display_project is not None else self.app_service.project
+        if not screen_grounds and project is not None:
             assembled = self._assembled_mechanism(project)
             transform = self._current_transform()
             screen_grounds = [
@@ -1931,9 +1936,10 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def _slider_at(self, screen_pos: QtCore.QPointF) -> CanvasSlider | None:
         screen_sliders = self._screen_sliders
-        if not screen_sliders and self.app_service.project is not None:
+        project = self._display_project if self._display_project is not None else self.app_service.project
+        if not screen_sliders and project is not None:
             transform = self._current_transform()
-            sliders = self._collect_sliders(self.app_service.project)
+            sliders = self._collect_sliders(project)
             screen_sliders = []
             for slider in sliders:
                 axis_x = math.cos(slider.angle)
@@ -1959,9 +1965,10 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def _slider_handle_at(self, screen_pos: QtCore.QPointF) -> tuple[str, str] | None:
         handles = self._screen_slider_handles
-        if not handles and self.app_service.project is not None:
+        project = self._display_project if self._display_project is not None else self.app_service.project
+        if not handles and project is not None:
             transform = self._current_transform()
-            for slider in self._collect_sliders(self.app_service.project):
+            for slider in self._collect_sliders(project):
                 axis_x = math.cos(slider.angle)
                 axis_y = math.sin(slider.angle)
                 start = self._to_screen(
@@ -3845,7 +3852,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 painter.drawText(tip + QtCore.QPointF(8.0, -8.0), f"{mz:.3f} Nm")
 
     def _body_at(self, point: QtCore.QPointF) -> str | None:
-        project = self.app_service.project
+        project = self._display_project if self._display_project is not None else self.app_service.project
         if project is None:
             return None
         if not self._screen_bodies:

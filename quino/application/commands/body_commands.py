@@ -220,7 +220,8 @@ class BodyCommands:
             style=Style(),
         )
         body.markers.append(self._make_com_marker(body))
-        project.model.bodies.append(body)
+        if not self._ctx.add_entity_to_case(body, "bodies"):
+            project.model.bodies.append(body)
         self._ctx.invalidate_pose_state()
         return body.id
 

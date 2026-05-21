@@ -535,7 +535,8 @@ class JointCommands:
         if slider_obj.travel_max is not None:
             self._ctx.expressions.evaluate_property(slider_obj.travel_max, project.parameters)
         self._ctx.snapshot()
-        project.model.sliders.append(slider_obj)
+        if not self._ctx.add_entity_to_case(slider_obj, "sliders"):
+            project.model.sliders.append(slider_obj)
         self._ctx.invalidate_pose_state()
         return slider_obj.id
 
@@ -599,7 +600,8 @@ class JointCommands:
         self._tag_joint_reference_topology(joint)
         self._ensure_joint_not_duplicate(joint)
         self._ctx.snapshot()
-        project.model.joints.append(joint)
+        if not self._ctx.add_entity_to_case(joint, "joints"):
+            project.model.joints.append(joint)
         # Invalidate entity index on the facade — there is no ctx field for it,
         # so we signal it via invalidate_pose_state which already handles the rest.
         # The entity index is rebuilt lazily; topology change forces rebuild via
@@ -669,7 +671,8 @@ class JointCommands:
             target_joint_id=target_joint_id,
             law=law,
         )
-        project.model.drivers.append(driver)
+        if not self._ctx.add_entity_to_case(driver, "drivers"):
+            project.model.drivers.append(driver)
         return driver.id
 
     def set_joint_type(self, joint_id: str, joint_type: str) -> None:

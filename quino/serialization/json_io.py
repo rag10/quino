@@ -907,7 +907,7 @@ class JsonMapper:
         )
 
     def _case_to_dict(self, case: Case) -> dict:
-        return {
+        result = {
             "id": case.id,
             "name": case.name,
             "baseline_id": case.baseline_id,
@@ -918,6 +918,21 @@ class JsonMapper:
             },
             "metadata": case.metadata,
         }
+        # Structural diffs
+        if case.added_entities:
+            result["added_entities"] = {
+                domain: [self._entity_to_dict_by_domain(domain, entity) for entity in entities]
+                for domain, entities in case.added_entities.items()
+            }
+        if case.removed_entity_ids:
+            result["removed_entity_ids"] = case.removed_entity_ids
+        if case.reference_overrides:
+            result["reference_overrides"] = case.reference_overrides
+        return result
+
+    def _entity_to_dict_by_domain(self, domain: str, entity: dict) -> dict:
+        # added_entities stores serialized dicts; pass through
+        return entity
 
     def _case_from_dict(self, data: dict) -> Case:
         return Case(
@@ -930,6 +945,9 @@ class JsonMapper:
                 k: self._scalar_value_from_dict(v)
                 for k, v in data.get("invariant_values", {}).items()
             },
+            added_entities=data.get("added_entities", {}),
+            removed_entity_ids=data.get("removed_entity_ids", []),
+            reference_overrides=data.get("reference_overrides", {}),
             metadata=data.get("metadata", {}),
         )
 

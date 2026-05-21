@@ -8,10 +8,13 @@ from typing import Callable
 from quino.domain.model import (
     Body,
     Driver,
+    Joint,
     Load,
     Parameter,
     Project,
     ScalarProperty,
+    Sensor,
+    Slider,
     Spring,
 )
 from quino.domain.workspace import Case, ScalarValue, Study, StudyOverlay
@@ -19,19 +22,21 @@ from quino.services.workspace_catalog import build_parameter_catalog
 
 
 def compose_project(base: Project, study: Study | None = None, case: Case | None = None) -> Project:
-    """Return a deep-copied Project with parameter overrides applied.
+    """Return a deep-copied Project with structural deltas and parameter overrides applied.
 
     Override priority (lowest to highest):
     1. Project base
-    2. Case.invariant_values
-    3. Study.variable_values
-    4. StudyOverlay.parameter_overrides
+    2. Case structural deltas (remove / add / reference overrides)
+    3. Case.invariant_values
+    4. Study.variable_values
+    5. StudyOverlay.parameter_overrides
     """
     composed = copy.deepcopy(base)
     _validate_workspace_override_scope(base, study, case)
 
     if case is not None:
         for inherited_case in _resolve_case_chain(base, case):
+            _apply_structural_deltas(composed, inherited_case)
             for path, scalar in inherited_case.invariant_values.items():
                 _apply_parameter_override(composed, path, scalar)
 
@@ -109,6 +114,170 @@ def _is_variable_path(
     if descriptor is None:
         return True
     return getattr(descriptor, "tag", "invariant") == "variable"
+
+
+# ------------------------------------------------------------------
+# Structural delta application
+# ------------------------------------------------------------------
+
+_ENTITY_DOMAIN_LISTS = {
+    "bodies": lambda p: p.model.bodies,
+    "joints": lambda p: p.model.joints,
+    "sliders": lambda p: p.model.sliders,
+    "drivers": lambda p: p.model.drivers,
+    "loads": lambda p: p.model.loads,
+    "sensors": lambda p: p.model.sensors,
+    "springs": lambda p: p.model.springs,
+}
+
+
+def _apply_structural_deltas(project: Project, case: Case) -> None:
+    """Apply structural deltas (added/removed entities and reference overrides) from *case* to *project*."""
+    # 1. Remove entities (and their dependents)
+    for entity_id in case.removed_entity_ids:
+        _remove_entity_from_project(project, entity_id)
+
+    # 2. Add new entities
+    from quino.serialization.json_io import JsonMapper
+
+    mapper = JsonMapper()
+    deserializers = {
+        "bodies": mapper._body_from_dict,
+        "joints": mapper._joint_from_dict,
+        "sliders": mapper._slider_from_dict,
+        "drivers": mapper._driver_from_dict,
+        "loads": mapper._load_from_dict,
+        "sensors": mapper._sensor_from_dict,
+        "springs": mapper._spring_from_dict,
+    }
+    for domain, entities_data in case.added_entities.items():
+        target_list = _ENTITY_DOMAIN_LISTS.get(domain)
+        if target_list is None:
+            continue
+        deserializer = deserializers.get(domain)
+        if deserializer is None:
+            continue
+        for entity_data in entities_data:
+            entity = deserializer(entity_data)
+            target_list(project).append(entity)
+
+    # 3. Apply reference overrides
+    for entity_id, overrides in case.reference_overrides.items():
+        entity = _find_entity_in_project(project, entity_id)
+        if entity is None:
+            continue
+        for prop, value in overrides.items():
+            if hasattr(entity, prop):
+                setattr(entity, prop, value)
+
+
+def _find_entity_in_project(project: Project, entity_id: str) -> Any | None:
+    """Find any model entity by id across all domains."""
+    for domain, getter in _ENTITY_DOMAIN_LISTS.items():
+        for item in getter(project):
+            if getattr(item, "id", None) == entity_id:
+                return item
+    # Markers live inside bodies
+    for body in project.model.bodies:
+        for marker in body.markers:
+            if marker.id == entity_id:
+                return marker
+    return None
+
+
+def _remove_entity_from_project(project: Project, entity_id: str) -> None:
+    """Remove an entity and all its dependents from the project."""
+    # Find what kind of entity this is
+    entity = _find_entity_in_project(project, entity_id)
+    if entity is None:
+        return
+
+    if isinstance(entity, Body):
+        marker_ids = {marker.id for marker in entity.markers}
+        # Remove joints connected to these markers
+        removed_joint_ids = {
+            joint.id
+            for joint in project.model.joints
+            if joint.endpoint_a.marker_id in marker_ids or joint.endpoint_b.marker_id in marker_ids
+        }
+        # Also joints connected to this body via endpoint body_id
+        removed_joint_ids.update({
+            joint.id
+            for joint in project.model.joints
+            if joint.endpoint_a.body_id == entity_id or joint.endpoint_b.body_id == entity_id
+        })
+        project.model.joints = [j for j in project.model.joints if j.id not in removed_joint_ids]
+        # Remove drivers of removed joints
+        project.model.drivers = [d for d in project.model.drivers if d.target_joint_id not in removed_joint_ids]
+        # Remove loads on these markers
+        project.model.loads = [load for load in project.model.loads if load.target_marker_id not in marker_ids]
+        # Remove sensors referencing these markers
+        project.model.sensors = [s for s in project.model.sensors if not any(m in marker_ids for m in s.marker_ids)]
+        # Remove springs connected to these markers
+        project.model.springs = [
+            sp for sp in project.model.springs
+            if not (
+                (sp.endpoint_a.marker_id in marker_ids and sp.endpoint_a.kind.value == "marker")
+                or (sp.endpoint_b.marker_id in marker_ids and sp.endpoint_b.kind.value == "marker")
+            )
+        ]
+        # Remove the body itself
+        project.model.bodies = [b for b in project.model.bodies if b.id != entity_id]
+        return
+
+    if isinstance(entity, Slider):
+        removed_joint_ids = {
+            joint.id
+            for joint in project.model.joints
+            if joint.endpoint_a.slider_id == entity_id or joint.endpoint_b.slider_id == entity_id
+        }
+        project.model.joints = [j for j in project.model.joints if j.id not in removed_joint_ids]
+        project.model.drivers = [d for d in project.model.drivers if d.target_joint_id not in removed_joint_ids]
+        project.model.sliders = [s for s in project.model.sliders if s.id != entity_id]
+        return
+
+    if isinstance(entity, Joint):
+        project.model.joints = [j for j in project.model.joints if j.id != entity_id]
+        project.model.drivers = [d for d in project.model.drivers if d.target_joint_id != entity_id]
+        return
+
+    if isinstance(entity, Driver):
+        project.model.drivers = [d for d in project.model.drivers if d.id != entity_id]
+        return
+
+    if isinstance(entity, Marker):
+        # Find the body that owns this marker
+        body = next((b for b in project.model.bodies if any(m.id == entity_id for m in b.markers)), None)
+        if body is not None:
+            # Remove joints connected to this marker
+            removed_joint_ids = {
+                joint.id
+                for joint in project.model.joints
+                if joint.endpoint_a.marker_id == entity_id or joint.endpoint_b.marker_id == entity_id
+            }
+            project.model.joints = [j for j in project.model.joints if j.id not in removed_joint_ids]
+            project.model.drivers = [d for d in project.model.drivers if d.target_joint_id not in removed_joint_ids]
+            project.model.loads = [load for load in project.model.loads if load.target_marker_id != entity_id]
+            project.model.sensors = [s for s in project.model.sensors if entity_id not in s.marker_ids]
+            project.model.springs = [
+                sp for sp in project.model.springs
+                if not (
+                    (sp.endpoint_a.marker_id == entity_id and sp.endpoint_a.kind.value == "marker")
+                    or (sp.endpoint_b.marker_id == entity_id and sp.endpoint_b.kind.value == "marker")
+                )
+            ]
+            # Remove marker from body
+            body.markers = [m for m in body.markers if m.id != entity_id]
+            body.edge_order = [mid for mid in body.edge_order if mid != entity_id]
+        return
+
+    # Generic removal for loads, sensors, springs
+    if isinstance(entity, Load):
+        project.model.loads = [load for load in project.model.loads if load.id != entity_id]
+    elif isinstance(entity, Sensor):
+        project.model.sensors = [s for s in project.model.sensors if s.id != entity_id]
+    elif isinstance(entity, Spring):
+        project.model.springs = [sp for sp in project.model.springs if sp.id != entity_id]
 
 
 # ------------------------------------------------------------------
@@ -256,7 +425,45 @@ def _set_scalar_property(obj, prop: str, scalar: ScalarValue) -> None:
     """Set a ScalarProperty field on *obj* identified by *prop*."""
     current = getattr(obj, prop, None)
     if current is None:
-        raise ValueError(f"Property {prop!r} on {obj.__class__.__name__} is None")
+        # Property is unset; create a new ScalarProperty with the appropriate
+        # dimension inferred from the property name.
+        from quino.domain.types import Dimension
+        dim_map: dict[str, Dimension] = {
+            "mass": Dimension.MASS,
+            "x": Dimension.LENGTH,
+            "y": Dimension.LENGTH,
+            "origin_x": Dimension.LENGTH,
+            "origin_y": Dimension.LENGTH,
+            "travel_min": Dimension.LENGTH,
+            "travel_max": Dimension.LENGTH,
+            "angle": Dimension.ANGLE,
+            "angle_limit_positive": Dimension.ANGLE,
+            "angle_limit_negative": Dimension.ANGLE,
+            "fx": Dimension.FORCE,
+            "fy": Dimension.FORCE,
+            "law": Dimension.ANGLE,  # overridden per-entity below
+        }
+        expected = dim_map.get(prop)
+        if prop == "law":
+            if isinstance(obj, Driver):
+                from quino.domain.types import DriverType
+                expected = Dimension.ANGLE if obj.type is DriverType.ROTATION else Dimension.LENGTH
+            else:
+                expected = Dimension.FORCE
+        if expected is None:
+            raise ValueError(f"Property {prop!r} on {obj.__class__.__name__} is None and has no known dimension")
+        new_expr = _scalar_to_expression(scalar)
+        new_unit = scalar.unit if scalar.unit else _default_unit_for_dimension(expected)
+        setattr(
+            obj,
+            prop,
+            ScalarProperty(
+                expression=new_expr,
+                unit=new_unit,
+                expected_dimension=expected,
+            ),
+        )
+        return
     if not isinstance(current, ScalarProperty):
         raise ValueError(f"Property {prop!r} on {obj.__class__.__name__} is not a scalar")
     new_expr = _scalar_to_expression(scalar)
@@ -272,6 +479,18 @@ def _set_scalar_property(obj, prop: str, scalar: ScalarValue) -> None:
             expected_dimension=current.expected_dimension,
         ),
     )
+
+
+def _default_unit_for_dimension(dimension) -> str:
+    from quino.domain.types import Dimension
+    return {
+        Dimension.LENGTH: "mm",
+        Dimension.ANGLE: "deg",
+        Dimension.MASS: "kg",
+        Dimension.FORCE: "N",
+        Dimension.TORQUE: "N*mm",
+        Dimension.TIME: "s",
+    }.get(dimension, "")
 
 
 def compose_project_hash(project: Project) -> str:

@@ -13,12 +13,12 @@ def svc_with_case():
     body = next(b for b in svc.project.model.bodies if b.id == body_id)
     baseline = svc.workspace.create_baseline("B1")
     case = svc.workspace.create_case("C1", baseline_id=baseline.id)
-    svc.set_working_context(case_id=case.id)
     return svc, body, baseline, case
 
 
 def test_scalar_edit_with_case_active_writes_to_overlay(svc_with_case):
     svc, body, baseline, case = svc_with_case
+    svc.set_working_context(case_id=case.id)
     svc.update_property(body.id, "mass", PropertyValueInput(kind="expression", value="3 kg"))
     # Base model should be unchanged (mass should still be None or not "3")
     base_body = next(b for b in svc.project.model.bodies if b.id == body.id)
@@ -31,6 +31,7 @@ def test_scalar_edit_with_case_active_writes_to_overlay(svc_with_case):
 
 def test_scalar_edit_without_case_mutates_base_model(svc_with_case):
     svc, body, baseline, case = svc_with_case
+    svc.set_working_context(case_id=case.id)
     svc.set_working_context()  # clear active case
     svc.update_property(body.id, "mass", PropertyValueInput(kind="expression", value="7 kg"))
     base_body = next(b for b in svc.project.model.bodies if b.id == body.id)
@@ -39,6 +40,7 @@ def test_scalar_edit_without_case_mutates_base_model(svc_with_case):
 
 def test_overlay_edit_is_undoable(svc_with_case):
     svc, body, baseline, case = svc_with_case
+    svc.set_working_context(case_id=case.id)
     path = f"bodies/{body.id}/mass"
     svc.update_property(body.id, "mass", PropertyValueInput(kind="expression", value="3 kg"))
     # Re-fetch the live case object (snapshot is on the project, not the fixture variable)
@@ -59,6 +61,7 @@ def test_driver_law_edit_with_case_active_writes_to_overlay(svc_with_case):
     driver = next(d for d in svc.project.model.drivers if d.id == driver_id)
 
     # While case is active, editing the driver law should write to the overlay
+    svc.set_working_context(case_id=case.id)
     svc.update_property(driver.id, "law", PropertyValueInput(kind="expression", value="45 deg"))
 
     # Base model driver law should be unchanged ("0 deg")
@@ -75,7 +78,6 @@ def test_driver_law_edit_with_case_active_writes_to_overlay(svc_with_case):
 def test_display_project_reflects_overlay(svc_with_case):
     svc, body, baseline, case = svc_with_case
     # Set a mass on the base body first so compose_project can resolve it
-    svc.set_working_context()
     svc.update_property(body.id, "mass", PropertyValueInput(kind="expression", value="1 kg"))
     svc.set_working_context(case_id=case.id)
     svc.update_property(body.id, "mass", PropertyValueInput(kind="expression", value="9 kg"))

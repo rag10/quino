@@ -41,7 +41,8 @@
       "Bash(xargs findstr /l \"UNITS\\\\|SI_\\\\|IMPERIAL\")",
       "Read(//c/Users/ruben/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/**)",
       "Bash(pytest --tb=short -q)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash"
     ]
   }
 }

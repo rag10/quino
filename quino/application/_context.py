@@ -42,3 +42,62 @@ class ServiceContext:
         if ws is None or ws.active_case_id is None:
             return None
         return next((c for c in ws.cases if c.id == ws.active_case_id), None)
+
+    def add_entity_to_case(self, entity, domain: str) -> bool:
+        """If a case is active, serialize *entity* and append it to
+        case.added_entities[*domain*].  Return True when redirected
+        (caller must NOT add the entity to project.model)."""
+        case = self.get_active_case()
+        if case is None:
+            return False
+        from quino.serialization.json_io import JsonMapper
+        mapper = JsonMapper()
+        serializer = {
+            "bodies": mapper._body_to_dict,
+            "joints": mapper._joint_to_dict,
+            "sliders": mapper._slider_to_dict,
+            "drivers": mapper._driver_to_dict,
+            "loads": mapper._load_to_dict,
+            "sensors": mapper._sensor_to_dict,
+            "springs": mapper._spring_to_dict,
+        }.get(domain)
+        if serializer is None:
+            return False
+        case.added_entities.setdefault(domain, []).append(serializer(entity))
+        return True
+
+    def remove_entity_from_case(self, entity_id: str) -> bool:
+        """If a case is active, record *entity_id* as removed.
+        If the entity was previously added by this case, it is removed
+        from added_entities instead.  Return True when handled
+        (caller should still remove from project.model so the baseline
+        stays consistent)."""
+        case = self.get_active_case()
+        if case is None:
+            return False
+        # If the entity was added by this same case, remove from added_entities
+        for domain, entities in case.added_entities.items():
+            for i, ent in enumerate(entities):
+                if ent.get("id") == entity_id:
+                    entities.pop(i)
+                    if not entities:
+                        case.added_entities.pop(domain, None)
+                    return True
+        # Otherwise record as removed from baseline
+        if entity_id not in case.removed_entity_ids:
+            case.removed_entity_ids.append(entity_id)
+        return True
+
+    def add_marker_removal_to_case(self, marker_id: str, body_id: str) -> bool:
+        """Record a marker removal in the active case.
+        Markers don't have their own domain in added_entities, so we
+        store reference overrides on the body to indicate the marker
+        is removed.  Return True when handled."""
+        case = self.get_active_case()
+        if case is None:
+            return False
+        overrides = case.reference_overrides.setdefault(body_id, {})
+        removed = overrides.setdefault("removed_markers", [])
+        if marker_id not in removed:
+            removed.append(marker_id)
+        return True

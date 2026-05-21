@@ -133,6 +133,76 @@ class WorkspaceCommands:
         ]
         invalidate_on_case_change(self._project, case_id)
 
+    # --- structural deltas ------------------------------------------------
+
+    def add_entity_to_case(self, case_id: str, domain: str, entity_dict: dict) -> None:
+        """Add a new entity (serialized as dict) to a case's added_entities."""
+        self._ctx.snapshot()
+        case = self._find_case(case_id)
+        if domain not in case.added_entities:
+            case.added_entities[domain] = []
+        case.added_entities[domain].append(entity_dict)
+        invalidate_on_case_change(self._project, case_id)
+
+    def remove_entity_from_case(self, case_id: str, entity_id: str) -> None:
+        """Remove an entity from a case.
+
+        If the entity was added by this case, remove it from added_entities.
+        Otherwise, mark it as removed via removed_entity_ids.
+        """
+        self._ctx.snapshot()
+        case = self._find_case(case_id)
+        # Check if the entity is in this case's added_entities
+        removed_from_added = False
+        for domain, entities in list(case.added_entities.items()):
+            filtered = [e for e in entities if e.get("id") != entity_id]
+            if len(filtered) != len(entities):
+                case.added_entities[domain] = filtered
+                removed_from_added = True
+            if not case.added_entities[domain]:
+                del case.added_entities[domain]
+        if not removed_from_added:
+            if entity_id not in case.removed_entity_ids:
+                case.removed_entity_ids.append(entity_id)
+        # Also remove from reference_overrides if present
+        case.reference_overrides.pop(entity_id, None)
+        invalidate_on_case_change(self._project, case_id)
+
+    def modify_reference_in_case(
+        self, case_id: str, entity_id: str, property_name: str, value: Any
+    ) -> None:
+        """Override a reference property (e.g. target_joint_id) for an existing entity in a case."""
+        self._ctx.snapshot()
+        case = self._find_case(case_id)
+        if entity_id not in case.reference_overrides:
+            case.reference_overrides[entity_id] = {}
+        case.reference_overrides[entity_id][property_name] = value
+        invalidate_on_case_change(self._project, case_id)
+
+    def update_case_invariants(self, case_id: str, invariants: dict[str, float | str]) -> None:
+        """Set invariant values on a case.
+
+        *invariants* is a dict of path → value. If value is a float, unit is
+        assumed empty; if a str, it is parsed as ``value unit``.
+        """
+        self._ctx.snapshot()
+        self.refresh_parameter_catalog()
+        case = self._find_case(case_id)
+        from quino.domain.workspace import ScalarValue
+
+        parsed: dict[str, ScalarValue] = {}
+        for path, value in invariants.items():
+            if isinstance(value, str):
+                parts = value.split()
+                if len(parts) == 2:
+                    parsed[path] = ScalarValue(float(parts[0]), parts[1])
+                else:
+                    parsed[path] = ScalarValue(float(parts[0]), "")
+            else:
+                parsed[path] = ScalarValue(float(value), "")
+        case.invariant_values = parsed
+        invalidate_on_case_change(self._project, case_id)
+
     # --- workspace poses --------------------------------------------------
 
     def create_pose(

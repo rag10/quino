@@ -40,6 +40,7 @@ from quino.domain.model import (
     Spring,
 )
 from quino.gui.canvas import CanvasMode, MechanismCanvas
+
 from quino.gui.panels.poses_panel import PosesPanel
 from quino.gui.panels.workflow_tree_panel import WorkflowTreePanel
 from quino.pose.geometry import assembled_reference_mechanism, marker_world_position, pose_to_state_overlay
@@ -53,12 +54,19 @@ from quino.gui.blocks import BlockEditorWidget
 
 
 def _changed_entity_ids_for_case(case) -> set[str]:
-    """Return entity ids that have overrides in case.invariant_values."""
+    """Return entity ids that have overrides, additions, or removals in the case."""
     ids = set()
     for path in case.invariant_values:
         parts = path.split("/")
         if len(parts) >= 2:
             ids.add(parts[1])
+    for entity_id in case.removed_entity_ids:
+        ids.add(entity_id)
+    for domain, entities in case.added_entities.items():
+        for ent in entities:
+            eid = ent.get("id")
+            if eid:
+                ids.add(eid)
     return ids
 
 
@@ -110,20 +118,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self._build_sketch_toolbar()
         self._build_model_toolbar()
         self._build_pose_toolbar()
-        self._build_sim_toolbar()
+        self._build_analysis_toolbar()
         self._mode_model_btn.setChecked(True)
         self._mode_sketch_btn.setChecked(False)
         self._mode_pose_btn.setChecked(False)
-        self._mode_sim_btn.setChecked(False)
+        self._mode_analysis_btn.setChecked(False)
         self.action_mode_model.setChecked(True)
         self.action_mode_sketch.setChecked(False)
         self.action_mode_pose.setChecked(False)
-        self.action_mode_sim.setChecked(False)
-        self.action_mode_blocks.setChecked(False)
+        self.action_mode_analysis.setChecked(False)
         self._sketch_toolbar.setVisible(False)
         self._model_toolbar.setVisible(True)
         self._pose_toolbar.setVisible(False)
-        self._sim_toolbar.setVisible(False)
+        self._analysis_toolbar.setVisible(False)
 
         central = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(central)
@@ -157,6 +164,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.workflow_panel.working_context_changed.connect(self._on_working_context_changed)
         self.workflow_panel.run_analysis_requested.connect(self._on_run_analysis_requested)
         self.workflow_panel.pose_selected.connect(self._on_workflow_pose_selected)
+        self.workflow_panel.analysis_selected.connect(self._on_analysis_selected)
         self.left_column.addWidget(self.workflow_panel)
         self.left_column.addWidget(self.tree)
         self.left_column.setSizes([180, 180])
@@ -174,18 +182,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.set_edit_guard(self._prepare_for_model_edit)
         self.canvas.set_structural_edit_guard(self._check_structural_edit_allowed)
         self.action_fit_view.triggered.connect(self.canvas.fit_view)
-        self._canvas_stack = QtWidgets.QWidget()
-        canvas_stack_layout = QtWidgets.QGridLayout(self._canvas_stack)
-        canvas_stack_layout.setContentsMargins(0, 0, 0, 0)
-        canvas_stack_layout.setSpacing(0)
-        canvas_stack_layout.addWidget(self.canvas, 0, 0)
         self._block_editor = BlockEditorWidget()
         self._block_editor.diagramChanged.connect(self._on_block_diagram_changed)
         self._block_editor._scene.validationError.connect(self._on_block_validation_error)
 
+        self._canvas_stack = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        self._canvas_stack.addWidget(self.canvas)
+        self._canvas_stack.addWidget(self._block_editor)
+        self._canvas_stack.setSizes([600, 250])
+        self._canvas_stack.setChildrenCollapsible(True)
+
         self._center_stack = QtWidgets.QStackedWidget()
         self._center_stack.addWidget(self._canvas_stack)
-        self._center_stack.addWidget(self._block_editor)
 
         self._mode_selector_widget.setParent(self._center_stack)
         self._mode_selector_widget.adjustSize()
@@ -359,14 +367,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas_summary.setReadOnly(True)
         right_panel.addTab(self.canvas_summary, "Info")
 
+        self._right_panel_tabs = right_panel
+
+        # Poses panel is kept as attribute for backward compatibility / tests,
+        # but no longer shown in the right-side tab widget.
         self.poses_panel = PosesPanel(self.app_service)
         self.poses_panel.current_pose_changed.connect(self._on_poses_panel_current_changed)
         self.poses_panel.simulation_pose_changed.connect(self._on_poses_panel_sim_initial_changed)
         self.poses_panel.poses_mutated.connect(self._on_poses_panel_mutated)
         self.poses_panel.pose_constraint_selected.connect(self._on_pose_constraint_selected)
         self.poses_panel.pose_constraint_delete_requested.connect(self._delete_pose_constraint)
-        self._right_panel_tabs = right_panel
-        self._poses_panel_index = right_panel.addTab(self.poses_panel, "Poses")
 
         splitter.setSizes([280, 720, 440])
         self.tree.setMinimumWidth(200)
@@ -511,13 +521,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_mode_pose.triggered.connect(lambda: self._set_app_mode("pose"))
         self.action_mode_pose.setCheckable(True)
 
-        self.action_mode_sim = QtGui.QAction("Sim", self)
-        self.action_mode_sim.triggered.connect(lambda: self._set_app_mode("sim"))
-        self.action_mode_sim.setCheckable(True)
-
-        self.action_mode_blocks = QtGui.QAction("Blocks", self)
-        self.action_mode_blocks.triggered.connect(lambda: self._set_app_mode("blocks"))
-        self.action_mode_blocks.setCheckable(True)
+        self.action_mode_analysis = QtGui.QAction("Analysis", self)
+        self.action_mode_analysis.triggered.connect(lambda: self._set_app_mode("analysis"))
+        self.action_mode_analysis.setCheckable(True)
 
         self.action_delete = QtGui.QAction(get_icon("delete", color_danger), "Delete", self)
         self.action_delete.setShortcut(QtGui.QKeySequence.StandardKey.Delete)
@@ -710,8 +716,7 @@ class MainWindow(QtWidgets.QMainWindow):
         mode_menu.addAction(self.action_mode_sketch)
         mode_menu.addAction(self.action_mode_model)
         mode_menu.addAction(self.action_mode_pose)
-        mode_menu.addAction(self.action_mode_sim)
-        mode_menu.addAction(self.action_mode_blocks)
+        mode_menu.addAction(self.action_mode_analysis)
 
         examples_menu = menubar.addMenu("E&xamples")
         self._build_examples_menu(examples_menu)
@@ -813,33 +818,21 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self._mode_pose_btn.clicked.connect(lambda: self._set_app_mode("pose"))
 
-        self._mode_sim_btn = QtWidgets.QToolButton()
-        self._mode_sim_btn.setText("Sim")
-        self._mode_sim_btn.setCheckable(True)
-        self._mode_sim_btn.setFixedSize(70, 32)
-        self._mode_sim_btn.setStyleSheet(
-            "QToolButton { border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; border-left: none; border-right: none; background: #f0f0f0; color: #666; font-weight: bold; font-size: 11px; }"
-            "QToolButton:checked { background: #31556f; color: white; border-color: #31556f; }"
-            "QToolButton:hover:!checked { background: #e0e0e0; }"
-        )
-        self._mode_sim_btn.clicked.connect(lambda: self._set_app_mode("sim"))
-
-        self._mode_blocks_btn = QtWidgets.QToolButton()
-        self._mode_blocks_btn.setText("Blocks")
-        self._mode_blocks_btn.setCheckable(True)
-        self._mode_blocks_btn.setFixedSize(70, 32)
-        self._mode_blocks_btn.setStyleSheet(
+        self._mode_analysis_btn = QtWidgets.QToolButton()
+        self._mode_analysis_btn.setText("Analysis")
+        self._mode_analysis_btn.setCheckable(True)
+        self._mode_analysis_btn.setFixedSize(70, 32)
+        self._mode_analysis_btn.setStyleSheet(
             "QToolButton { border: 1px solid #ccc; border-top-right-radius: 14px; border-bottom-right-radius: 14px; background: #f0f0f0; color: #666; font-weight: bold; font-size: 11px; }"
             "QToolButton:checked { background: #31556f; color: white; border-color: #31556f; }"
             "QToolButton:hover:!checked { background: #e0e0e0; }"
         )
-        self._mode_blocks_btn.clicked.connect(lambda: self._set_app_mode("blocks"))
+        self._mode_analysis_btn.clicked.connect(lambda: self._set_app_mode("analysis"))
 
         layout.addWidget(self._mode_sketch_btn)
         layout.addWidget(self._mode_model_btn)
         layout.addWidget(self._mode_pose_btn)
-        layout.addWidget(self._mode_sim_btn)
-        layout.addWidget(self._mode_blocks_btn)
+        layout.addWidget(self._mode_analysis_btn)
         return container
 
     def _build_common_toolbar(self) -> None:
@@ -954,12 +947,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._pose_toolbar.setVisible(False)
 
-    def _build_sim_toolbar(self) -> None:
-        self._sim_toolbar = self.addToolBar("Simulation")
-        self._sim_toolbar.setIconSize(QtCore.QSize(28, 28))
-        self._sim_toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-        self._sim_toolbar.setMovable(False)
-        t = self._sim_toolbar
+    def _build_analysis_toolbar(self) -> None:
+        self._analysis_toolbar = self.addToolBar("Analysis")
+        self._analysis_toolbar.setIconSize(QtCore.QSize(28, 28))
+        self._analysis_toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        self._analysis_toolbar.setMovable(False)
+        t = self._analysis_toolbar
 
         self._add_toolbar_block(t, [
             [self.action_validate, self.action_run, self.action_play_pause, self.action_stop],
@@ -975,7 +968,7 @@ class MainWindow(QtWidgets.QMainWindow):
             [self.action_export_script],
         ], "Export")
 
-        self._sim_toolbar.setVisible(False)
+        self._analysis_toolbar.setVisible(False)
 
     def _set_app_mode(self, mode: str) -> None:
         if mode == self._app_mode:
@@ -990,18 +983,17 @@ class MainWindow(QtWidgets.QMainWindow):
             self._mode_sketch_btn.setChecked(True)
             self._mode_model_btn.setChecked(False)
             self._mode_pose_btn.setChecked(False)
-            self._mode_sim_btn.setChecked(False)
-            self._mode_blocks_btn.setChecked(False)
+            self._mode_analysis_btn.setChecked(False)
             self.action_mode_sketch.setChecked(True)
             self.action_mode_model.setChecked(False)
             self.action_mode_pose.setChecked(False)
-            self.action_mode_sim.setChecked(False)
-            self.action_mode_blocks.setChecked(False)
+            self.action_mode_analysis.setChecked(False)
             self._sketch_toolbar.setVisible(True)
             self._model_toolbar.setVisible(False)
             self._pose_toolbar.setVisible(False)
-            self._sim_toolbar.setVisible(False)
+            self._analysis_toolbar.setVisible(False)
             self._playback_widget.setVisible(False)
+            self._set_block_editor_visible(True)
             # Ensure sketch is visible when entering sketch mode
             if self.app_service.project and self.app_service.project.sketch is not None:
                 if not self.app_service.project.sketch.visible:
@@ -1015,79 +1007,56 @@ class MainWindow(QtWidgets.QMainWindow):
             self._mode_sketch_btn.setChecked(False)
             self._mode_model_btn.setChecked(False)
             self._mode_pose_btn.setChecked(True)
-            self._mode_sim_btn.setChecked(False)
-            self._mode_blocks_btn.setChecked(False)
+            self._mode_analysis_btn.setChecked(False)
             self.action_mode_sketch.setChecked(False)
             self.action_mode_model.setChecked(False)
             self.action_mode_pose.setChecked(True)
-            self.action_mode_sim.setChecked(False)
-            self.action_mode_blocks.setChecked(False)
+            self.action_mode_analysis.setChecked(False)
             self._sketch_toolbar.setVisible(False)
             self._model_toolbar.setVisible(False)
             self._pose_toolbar.setVisible(True)
-            self._sim_toolbar.setVisible(False)
+            self._analysis_toolbar.setVisible(False)
             self._playback_widget.setVisible(False)
+            self._set_block_editor_visible(False)
             self._ensure_pose_session()
             self._load_pose_constraints_from_current_pose()
-            self.poses_panel.refresh()
-            if hasattr(self, "_right_panel_tabs"):
-                self._right_panel_tabs.setCurrentIndex(self._poses_panel_index)
+            if hasattr(self, "poses_panel"):
+                self.poses_panel.refresh()
             self.refresh_all()
-        elif mode == "sim":
+        elif mode == "analysis":
             self._mode_sketch_btn.setChecked(False)
             self._mode_model_btn.setChecked(False)
             self._mode_pose_btn.setChecked(False)
-            self._mode_sim_btn.setChecked(True)
-            self._mode_blocks_btn.setChecked(False)
+            self._mode_analysis_btn.setChecked(True)
             self.action_mode_sketch.setChecked(False)
             self.action_mode_model.setChecked(False)
             self.action_mode_pose.setChecked(False)
-            self.action_mode_sim.setChecked(True)
-            self.action_mode_blocks.setChecked(False)
+            self.action_mode_analysis.setChecked(True)
             self._sketch_toolbar.setVisible(False)
             self._model_toolbar.setVisible(False)
             self._pose_toolbar.setVisible(False)
-            self._sim_toolbar.setVisible(True)
+            self._analysis_toolbar.setVisible(True)
             self._playback_widget.setVisible(True)
+            self._set_block_editor_visible(False)
             self._center_stack.setCurrentIndex(0)
             is_exudyn = self.app_service.simulation_runner.backend_name() == "exudyn"
             self.action_export_script.setEnabled(is_exudyn)
-            self.refresh_all()
-        elif mode == "blocks":
-            self._mode_sketch_btn.setChecked(False)
-            self._mode_model_btn.setChecked(False)
-            self._mode_pose_btn.setChecked(False)
-            self._mode_sim_btn.setChecked(False)
-            self._mode_blocks_btn.setChecked(True)
-            self.action_mode_sketch.setChecked(False)
-            self.action_mode_model.setChecked(False)
-            self.action_mode_pose.setChecked(False)
-            self.action_mode_sim.setChecked(False)
-            self.action_mode_blocks.setChecked(True)
-            self._sketch_toolbar.setVisible(False)
-            self._model_toolbar.setVisible(False)
-            self._pose_toolbar.setVisible(False)
-            self._sim_toolbar.setVisible(False)
-            self._playback_widget.setVisible(False)
-            self._center_stack.setCurrentIndex(1)
-            self._refresh_block_editor()
             self.refresh_all()
         else:
             self._mode_sketch_btn.setChecked(False)
             self._mode_model_btn.setChecked(True)
             self._mode_pose_btn.setChecked(False)
-            self._mode_sim_btn.setChecked(False)
-            self._mode_blocks_btn.setChecked(False)
+            self._mode_analysis_btn.setChecked(False)
             self.action_mode_sketch.setChecked(False)
             self.action_mode_model.setChecked(True)
             self.action_mode_pose.setChecked(False)
-            self.action_mode_sim.setChecked(False)
-            self.action_mode_blocks.setChecked(False)
+            self.action_mode_analysis.setChecked(False)
             self._sketch_toolbar.setVisible(False)
             self._model_toolbar.setVisible(True)
             self._pose_toolbar.setVisible(False)
-            self._sim_toolbar.setVisible(False)
+            self._analysis_toolbar.setVisible(False)
             self._playback_widget.setVisible(False)
+            self._set_block_editor_visible(True)
             self._center_stack.setCurrentIndex(0)
             if self._has_simulation_frames():
                 self._rewind_simulation_to_start()
@@ -1099,11 +1068,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_status_message()
 
     def refresh_all(self) -> None:
-        project = self.app_service.project
+        project = self.app_service.display_project
         if project is None:
-            if hasattr(self, "poses_panel"):
-                self.poses_panel.refresh()
             return
+        self.canvas.set_display_project(project)
         if self._app_mode == "pose":
             self._ensure_pose_session()
         self._update_window_title()
@@ -1125,7 +1093,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_status_message()
 
     def _refresh_block_editor(self) -> None:
-        project = self.app_service.project
+        project = self.app_service.display_project
         self._block_editor.set_project(project)
         if project is None:
             self._block_editor.set_diagram(None)
@@ -1133,6 +1101,16 @@ class MainWindow(QtWidgets.QMainWindow):
         if project.model.control_graph is None:
             project.model.control_graph = BlockDiagram()
         self._block_editor.set_diagram(project.model.control_graph)
+
+    def _set_block_editor_visible(self, visible: bool) -> None:
+        if self._block_editor.isVisible() == visible:
+            return
+        self._block_editor.setVisible(visible)
+        if visible:
+            self._canvas_stack.setSizes([600, 250])
+            self._refresh_block_editor()
+        else:
+            self._canvas_stack.setSizes([850, 0])
 
     def _on_block_diagram_changed(self) -> None:
         project = self.app_service.project
@@ -1174,8 +1152,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._pose_pick_state = None
         self._pose_constraints.clear()
         self.canvas.set_pose_constraints([])
-        if hasattr(self, "poses_panel"):
-            self.poses_panel.refresh()
 
     def _on_poses_panel_current_changed(self, pose_id: str) -> None:
         self._load_pose_constraints_from_current_pose()
@@ -1184,7 +1160,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_poses_panel_sim_initial_changed(self, pose_id) -> None:
         self._mark_project_dirty()
-        if self._app_mode == "sim":
+        if self._app_mode == "analysis":
             self._apply_current_frame()
             self.canvas.update()
 
@@ -1205,6 +1181,9 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self, "Run Study Failed", str(exc))
 
+    def _on_analysis_selected(self, analysis_id: str) -> None:
+        self._set_app_mode("analysis")
+
     def _on_run_analysis_requested(self, analysis_id: str) -> None:
         project_dir = self._current_project_path.parent if self._current_project_path else None
         try:
@@ -1220,9 +1199,11 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Run Analysis Failed", str(exc))
 
     def _on_working_context_changed(self) -> None:
-        project = self.app_service.project
+        project = self.app_service.display_project
         if project is None:
             return
+        self._set_app_mode("model")
+        self.canvas.set_display_project(project)
         self._populate_tree(project)
         self._apply_case_delta_highlights()
         if hasattr(self, "workflow_panel"):
@@ -1231,7 +1212,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.update()
 
     def _on_workflow_pose_selected(self, pose_id: str) -> None:
-        pass  # future: set simulation initial pose
+        ws = self.app_service.project.workspace if self.app_service.project else None
+        if ws is None:
+            return
+        pose = next((p for p in ws.poses if p.id == pose_id), None)
+        if pose is None:
+            return
+        if pose.is_default:
+            # Default pose is read-only; just select it for future analysis creation
+            self.app_service.set_selected_pose(pose_id)
+            return
+        # Non-default pose -> enter pose mode
+        self.app_service.set_selected_pose(pose_id)
+        self._set_app_mode("pose")
 
     def _update_window_title(self) -> None:
         project = self.app_service.project
@@ -1596,7 +1589,7 @@ class MainWindow(QtWidgets.QMainWindow):
         time_value = 0.0
         if self._app_mode == "pose":
             frame = pose_to_state_overlay(self.app_service.get_current_pose())
-        elif self._app_mode == "sim":
+        elif self._app_mode == "analysis":
             if self._last_simulation_result is not None and self._last_simulation_result.frames:
                 index = max(0, min(self._current_frame_index, len(self._last_simulation_result.frames) - 1))
                 frame = self._last_simulation_result.frames[index]
@@ -1766,20 +1759,19 @@ class MainWindow(QtWidgets.QMainWindow):
             self.canvas.set_show_trajectories(True)
 
     def _check_structural_edit_allowed(self) -> bool:
-        """Return True if structural model edits are allowed. Shows warning when case is active."""
+        """Return True if structural model edits are allowed.
+
+        When a case is active, edits are redirected into case structural diffs
+        (added_entities / removed_entity_ids) instead of modifying the baseline.
+        """
         project = self.app_service.project
         if project is None:
             return True
         ws = project.workspace
         if ws is None or ws.active_case_id is None:
             return True
-        reply = QtWidgets.QMessageBox.question(
-            self,
-            "Edit Baseline Model",
-            "Adding or removing model elements modifies the baseline model and affects all cases.\n\nContinue?",
-            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
-        )
-        return reply == QtWidgets.QMessageBox.StandardButton.Yes
+        # Structural edits in a case are now captured as diffs — no warning needed.
+        return True
 
     def _prepare_for_model_edit(self) -> bool:
         if self._playback_timer.isActive():
@@ -2056,6 +2048,27 @@ class MainWindow(QtWidgets.QMainWindow):
         for spring in project.model.springs:
             springs_root.addChild(self._entity_item(spring.name, spring.spring_type.value, spring.id))
 
+        control_graph = project.model.control_graph
+        if control_graph is not None and control_graph.instances:
+            blocks_root = _root("Block Diagram", len(control_graph.instances))
+            self.tree.addTopLevelItem(blocks_root)
+            for inst in control_graph.instances.values():
+                block_item = self._entity_item(inst.instance_id, f"block_{inst.block_type}", inst.instance_id)
+                blocks_root.addChild(block_item)
+                for param_key, param_value in inst.parameters.items():
+                    param_item = QtWidgets.QTreeWidgetItem([f"{param_key} = {param_value}", "block_param"])
+                    param_item.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("block_param", inst.instance_id, param_key))
+                    block_item.addChild(param_item)
+            if control_graph.connections:
+                conn_root = QtWidgets.QTreeWidgetItem([f"Connections  ({len(control_graph.connections)})", ""])
+                conn_root.setFlags(conn_root.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
+                blocks_root.addChild(conn_root)
+                for conn in control_graph.connections:
+                    conn_label = f"{conn.src_instance}.{conn.src_port} → {conn.dst_instance}.{conn.dst_port}"
+                    conn_item = QtWidgets.QTreeWidgetItem([conn_label, "block_connection"])
+                    conn_item.setData(0, QtCore.Qt.ItemDataRole.UserRole, ("block_connection", conn.src_instance, conn.dst_instance))
+                    conn_root.addChild(conn_item)
+
         if project.reaction_outputs:
             reactions_root = _root("Reactions", len(project.reaction_outputs))
             self.tree.addTopLevelItem(reactions_root)
@@ -2074,7 +2087,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tree.blockSignals(False)
 
     def _apply_case_delta_highlights(self) -> None:
-        """Highlight model tree items with blue foreground for entities that have overrides in the active case."""
+        """Highlight model tree items for entities changed in the active case.
+
+        - Blue: property override
+        - Green: entity added by case
+        - Red: entity removed by case
+        """
         # First, clear all foreground overrides on entity items
         it = QtWidgets.QTreeWidgetItemIterator(self.tree)
         while it.value():
@@ -2089,11 +2107,26 @@ class MainWindow(QtWidgets.QMainWindow):
         if ws.active_case_id is None:
             return
         case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
-        if case is None or not case.invariant_values:
+        if case is None:
+            return
+        if not case.invariant_values and not case.removed_entity_ids and not case.added_entities:
             return
 
         changed_ids = _changed_entity_ids_for_case(case)
-        highlight = QtGui.QBrush(QtGui.QColor("#2255aa"))
+        added_ids = {e.get("id") for e in case.added_entities.get("bodies", [])}
+        added_ids.update(e.get("id") for e in case.added_entities.get("joints", []))
+        added_ids.update(e.get("id") for e in case.added_entities.get("sliders", []))
+        added_ids.update(e.get("id") for e in case.added_entities.get("drivers", []))
+        added_ids.update(e.get("id") for e in case.added_entities.get("loads", []))
+        added_ids.update(e.get("id") for e in case.added_entities.get("sensors", []))
+        added_ids.update(e.get("id") for e in case.added_entities.get("springs", []))
+        added_ids.discard(None)
+        removed_ids = set(case.removed_entity_ids)
+
+        override_brush = QtGui.QBrush(QtGui.QColor("#2255aa"))
+        added_brush = QtGui.QBrush(QtGui.QColor("#228822"))
+        removed_brush = QtGui.QBrush(QtGui.QColor("#aa2222"))
+
         it = QtWidgets.QTreeWidgetItemIterator(self.tree)
         while it.value():
             item = it.value()
@@ -2104,8 +2137,13 @@ class MainWindow(QtWidgets.QMainWindow):
                     entity_id = data[1]
                 elif isinstance(data, str):
                     entity_id = data
-                if entity_id and entity_id in changed_ids:
-                    item.setForeground(0, highlight)
+                if entity_id:
+                    if entity_id in removed_ids:
+                        item.setForeground(0, removed_brush)
+                    elif entity_id in added_ids:
+                        item.setForeground(0, added_brush)
+                    elif entity_id in changed_ids:
+                        item.setForeground(0, override_brush)
             it += 1
 
     def _collect_expanded_tree_keys(self) -> set[str]:
@@ -2328,10 +2366,10 @@ class MainWindow(QtWidgets.QMainWindow):
             {"key": key, "constraint": self._pose_constraint_to_metadata(constraint)}
             for key, constraint in self._pose_constraints.items()
         ]
-        if hasattr(self, "poses_panel"):
-            self.poses_panel.refresh()
         self.canvas.set_pose_constraints(self._pose_constraints.values())
         self._mark_project_dirty()
+        if hasattr(self, "poses_panel"):
+            self.poses_panel.refresh()
 
     def _load_pose_constraints_from_current_pose(self) -> None:
         pose = self.app_service.get_current_pose()
@@ -3879,6 +3917,28 @@ class MainWindow(QtWidgets.QMainWindow):
 
             if not self._selected_entity_id:
                 return
+
+            # --- Block diagram support ---
+            project = self.app_service.display_project
+            block = None
+            if project is not None and project.model.control_graph is not None:
+                block = project.model.control_graph.instances.get(self._selected_entity_id)
+            if block is not None:
+                self.inspector_title.setText(
+                    f'<b>{block.instance_id}</b> &nbsp;<span style="color:#888;font-weight:normal">{block.block_type}</span>'
+                )
+                for param_key, param_value in block.parameters.items():
+                    self.inspector.add_property(
+                        param_key,
+                        f"block_param/{block.instance_id}/{param_key}",
+                        str(param_value),
+                        "block_param",
+                        str(param_value),
+                        enabled=self._editing_allowed() and self._app_mode != "pose",
+                    )
+                self.inspector.layout.addStretch()
+                return
+
             entity = self.app_service.get_entity(self._selected_entity_id)
             if entity is None:
                 return
@@ -4504,6 +4564,36 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if kind in {"readonly", "section_header", "key"}:
             return
+        # Block diagram parameters
+        if kind == "block_param":
+            if not self._editing_allowed():
+                return
+            try:
+                parts = path.split("/")
+                if len(parts) == 3:
+                    instance_id = parts[1]
+                    param_key = parts[2]
+                    project = self.app_service.project
+                    if project is not None and project.model.control_graph is not None:
+                        inst = project.model.control_graph.instances.get(instance_id)
+                        if inst is not None:
+                            # Try to preserve numeric type
+                            try:
+                                if "." in value:
+                                    inst.parameters[param_key] = float(value)
+                                else:
+                                    inst.parameters[param_key] = int(value)
+                            except ValueError:
+                                inst.parameters[param_key] = value
+                            self.app_service._snapshot()
+                            self._mark_project_dirty()
+                            if project.workspace is not None:
+                                from quino.services.workspace_invalidation import invalidate_on_model_change
+                                invalidate_on_model_change(project)
+            except Exception as exc:  # pragma: no cover - UI feedback
+                self._append_message(f"Block parameter update failed: {exc}")
+            self.refresh_all()
+            return
         # Pose-scoped fields are handled separately so they remain editable in
         # pose mode even though the rest of the model is locked.
         if path.startswith("pose:"):
@@ -4742,7 +4832,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _editing_allowed(self) -> bool:
         if self._playback_timer.isActive():
             return False
-        if self._app_mode == "sim":
+        if self._app_mode == "analysis":
             return False
         if self._last_simulation_result is None or not self._last_simulation_result.frames:
             return True

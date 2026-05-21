@@ -44,6 +44,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
     working_context_changed = QtCore.Signal()
     run_analysis_requested = QtCore.Signal(str)  # analysis_id
     pose_selected = QtCore.Signal(str)           # pose_id
+    analysis_selected = QtCore.Signal(str)       # analysis_id
 
     def __init__(self, app_service: ApplicationService) -> None:
         super().__init__()
@@ -263,6 +264,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             self.pose_selected.emit(obj_id)
         elif kind == "analysis":
             self.app_service.set_selected_analysis(obj_id)
+            self.analysis_selected.emit(obj_id)
 
     def _set_subtree_expanded(self, item: QtWidgets.QTreeWidgetItem, expanded: bool) -> None:
         item.setExpanded(expanded)
@@ -354,9 +356,11 @@ class WorkflowTreePanel(QtWidgets.QWidget):
                 ws = self.app_service.project.workspace
                 pose = next((p for p in ws.poses if p.id == obj_id), None)
                 menu.addAction("Add Analysis", lambda: self._action_add_analysis(pose_id=obj_id))
-                menu.addAction("Use As Initial Pose", lambda: self._action_use_as_initial_pose(obj_id))
+                if pose and not pose.is_default:
+                    menu.addAction("Use As Initial Pose", lambda: self._action_use_as_initial_pose(obj_id))
                 menu.addSeparator()
-                menu.addAction("Rename", lambda: self._action_rename(kind, obj_id))
+                if pose and not pose.is_default:
+                    menu.addAction("Rename", lambda: self._action_rename(kind, obj_id))
                 act_del = menu.addAction("Delete", lambda: self._delete_item(kind, obj_id, item.text(0)))
                 if pose and pose.is_default:
                     act_del.setEnabled(False)
@@ -409,8 +413,9 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         name, ok = QtWidgets.QInputDialog.getText(self, "New Analysis", "Name:")
         if not ok or not name:
             return
+        # Future types: static, kinematic, equilibrium
         analysis_type, ok2 = QtWidgets.QInputDialog.getItem(
-            self, "Analysis Type", "Type:", ["dynamic", "kinematic", "static"], 0, False
+            self, "Analysis Type", "Type:", ["dynamic"], 0, False
         )
         if not ok2:
             return

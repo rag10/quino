@@ -61,6 +61,12 @@ class Case:
     parent_case_id: str | None = None
     model_snapshot_id: str | None = None
     invariant_values: dict[str, ScalarValue] = field(default_factory=dict)
+    # Structural diffs vs parent baseline/case
+    added_entities: dict[str, list[dict]] = field(default_factory=dict)
+    #   key: domain ("bodies", "joints", "sliders", "drivers", "loads", "sensors", "springs")
+    removed_entity_ids: list[str] = field(default_factory=list)
+    reference_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #   key: entity_id, value: {property_name: new_value}
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
