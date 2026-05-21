@@ -118,6 +118,22 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
             )
             self.addItem(item)
             self._block_items[inst_id] = item
+            # Attach shape metadata when known (from registry or instance).
+            shape_by_name: dict[str, tuple[int, ...]] = {}
+            if inst.block_type in BLOCK_REGISTRY:
+                block_def = get_block_def(inst.block_type)
+                for p in block_def.input_specs:
+                    shape_by_name[p.name] = p.shape
+                for p in block_def.output_specs:
+                    shape_by_name[p.name] = p.shape
+            else:
+                for p in inst.input_ports:
+                    shape_by_name[p.name] = p.shape
+                for p in inst.output_ports:
+                    shape_by_name[p.name] = p.shape
+            for port_name, port_item in {**item.input_ports, **item.output_ports}.items():
+                if port_name in shape_by_name:
+                    port_item.set_shape(shape_by_name[port_name])
 
         for conn in self._diagram.connections:
             src_block = self._block_items.get(conn.src_instance)
@@ -259,6 +275,15 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
         )
         self.addItem(item)
         self._block_items[instance_id] = item
+        # Annotate ports with their shape for tooltip display.
+        for p in block_def.input_specs:
+            port_item = item.input_ports.get(p.name)
+            if port_item is not None:
+                port_item.set_shape(p.shape)
+        for p in block_def.output_specs:
+            port_item = item.output_ports.get(p.name)
+            if port_item is not None:
+                port_item.set_shape(p.shape)
         self.clearSelection()
         item.setSelected(True)
         self.sync_to_diagram()
@@ -690,20 +715,36 @@ class BlockEditorCanvas(QtWidgets.QGraphicsView):
     def drawBackground(self, painter: QtGui.QPainter, rect: QtCore.QRectF) -> None:
         super().drawBackground(painter, rect)
         scene = self.scene()
-        if not isinstance(scene, BlockDiagramScene) or scene._block_items:
+        if not isinstance(scene, BlockDiagramScene):
+            return
+        # Light dot grid for visual orientation (only when there are blocks
+        # or while the user is wiring; with no content we show the hint).
+        viewport_rect = self.viewport().rect()
+        scene_rect = self.mapToScene(viewport_rect).boundingRect()
+        if scene._block_items:
+            painter.save()
+            painter.setPen(QtGui.QPen(QtGui.QColor("#e7eaef"), 1))
+            step = 40.0
+            x = int(scene_rect.left() / step) * step
+            while x < scene_rect.right():
+                y = int(scene_rect.top() / step) * step
+                while y < scene_rect.bottom():
+                    painter.drawPoint(QtCore.QPointF(x, y))
+                    y += step
+                x += step
+            painter.restore()
             return
         # Empty state hint when there are no blocks yet.
         painter.save()
-        painter.setPen(QtGui.QPen(QtGui.QColor("#a0a0a0")))
+        painter.setPen(QtGui.QPen(QtGui.QColor("#9aa3ad")))
         font = painter.font()
         font.setPointSize(11)
         painter.setFont(font)
-        viewport_rect = self.viewport().rect()
-        scene_rect = self.mapToScene(viewport_rect).boundingRect()
         painter.drawText(
             scene_rect,
             QtCore.Qt.AlignmentFlag.AlignCenter,
-            "Drag blocks here, or double-click a block in the palette",
+            "Drag a block here from the palette  ·  or double-click a palette entry\n"
+            "Drag between ports to wire blocks together",
         )
         painter.restore()
 

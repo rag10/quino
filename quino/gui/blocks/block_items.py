@@ -40,10 +40,12 @@ class PortItem(QtWidgets.QGraphicsEllipseItem):
         name: str,
         is_input: bool,
         parent: BlockItem,
+        shape: tuple[int, ...] | None = None,
     ) -> None:
         self._port_name = name
         self._is_input = is_input
         self._parent_block = parent
+        self._shape: tuple[int, ...] | None = shape
         self._connections: list[ConnectionItem] = []
         super().__init__(
             -PORT_RADIUS, -PORT_RADIUS,
@@ -56,12 +58,23 @@ class PortItem(QtWidgets.QGraphicsEllipseItem):
         self.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.CrossCursor))
         self._refresh_tooltip()
 
+    def set_shape(self, shape: tuple[int, ...] | None) -> None:
+        self._shape = shape
+        self._refresh_tooltip()
+
+    @property
+    def shape(self) -> tuple[int, ...] | None:
+        return self._shape
+
     def _refresh_tooltip(self) -> None:
         direction = "Input" if self._is_input else "Output"
         connected = "connected" if self._connections else "disconnected"
+        shape_str = ""
+        if self._shape:
+            shape_str = f"\nShape: {'×'.join(str(d) for d in self._shape)}"
         self.setToolTip(
             f"{self._parent_block.instance_id}.{self._port_name}\n"
-            f"{direction} · {connected}"
+            f"{direction} · {connected}{shape_str}"
         )
 
     @property

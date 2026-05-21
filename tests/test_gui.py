@@ -3160,12 +3160,13 @@ def test_model_tree_marks_inherited_block_in_italics(qtbot):
     assert "Parent" in tip
 
 
-def test_model_tree_marks_local_override_in_blue(qtbot):
+def test_model_tree_marks_local_override_in_orange(qtbot):
     import os
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from quino.application.service import ApplicationService
     from quino.domain.inputs import PropertyValueInput
     from quino.gui.main_window import MainWindow
+    from quino.gui._palette import OVERRIDE_ORANGE
 
     app = ApplicationService()
     app.new_project("test")
@@ -3182,7 +3183,9 @@ def test_model_tree_marks_local_override_in_blue(qtbot):
     item = window._tree_items.get(body_id)
     assert item is not None
     color = item.foreground(0).color().name()
-    assert color == "#2255aa", f"Expected local-override blue, got {color}"
+    assert color.lower() == OVERRIDE_ORANGE.lower(), (
+        f"Expected local-override orange ({OVERRIDE_ORANGE}), got {color}"
+    )
     assert item.font(0).italic() is False
 
 
@@ -3292,6 +3295,23 @@ def test_block_inspector_hides_internal_position_param(qtbot):
         for row in range(window.inspector.rowCount())
     ]
     assert not any(p.endswith("/_position") for p in paths)
+
+
+def test_port_tooltip_includes_shape(qtbot):
+    """Port tooltip should mention the port shape (e.g. 1)."""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.blocks.editor_widget import BlockEditorWidget
+    app = ApplicationService()
+    app.new_project("test")
+    widget = BlockEditorWidget()
+    qtbot.addWidget(widget)
+    widget.set_app_service(app)
+    widget._palette.blockTypeRequested.emit("Gain")
+    item = next(iter(widget._scene._block_items.values()))
+    tip = item.input_ports["in"].toolTip()
+    assert "Shape" in tip
 
 
 def test_port_has_tooltip_with_name_and_direction(qtbot):

@@ -2499,6 +2499,12 @@ class MainWindow(QtWidgets.QMainWindow):
         def _set(entity_id: str, color: str, italic: bool, tip: str) -> None:
             per_entity[entity_id] = (color, italic, tip)
 
+        from quino.gui._palette import (
+            ADDED_GREEN, ADDED_GREEN_SOFT,
+            OVERRIDE_ORANGE, OVERRIDE_ORANGE_SOFT,
+            REMOVED_RED, REMOVED_RED_SOFT,
+        )
+
         for entry in summary.invariant_overrides:
             parts = entry.path.split("/")
             if len(parts) >= 2:
@@ -2509,18 +2515,20 @@ class MainWindow(QtWidgets.QMainWindow):
                     tip = f"Property override (local): {entry.path}"
                     if entry.shadows_inherited:
                         tip += "  ·  shadows an inherited override"
-                    _set(eid, "#2255aa", False, tip)
+                    _set(eid, OVERRIDE_ORANGE, False, tip)
                 else:
-                    _set(eid, "#6fa0d8", True, f"Inherited override from {src_label}: {entry.path}")
+                    _set(eid, OVERRIDE_ORANGE_SOFT, True,
+                         f"Inherited override from {src_label}: {entry.path}")
 
         for entry in summary.reference_overrides:
             tip = f"Override {entry.prop}"
             source = case_by_id.get(entry.source_case_id)
             src_label = source.name if source else entry.source_case_id
             if entry.is_local:
-                _set(entry.entity_id, "#2255aa", False, tip + " (local)")
+                _set(entry.entity_id, OVERRIDE_ORANGE, False, tip + " (local)")
             else:
-                _set(entry.entity_id, "#6fa0d8", True, f"Inherited {entry.prop} from {src_label}")
+                _set(entry.entity_id, OVERRIDE_ORANGE_SOFT, True,
+                     f"Inherited {entry.prop} from {src_label}")
 
         for entry in summary.removals:
             if entry.kind != "entity":
@@ -2528,17 +2536,19 @@ class MainWindow(QtWidgets.QMainWindow):
             source = case_by_id.get(entry.source_case_id)
             src_label = source.name if source else entry.source_case_id
             if entry.is_local:
-                _set(str(entry.payload), "#aa2222", False, f"Removed by this case")
+                _set(str(entry.payload), REMOVED_RED, False, "Removed by this case")
             else:
-                _set(str(entry.payload), "#d68585", True, f"Removed by ancestor {src_label}")
+                _set(str(entry.payload), REMOVED_RED_SOFT, True,
+                     f"Removed by ancestor {src_label}")
 
         for entry in summary.additions:
             source = case_by_id.get(entry.source_case_id)
             src_label = source.name if source else entry.source_case_id
             if entry.is_local:
-                _set(entry.entity_id, "#228822", False, f"Added by this case")
+                _set(entry.entity_id, ADDED_GREEN, False, "Added by this case")
             else:
-                _set(entry.entity_id, "#80c280", True, f"Inherited (added by {src_label})")
+                _set(entry.entity_id, ADDED_GREEN_SOFT, True,
+                     f"Inherited (added by {src_label})")
 
         # Walk tree and apply.
         it = QtWidgets.QTreeWidgetItemIterator(self.tree)

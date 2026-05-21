@@ -113,9 +113,19 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         self._tree = QtWidgets.QTreeWidget()
         self._tree.setHeaderHidden(True)
         self._tree.setColumnCount(1)
-        self._tree.setIndentation(14)
+        self._tree.setIndentation(18)
+        self._tree.setRootIsDecorated(True)
+        self._tree.setAnimated(True)
+        self._tree.setAlternatingRowColors(True)
+        self._tree.setUniformRowHeights(True)
         self._tree.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         self._tree.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+        self._tree.setStyleSheet(
+            "QTreeWidget { background: #fbfcfd; alternate-background-color: #f4f6f9;"
+            " border: 1px solid #d0d7de; }"
+            " QTreeView::item { padding: 1px 0; }"
+            " QTreeView::item:selected { background: #cfe1f5; color: #112746; }"
+        )
         self._tree.customContextMenuRequested.connect(self._on_context_menu)
         self._tree.itemDoubleClicked.connect(self._on_item_double_clicked)
         self._tree.currentItemChanged.connect(self._on_current_changed)
@@ -131,14 +141,15 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         project = self.app_service.project
         if project is None or project.workspace is None:
             item = QtWidgets.QTreeWidgetItem(self._tree)
-            item.setText(0, "No workspace")
+            item.setText(0, "No workspace loaded.\nOpen or create a project to begin.")
             item.setFlags(item.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
+            item.setForeground(0, QtGui.QBrush(QtGui.QColor("#888888")))
             self._update_badge()
             return
 
         ws = project.workspace
         for baseline in ws.baselines:
-            label = f"Baseline: {baseline.name}"
+            label = f"■  Baseline · {baseline.name}"
             counts = self._scope_counts(baseline_id=baseline.id, case_id=None)
             label += counts
             b_item = self._make_item(baseline.id, "baseline", label)
@@ -151,8 +162,12 @@ class WorkflowTreePanel(QtWidgets.QWidget):
 
         if not ws.baselines:
             placeholder = QtWidgets.QTreeWidgetItem(self._tree)
-            placeholder.setText(0, "No baseline — right-click to add")
+            placeholder.setText(
+                0,
+                "No baselines yet.\nRight-click here to add the first baseline.",
+            )
             placeholder.setFlags(placeholder.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
+            placeholder.setForeground(0, QtGui.QBrush(QtGui.QColor("#888888")))
 
         self._tree.expandAll()
         self._apply_active_highlight()
@@ -172,8 +187,10 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             if c.baseline_id == baseline_id and c.parent_case_id == parent_case_id
         ]
         for case in children:
+            glyph = "◇" if parent_case_id else "◆"
             kind_label = "Subcase" if parent_case_id else "Case"
-            label = f"{kind_label}: {case.name}{_badge_string(case)}"
+            counts = self._scope_counts(baseline_id=None, case_id=case.id)
+            label = f"{glyph}  {kind_label} · {case.name}{_badge_string(case)}{counts}"
             c_item = self._make_item(case.id, "case", label)
             self._style_node(c_item, "subcase" if parent_case_id else "case")
             summary = _build_delta_summary(case)
@@ -205,7 +222,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             )
             if additions or removals or overrides:
                 diffs_node = QtWidgets.QTreeWidgetItem(
-                    [f"Diffs  (+{additions}  -{removals}  ~{overrides})"]
+                    [f"✱  Diffs  +{additions}  -{removals}  ~{overrides}"]
                 )
                 diffs_node.setFlags(diffs_node.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
                 font = diffs_node.font(0)
@@ -221,7 +238,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         else:
             poses = [p for p in ws.poses if p.case_id is None and p.baseline_id == baseline_id]
         if poses:
-            poses_node = QtWidgets.QTreeWidgetItem([f"Poses  ({len(poses)})"])
+            poses_node = QtWidgets.QTreeWidgetItem([f"📐  Poses  ({len(poses)})"])
             poses_node.setFlags(poses_node.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
             poses_node.setForeground(0, QtGui.QBrush(QtGui.QColor("#666666")))
             parent_item.addChild(poses_node)
@@ -245,7 +262,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
                 if a.case_id is None and a.baseline_id == baseline_id
             ]
         if all_analyses:
-            an_node = QtWidgets.QTreeWidgetItem([f"Analyses  ({len(all_analyses)})"])
+            an_node = QtWidgets.QTreeWidgetItem([f"⚙  Analyses  ({len(all_analyses)})"])
             an_node.setFlags(an_node.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
             an_node.setForeground(0, QtGui.QBrush(QtGui.QColor("#666666")))
             parent_item.addChild(an_node)
@@ -257,7 +274,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         if case is not None:
             block_adds = case.added_entities.get("blocks", [])
             if block_adds:
-                blocks_node = QtWidgets.QTreeWidgetItem([f"Blocks  ({len(block_adds)})"])
+                blocks_node = QtWidgets.QTreeWidgetItem([f"🧩  Blocks  ({len(block_adds)})"])
                 blocks_node.setFlags(blocks_node.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable)
                 blocks_node.setForeground(0, QtGui.QBrush(QtGui.QColor("#666666")))
                 parent_item.addChild(blocks_node)

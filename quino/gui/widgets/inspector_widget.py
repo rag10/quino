@@ -245,9 +245,10 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
             if w is not None and w.property("is_baseline_hint_row"):
                 outer_layout.removeWidget(w)
                 w.deleteLater()
-        # Apply a left-border accent to the outer widget to flag the override
+        # Apply a left-border accent to the outer widget to flag the override.
+        # Orange is the override semantic; see quino/gui/_palette.py.
         outer_widget.setStyleSheet(
-            "QWidget { border-left: 3px solid #2255aa; padding-left: 4px; }"
+            "QWidget { border-left: 3px solid #c75b12; padding-left: 4px; }"
         )
         hint_row = QtWidgets.QWidget()
         hint_row.setProperty("is_baseline_hint_row", True)

@@ -85,14 +85,14 @@ def test_case_node_shows_poses_subgroup(panel_with_workspace):
     panel, svc, baseline, case = panel_with_workspace
     case_item = panel._item_map[case.id]
     labels = [case_item.child(i).text(0) for i in range(case_item.childCount())]
-    assert any(l.startswith("Poses") for l in labels)
+    assert any("Poses" in l for l in labels)
 
 
 def test_case_node_shows_analyses_subgroup(panel_with_workspace):
     panel, svc, baseline, case = panel_with_workspace
     case_item = panel._item_map[case.id]
     labels = [case_item.child(i).text(0) for i in range(case_item.childCount())]
-    assert any(l.startswith("Analyses") for l in labels)
+    assert any("Analyses" in l for l in labels)
 
 
 def test_case_with_diffs_shows_diffs_subgroup_with_counts():
@@ -114,7 +114,7 @@ def test_case_with_diffs_shows_diffs_subgroup_with_counts():
     diffs_labels = [
         case_item.child(i).text(0)
         for i in range(case_item.childCount())
-        if case_item.child(i).text(0).startswith("Diffs")
+        if "Diffs" in case_item.child(i).text(0)
     ]
     assert diffs_labels, "Case with diffs should show a Diffs subgroup"
     label = diffs_labels[0]
