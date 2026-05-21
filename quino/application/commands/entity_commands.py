@@ -10,6 +10,7 @@ PoseCommands. EntityCommands must be instantiated AFTER all the others.
 """
 from __future__ import annotations
 
+import copy
 import re
 
 from quino.application._context import ServiceContext
@@ -181,14 +182,85 @@ class EntityCommands:
             for entity_id in removed_ids:
                 if entity_id in index:
                     del index[entity_id]
-            # Apply invariant overrides to entities in the index
+            # Apply invariant overrides to entities in the index.
+            # IMPORTANT: clone the entity before mutating so we don't contaminate
+            # the baseline objects (which are shared with project.model).
+            cloned_ids: set[str] = set()
+            # marker_id -> owning body_id for fast lookup
+            marker_owner: dict[str, str] = {}
+            for body in self._project.model.bodies:
+                for m in body.markers:
+                    marker_owner[m.id] = body.id
+
+            def _clone_for_override(entity_id: str, entity):
+                if entity_id in cloned_ids:
+                    return entity
+                # If this is a marker, clone the owning body too so its
+                # markers list points to clones (keeps the index consistent
+                # with body.markers).
+                if isinstance(entity, Marker):
+                    body_id = marker_owner.get(entity_id)
+                    if body_id is not None and body_id not in cloned_ids:
+                        owning_body = index.get(body_id)
+                        if owning_body is not None:
+                            body_clone = copy.copy(owning_body)
+                            body_clone.markers = [copy.copy(m) for m in body_clone.markers]
+                            for m in body_clone.markers:
+                                index[m.id] = m
+                            index[body_id] = body_clone
+                            cloned_ids.add(body_id)
+                            cloned_ids.add(entity_id)
+                            return index[entity_id]
+                    cloned_ids.add(entity_id)
+                    return entity
+                clone = copy.copy(entity)
+                if isinstance(clone, Body):
+                    clone.markers = [copy.copy(m) for m in clone.markers]
+                    for m in clone.markers:
+                        index[m.id] = m
+                # Deep-copy mutable shared attrs so baseline objects stay clean.
+                if hasattr(clone, "metadata"):
+                    try:
+                        clone.metadata = copy.deepcopy(clone.metadata)
+                    except Exception:
+                        pass
+                index[entity_id] = clone
+                cloned_ids.add(entity_id)
+                return clone
+
+            _JOINT_METADATA_KEYS = {
+                "friction_coulomb": "friction_coulomb",
+                "friction_viscous": "friction_viscous",
+                "friction_pin_radius": "friction_pin_radius",
+                "angle_limit_positive": "angle_limit_positive_deg",
+                "angle_limit_negative": "angle_limit_negative_deg",
+            }
+
             for path, scalar in all_overrides.items():
                 parts = path.split("/")
+                if len(parts) < 3:
+                    continue
+                domain = parts[0]
+                entity_id = parts[1]
+                prop = parts[2]
+                # Domain-specific metadata overrides (joints/springs_meta)
+                if domain == "joints":
+                    joint = next((j for j in self._project.model.joints if j.id == entity_id), None)
+                    if joint is not None and prop in _JOINT_METADATA_KEYS:
+                        cloned = _clone_for_override(entity_id, joint)
+                        cloned.metadata.values[_JOINT_METADATA_KEYS[prop]] = scalar.value
+                        continue
+                if domain == "springs_meta":
+                    spring = next((s for s in self._project.model.springs if s.id == entity_id), None)
+                    if spring is not None:
+                        cloned = _clone_for_override(entity_id, spring)
+                        cloned.metadata.values[prop] = scalar.value
+                        continue
+                # Generic ScalarProperty-on-entity overrides
                 if len(parts) >= 3:
-                    entity_id = parts[1]
                     entity = index.get(entity_id)
                     if entity is not None:
-                        prop = parts[2]
+                        entity = _clone_for_override(entity_id, entity)
                         current = getattr(entity, prop, None)
                         if isinstance(current, ScalarProperty):
                             new_expr = f"{scalar.value:g} {scalar.unit}".strip() if scalar.unit else f"{scalar.value:g}"

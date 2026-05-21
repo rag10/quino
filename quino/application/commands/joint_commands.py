@@ -331,6 +331,20 @@ class JointCommands:
         current_y = self._evaluate_scalar_as(slider.origin_y, "mm")
         delta_x = target_x - current_x
         delta_y = target_y - current_y
+        case = self._ctx.get_active_case()
+        if case is not None:
+            from quino.domain.workspace import ScalarValue as _WsScalarValue
+            self._ctx.snapshot()
+            case.invariant_values[f"sliders/{slider_id}/origin_x"] = _WsScalarValue(value=target_x, unit="mm")
+            case.invariant_values[f"sliders/{slider_id}/origin_y"] = _WsScalarValue(value=target_y, unit="mm")
+            if abs(delta_x) > 1e-12 or abs(delta_y) > 1e-12:
+                for marker in self._markers_linked_to_slider(slider.id):
+                    mx = self._evaluate_scalar_as(marker.x, "mm") + delta_x
+                    my = self._evaluate_scalar_as(marker.y, "mm") + delta_y
+                    case.invariant_values[f"markers/{marker.id}/x"] = _WsScalarValue(value=mx, unit="mm")
+                    case.invariant_values[f"markers/{marker.id}/y"] = _WsScalarValue(value=my, unit="mm")
+            self._ctx.invalidate_pose_state()
+            return
         if abs(delta_x) < 1e-12 and abs(delta_y) < 1e-12:
             if (
                 slider.origin_x.expression != x_expression
@@ -379,6 +393,17 @@ class JointCommands:
                     origin_y + slider_coordinate * new_axis[1],
                 )
             )
+        case = self._ctx.get_active_case()
+        if case is not None:
+            from quino.domain.workspace import ScalarValue as _WsScalarValue
+            self._ctx.snapshot()
+            case.invariant_values[f"sliders/{slider_id}/angle"] = _WsScalarValue(value=target_angle, unit="rad")
+            if abs(target_angle - old_angle) > 1e-12:
+                for marker, marker_x, marker_y in marker_targets:
+                    case.invariant_values[f"markers/{marker.id}/x"] = _WsScalarValue(value=marker_x, unit="mm")
+                    case.invariant_values[f"markers/{marker.id}/y"] = _WsScalarValue(value=marker_y, unit="mm")
+            self._ctx.invalidate_pose_state()
+            return
         if abs(target_angle - old_angle) < 1e-12:
             if slider.angle.expression == angle_expression:
                 return
@@ -492,6 +517,13 @@ class JointCommands:
                 numeric = float(value.value.strip().replace(",", "."))
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"{path} must be a number") from exc
+        case = self._ctx.get_active_case()
+        if case is not None:
+            from quino.domain.workspace import ScalarValue as _WsScalarValue
+            self._ctx.snapshot()
+            unit = "mm" if path == "friction_pin_radius" else ""
+            case.invariant_values[f"joints/{joint.id}/{path}"] = _WsScalarValue(value=float(numeric), unit=unit)
+            return
         self._ctx.snapshot()
         joint.metadata.values[path] = numeric
 
@@ -505,6 +537,15 @@ class JointCommands:
         if metadata_key is None:
             raise ValueError(f"Unknown angular limit property: {path}")
         numeric = self._parse_joint_angle_limit(path, value)
+        case = self._ctx.get_active_case()
+        if case is not None:
+            from quino.domain.workspace import ScalarValue as _WsScalarValue
+            self._ctx.snapshot()
+            if numeric is None:
+                case.invariant_values.pop(f"joints/{joint.id}/{path}", None)
+            else:
+                case.invariant_values[f"joints/{joint.id}/{path}"] = _WsScalarValue(value=float(numeric), unit="deg")
+            return
         self._ctx.snapshot()
         if numeric is None:
             joint.metadata.values.pop(metadata_key, None)

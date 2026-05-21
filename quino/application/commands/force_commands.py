@@ -191,11 +191,17 @@ class ForceCommands:
         project = self._project
         if value.kind != "expression" or not isinstance(value.value, str):
             raise ValueError(f"{property_path} requires an expression value")
+        case = self._ctx.get_active_case()
+        from quino.domain.workspace import ScalarValue as _WsScalarValue
         if property_path in ("stiffness", "damping"):
             try:
                 numeric = float(value.value.strip().replace(",", "."))
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"{property_path} must be a plain number") from exc
+            if case is not None:
+                self._ctx.snapshot()
+                case.invariant_values[f"springs_meta/{spring_id}/{property_path}"] = _WsScalarValue(value=numeric, unit="")
+                return
             self._ctx.snapshot()
             spring.metadata.values[property_path] = numeric
             return
@@ -206,7 +212,11 @@ class ForceCommands:
                 "deg" if is_rotational else "mm",
                 Dimension.ANGLE if is_rotational else Dimension.LENGTH,
             )
-            self._ctx.expressions.evaluate_property(scalar, project.parameters)
+            evaluated = self._ctx.expressions.evaluate_property(scalar, project.parameters)
+            if case is not None:
+                self._ctx.snapshot()
+                case.invariant_values[f"springs/{spring_id}/rest_value"] = _WsScalarValue(value=float(evaluated.value), unit=evaluated.unit or scalar.unit)
+                return
             self._ctx.snapshot()
             spring.rest_value = scalar
             return
@@ -217,11 +227,15 @@ class ForceCommands:
                 "N*mm" if is_rotational else "N",
                 Dimension.TORQUE if is_rotational else Dimension.FORCE,
             )
-            self._ctx.expressions.evaluate_property(
+            evaluated = self._ctx.expressions.evaluate_property(
                 scalar,
                 project.parameters,
                 variables={"t": self._ctx.units.quantity(0.0, "s")},
             )
+            if case is not None:
+                self._ctx.snapshot()
+                case.invariant_values[f"springs/{spring_id}/law"] = _WsScalarValue(value=float(evaluated.value), unit=scalar.unit)
+                return
             self._ctx.snapshot()
             spring.law = scalar
             return

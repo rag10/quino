@@ -357,6 +357,19 @@ class BodyCommands:
         if not isinstance(marker, Marker):
             raise ValueError("move_marker requires a marker entity")
         body = self._find_body_by_marker(marker_id)
+        case = self._ctx.get_active_case()
+        if case is not None and marker.type is not MarkerType.COM:
+            project = self._project
+            new_x = ScalarProperty(expression=x_expression, unit=marker.x.unit, expected_dimension=Dimension.LENGTH)
+            new_y = ScalarProperty(expression=y_expression, unit=marker.y.unit, expected_dimension=Dimension.LENGTH)
+            ev_x = self._ctx.expressions.evaluate_property(new_x, project.parameters)
+            ev_y = self._ctx.expressions.evaluate_property(new_y, project.parameters)
+            from quino.domain.workspace import ScalarValue as _WsScalarValue
+            self._ctx.snapshot()
+            case.invariant_values[f"markers/{marker_id}/x"] = _WsScalarValue(value=float(ev_x.value), unit=ev_x.unit or marker.x.unit)
+            case.invariant_values[f"markers/{marker_id}/y"] = _WsScalarValue(value=float(ev_y.value), unit=ev_y.unit or marker.y.unit)
+            self._ctx.invalidate_pose_state()
+            return
         if marker.type is MarkerType.COM:
             if body.type is BodyType.POINT_MASS:
                 raise ValueError("CoM of a point mass cannot be moved independently")

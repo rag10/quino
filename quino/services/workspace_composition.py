@@ -428,11 +428,70 @@ def _resolve_model_control_graph_parameter(project: Project, parts: list[str], s
     _resolve_block_parameter(project, parts[1:], scalar)
 
 
+def _resolve_marker_property(project: Project, parts: list[str], scalar: ScalarValue) -> None:
+    if len(parts) != 3:
+        raise ValueError(f"Invalid marker path: {'/'.join(parts)!r}")
+    marker_id, prop = parts[1], parts[2]
+    for body in project.model.bodies:
+        for marker in body.markers:
+            if marker.id == marker_id:
+                _set_scalar_property(marker, prop, scalar)
+                return
+    raise ValueError(f"Marker {marker_id!r} not found")
+
+
+def _resolve_slider_property(project: Project, parts: list[str], scalar: ScalarValue) -> None:
+    if len(parts) != 3:
+        raise ValueError(f"Invalid slider path: {'/'.join(parts)!r}")
+    slider_id, prop = parts[1], parts[2]
+    slider = _find_by_id(project.model.sliders, slider_id)
+    if slider is None:
+        raise ValueError(f"Slider {slider_id!r} not found")
+    _set_scalar_property(slider, prop, scalar)
+
+
+def _resolve_joint_property(project: Project, parts: list[str], scalar: ScalarValue) -> None:
+    if len(parts) != 3:
+        raise ValueError(f"Invalid joint path: {'/'.join(parts)!r}")
+    joint_id, prop = parts[1], parts[2]
+    joint = _find_by_id(project.model.joints, joint_id)
+    if joint is None:
+        raise ValueError(f"Joint {joint_id!r} not found")
+    # Friction and angular limits live on joint.metadata.values.
+    # Angular limits use a "_deg" suffix to match the baseline storage key.
+    _JOINT_METADATA_KEYS = {
+        "friction_coulomb": "friction_coulomb",
+        "friction_viscous": "friction_viscous",
+        "friction_pin_radius": "friction_pin_radius",
+        "angle_limit_positive": "angle_limit_positive_deg",
+        "angle_limit_negative": "angle_limit_negative_deg",
+    }
+    if prop in _JOINT_METADATA_KEYS:
+        joint.metadata.values[_JOINT_METADATA_KEYS[prop]] = scalar.value
+        return
+    _set_scalar_property(joint, prop, scalar)
+
+
+def _resolve_spring_metadata_property(project: Project, parts: list[str], scalar: ScalarValue) -> None:
+    # springs_meta/<id>/<key>  → spring.metadata.values[key]
+    if len(parts) != 3:
+        raise ValueError(f"Invalid springs_meta path: {'/'.join(parts)!r}")
+    spring_id, key = parts[1], parts[2]
+    spring = _find_by_id(project.model.springs, spring_id)
+    if spring is None:
+        raise ValueError(f"Spring {spring_id!r} not found")
+    spring.metadata.values[key] = scalar.value
+
+
 _PARAMETER_RESOLVERS: dict[str, Callable[[Project, list[str], ScalarValue], None]] = {
     "parameters": _resolve_project_parameter,
     "bodies": _resolve_body_property,
+    "markers": _resolve_marker_property,
+    "sliders": _resolve_slider_property,
+    "joints": _resolve_joint_property,
     "loads": _resolve_load_property,
     "springs": _resolve_spring_property,
+    "springs_meta": _resolve_spring_metadata_property,
     "drivers": _resolve_driver_property,
     "block_diagram": _resolve_block_parameter,
     "model": _resolve_model_control_graph_parameter,
@@ -503,7 +562,19 @@ def _set_scalar_property(obj, prop: str, scalar: ScalarValue) -> None:
                 from quino.domain.types import DriverType
                 expected = Dimension.ANGLE if obj.type is DriverType.ROTATION else Dimension.LENGTH
             else:
-                expected = Dimension.FORCE
+                from quino.domain.model import Spring
+                from quino.domain.types import SpringType
+                if isinstance(obj, Spring) and obj.spring_type is SpringType.ROTATIONAL_ACTUATOR:
+                    expected = Dimension.TORQUE
+                else:
+                    expected = Dimension.FORCE
+        if prop == "rest_value":
+            from quino.domain.model import Spring
+            from quino.domain.types import SpringType
+            if isinstance(obj, Spring) and obj.spring_type in (SpringType.ROTATIONAL_SPRING, SpringType.ROTATIONAL_ACTUATOR):
+                expected = Dimension.ANGLE
+            else:
+                expected = Dimension.LENGTH
         if expected is None:
             raise ValueError(f"Property {prop!r} on {obj.__class__.__name__} is None and has no known dimension")
         new_expr = _scalar_to_expression(scalar)

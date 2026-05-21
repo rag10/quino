@@ -105,3 +105,66 @@ def test_new_project_resets_structural_warning():
     svc.acknowledge_structural_case_warning()
     svc.new_project("second")
     assert svc.structural_case_warning_acknowledged is False
+
+
+# ----------------------------------------------------------------------
+# Baseline-immutability regression tests for F1 routing fixes
+# ----------------------------------------------------------------------
+
+@pytest.fixture
+def svc_with_bar():
+    from quino.domain.inputs import MarkerInput
+    svc = ApplicationService()
+    svc.new_project("test")
+    bar_id = svc.create_bar(
+        "Bar", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B")
+    )
+    bar = next(b for b in svc.project.model.bodies if b.id == bar_id)
+    baseline = svc.workspace.create_baseline("B1")
+    case = svc.workspace.create_case("C1", baseline_id=baseline.id)
+    return svc, bar, baseline, case
+
+
+def test_marker_move_in_case_does_not_mutate_baseline(svc_with_bar):
+    svc, bar, baseline, case = svc_with_bar
+    marker = bar.markers[1]  # B
+    baseline_x_before = marker.x.expression
+    svc.set_working_context(case_id=case.id)
+    svc.update_property(
+        marker.id, "x",
+        PropertyValueInput(kind="expression", value="250 mm"),
+    )
+    # Baseline marker must not change
+    base_bar = next(b for b in svc.project.model.bodies if b.id == bar.id)
+    base_marker = next(m for m in base_bar.markers if m.id == marker.id)
+    assert base_marker.x.expression == baseline_x_before
+    # Overlay must record the new value
+    assert f"markers/{marker.id}/x" in case.invariant_values
+    assert case.invariant_values[f"markers/{marker.id}/x"].value == pytest.approx(250.0)
+
+
+def test_marker_overlay_visible_in_display_project(svc_with_bar):
+    svc, bar, baseline, case = svc_with_bar
+    marker = bar.markers[1]
+    svc.set_working_context(case_id=case.id)
+    svc.update_property(
+        marker.id, "x",
+        PropertyValueInput(kind="expression", value="200 mm"),
+    )
+    dp = svc.display_project
+    composed_bar = next(b for b in dp.model.bodies if b.id == bar.id)
+    composed_marker = next(m for m in composed_bar.markers if m.id == marker.id)
+    assert "200" in composed_marker.x.expression
+
+
+def test_entity_index_does_not_mutate_baseline_after_overlay_lookup(svc_with_case):
+    """Regression: entering a case with mass override used to mutate baseline body.mass."""
+    svc, body, baseline, case = svc_with_case
+    svc.update_property(body.id, "mass", PropertyValueInput(kind="expression", value="1 kg"))
+    base_expr_before = body.mass.expression
+    svc.set_working_context(case_id=case.id)
+    svc.update_property(body.id, "mass", PropertyValueInput(kind="expression", value="9 kg"))
+    # Force _build_entity_index to run (find_entity triggers it)
+    svc.get_entity(body.id)
+    base_body = next(b for b in svc.project.model.bodies if b.id == body.id)
+    assert base_body.mass.expression == base_expr_before
