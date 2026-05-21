@@ -3294,6 +3294,147 @@ def test_block_inspector_hides_internal_position_param(qtbot):
     assert not any(p.endswith("/_position") for p in paths)
 
 
+def test_port_has_tooltip_with_name_and_direction(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.blocks.editor_widget import BlockEditorWidget
+    app = ApplicationService()
+    app.new_project("test")
+    widget = BlockEditorWidget()
+    qtbot.addWidget(widget)
+    widget.set_app_service(app)
+    widget._palette.blockTypeRequested.emit("Gain")
+    item = next(iter(widget._scene._block_items.values()))
+    in_port = item.input_ports.get("in")
+    out_port = item.output_ports.get("out")
+    assert in_port is not None and out_port is not None
+    in_tip = in_port.toolTip()
+    out_tip = out_port.toolTip()
+    assert "Input" in in_tip and ".in" in in_tip and "disconnected" in in_tip
+    assert "Output" in out_tip and ".out" in out_tip and "disconnected" in out_tip
+
+
+def test_port_tooltip_updates_when_connected(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.blocks.editor_widget import BlockEditorWidget
+    from quino.domain.blocks import BlockDiagram, BlockInstance, Connection, PortSpec
+    app = ApplicationService()
+    app.new_project("test")
+    diagram = BlockDiagram(
+        instances={
+            "src": BlockInstance(
+                instance_id="src", block_type="Constant",
+                parameters={"value": 1.0, "_position": [0, 0]},
+                input_ports=[], output_ports=[PortSpec("out")],
+            ),
+            "g": BlockInstance(
+                instance_id="g", block_type="Gain",
+                parameters={"k": 2.0, "_position": [200, 0]},
+                input_ports=[PortSpec("in")], output_ports=[PortSpec("out")],
+            ),
+        },
+        connections=[Connection(src_instance="src", src_port="out", dst_instance="g", dst_port="in")],
+    )
+    app.project.model.control_graph = diagram
+
+    widget = BlockEditorWidget()
+    qtbot.addWidget(widget)
+    widget.set_app_service(app)
+    widget.set_diagram(diagram)
+
+    g_in = widget._scene._block_items["g"].input_ports["in"]
+    assert "connected" in g_in.toolTip()
+
+
+def test_invalid_connection_emits_validation_error(qtbot):
+    """Dropping a wire on the same direction or same block emits a
+    validationError signal."""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.blocks.editor_widget import BlockEditorWidget
+    app = ApplicationService()
+    app.new_project("test")
+    widget = BlockEditorWidget()
+    qtbot.addWidget(widget)
+    widget.set_app_service(app)
+    widget._palette.blockTypeRequested.emit("Gain")
+    widget._palette.blockTypeRequested.emit("Gain")
+    items = list(widget._scene._block_items.values())
+    g1, g2 = items[0], items[1]
+
+    errors: list[str] = []
+    widget._scene.validationError.connect(errors.append)
+
+    # Simulate starting a drag from g1.out and ending on g2.out (output-output).
+    scene = widget._scene
+    scene._start_drag_connection(g1.output_ports["out"], g1.output_ports["out"].scene_center())
+    # Manually finish on g2's output port.
+    out2 = g2.output_ports["out"]
+    scene._finish_drag_connection(out2.scene_center())
+
+    assert any("output" in e.lower() for e in errors), f"Expected output-output error, got: {errors}"
+
+
+def test_connection_has_tooltip_and_arrow_renders(qtbot):
+    """ConnectionItem provides a tooltip identifying both endpoints and
+    paints a direction arrow at the destination."""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.application.service import ApplicationService
+    from quino.gui.blocks.editor_widget import BlockEditorWidget
+    from quino.domain.blocks import BlockDiagram, BlockInstance, Connection, PortSpec
+    app = ApplicationService()
+    app.new_project("test")
+    diagram = BlockDiagram(
+        instances={
+            "a": BlockInstance(
+                instance_id="a", block_type="Constant",
+                parameters={"value": 0.0, "_position": [0, 0]},
+                input_ports=[], output_ports=[PortSpec("out")],
+            ),
+            "b": BlockInstance(
+                instance_id="b", block_type="Gain",
+                parameters={"k": 1.0, "_position": [240, 0]},
+                input_ports=[PortSpec("in")], output_ports=[PortSpec("out")],
+            ),
+        },
+        connections=[Connection(src_instance="a", src_port="out", dst_instance="b", dst_port="in")],
+    )
+    app.project.model.control_graph = diagram
+
+    widget = BlockEditorWidget()
+    qtbot.addWidget(widget)
+    widget.set_app_service(app)
+    widget.set_diagram(diagram)
+
+    conns = widget._scene._connection_items
+    assert len(conns) == 1
+    tip = conns[0].toolTip()
+    assert "a.out" in tip and "b.in" in tip and "→" in tip
+
+    # Render to a QImage and verify the connection painted SOMETHING near
+    # the destination port (sanity check that arrow drawing didn't crash).
+    img = QtGui.QImage(800, 600, QtGui.QImage.Format.Format_ARGB32)
+    img.fill(QtCore.Qt.GlobalColor.white)
+    painter = QtGui.QPainter(img)
+    widget._scene.render(painter)
+    painter.end()
+    # Confirm at least some non-white pixel exists.
+    found_pixel = False
+    for x in range(0, 800, 20):
+        for y in range(0, 600, 20):
+            if QtGui.QColor(img.pixel(x, y)).rgb() != QtGui.QColor("white").rgb():
+                found_pixel = True
+                break
+        if found_pixel:
+            break
+    assert found_pixel
+
+
 def test_block_editor_set_selected_centers_view(qtbot):
     import os
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

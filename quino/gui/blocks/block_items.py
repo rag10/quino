@@ -54,6 +54,15 @@ class PortItem(QtWidgets.QGraphicsEllipseItem):
         self.setBrush(PORT_INPUT_COLOR if is_input else PORT_OUTPUT_COLOR)
         self.setAcceptHoverEvents(True)
         self.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.CrossCursor))
+        self._refresh_tooltip()
+
+    def _refresh_tooltip(self) -> None:
+        direction = "Input" if self._is_input else "Output"
+        connected = "connected" if self._connections else "disconnected"
+        self.setToolTip(
+            f"{self._parent_block.instance_id}.{self._port_name}\n"
+            f"{direction} · {connected}"
+        )
 
     @property
     def port_name(self) -> str:
@@ -74,10 +83,12 @@ class PortItem(QtWidgets.QGraphicsEllipseItem):
     def add_connection(self, conn: ConnectionItem) -> None:
         if conn not in self._connections:
             self._connections.append(conn)
+            self._refresh_tooltip()
 
     def remove_connection(self, conn: ConnectionItem) -> None:
         if conn in self._connections:
             self._connections.remove(conn)
+            self._refresh_tooltip()
 
     def scene_center(self) -> QtCore.QPointF:
         return self.mapToScene(self.boundingRect().center())
@@ -247,7 +258,7 @@ class BlockItem(QtWidgets.QGraphicsRectItem):
 # ---------------------------------------------------------------------------
 
 class ConnectionItem(QtWidgets.QGraphicsPathItem):
-    """Visual wire between two ports."""
+    """Visual wire between two ports with a direction arrow at the destination."""
 
     def __init__(
         self,
@@ -257,12 +268,30 @@ class ConnectionItem(QtWidgets.QGraphicsPathItem):
         super().__init__()
         self._src_port = src_port
         self._dst_port = dst_port
+        self._hovered = False
         self.setPen(QtGui.QPen(CONNECTION_COLOR, CONNECTION_WIDTH))
         self.setZValue(-1)
         self.setFlags(QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
+        self.setAcceptHoverEvents(True)
         src_port.add_connection(self)
         dst_port.add_connection(self)
         self.update_path()
+        self._refresh_tooltip()
+
+    def _refresh_tooltip(self) -> None:
+        src = f"{self._src_port.parent_block.instance_id}.{self._src_port.port_name}"
+        dst = f"{self._dst_port.parent_block.instance_id}.{self._dst_port.port_name}"
+        self.setToolTip(f"{src} → {dst}")
+
+    def hoverEnterEvent(self, event):  # pragma: no cover - visual
+        self._hovered = True
+        self.update()
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event):  # pragma: no cover - visual
+        self._hovered = False
+        self.update()
+        super().hoverLeaveEvent(event)
 
     @property
     def src_port(self) -> PortItem:
@@ -290,11 +319,46 @@ class ConnectionItem(QtWidgets.QGraphicsPathItem):
         if self.isSelected():
             pen.setColor(CONNECTION_SELECTED_COLOR)
             pen.setWidth(CONNECTION_WIDTH + 1)
+        elif self._hovered:
+            pen.setColor(CONNECTION_SELECTED_COLOR)
+            pen.setWidth(CONNECTION_WIDTH)
         else:
             pen.setColor(CONNECTION_COLOR)
             pen.setWidth(CONNECTION_WIDTH)
         self.setPen(pen)
         super().paint(painter, option, widget)
+        # Direction arrow at the destination.
+        self._draw_arrow(painter, pen.color())
+
+    def _draw_arrow(self, painter: QtGui.QPainter, color: QtGui.QColor) -> None:
+        path = self.path()
+        if path.length() <= 0:
+            return
+        # Sample slightly before the end so the arrow tangent is meaningful.
+        t_tip = 1.0
+        t_back = max(0.0, 1.0 - 12.0 / max(path.length(), 1e-6))
+        tip = path.pointAtPercent(t_tip)
+        back = path.pointAtPercent(t_back)
+        # Direction vector
+        dx, dy = tip.x() - back.x(), tip.y() - back.y()
+        import math
+        length = math.hypot(dx, dy)
+        if length <= 1e-9:
+            return
+        ux, uy = dx / length, dy / length
+        # Perpendicular for arrow wings
+        px, py = -uy, ux
+        size = 7.0
+        wing = 4.5
+        p_back = QtCore.QPointF(tip.x() - size * ux, tip.y() - size * uy)
+        p_left = QtCore.QPointF(p_back.x() + wing * px, p_back.y() + wing * py)
+        p_right = QtCore.QPointF(p_back.x() - wing * px, p_back.y() - wing * py)
+        poly = QtGui.QPolygonF([tip, p_left, p_right])
+        painter.save()
+        painter.setBrush(QtGui.QBrush(color))
+        painter.setPen(QtGui.QPen(color, 1))
+        painter.drawPolygon(poly)
+        painter.restore()
 
     def remove_from_ports(self) -> None:
         self._src_port.remove_connection(self)

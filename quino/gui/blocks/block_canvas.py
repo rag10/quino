@@ -551,6 +551,20 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
         path = QtGui.QPainterPath(p1)
         path.cubicTo(p1.x() + dx, p1.y(), pos.x() - dx, pos.y(), pos.x(), pos.y())
         self._drag_line.setPath(path)
+        # Color the rubber line green when hovering over a compatible target
+        # port, red when over an incompatible one, default blue otherwise.
+        item = self.itemAt(pos, QtGui.QTransform())
+        pen = self._drag_line.pen()
+        if isinstance(item, PortItem):
+            if item.parent_block == self._drag_src_port.parent_block:
+                pen.setColor(QtGui.QColor("#dc3545"))  # red: same block
+            elif item.is_input == self._drag_src_port.is_input:
+                pen.setColor(QtGui.QColor("#dc3545"))  # red: same direction
+            else:
+                pen.setColor(QtGui.QColor("#28a745"))  # green: compatible
+        else:
+            pen.setColor(QtGui.QColor("#31556f"))  # default blue
+        self._drag_line.setPen(pen)
 
     def _finish_drag_connection(self, pos: QtCore.QPointF) -> None:
         if self._drag_line is None or self._drag_src_port is None:
@@ -565,10 +579,15 @@ class BlockDiagramScene(QtWidgets.QGraphicsScene):
             return
         dst = item
 
-        # Validation
+        # Validation with user feedback.
         if src.parent_block == dst.parent_block:
+            self.validationError.emit("Cannot connect a block to itself")
             return
         if src.is_input == dst.is_input:
+            direction = "input" if src.is_input else "output"
+            self.validationError.emit(
+                f"Cannot connect two {direction} ports; connect output → input"
+            )
             return
         # Determine direction: src must be output, dst input
         if src.is_input:
