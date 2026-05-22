@@ -24,9 +24,10 @@ class RunStatusWidget(QtWidgets.QWidget):
         layout.addStretch(1)
         layout.addWidget(self._cancel_btn)
 
-    def show_running(self, run_id: str, label: str) -> None:
+    def show_running(self, run_id: str, label: str, pending: int = 0) -> None:
         self._current_id = run_id
-        self._label.setText(f"Running: {label}")
+        suffix = f"  · {pending} pending" if pending else ""
+        self._label.setText(f"Running: {label}{suffix}")
         self._cancel_btn.setEnabled(True)
 
     def show_idle(self) -> None:

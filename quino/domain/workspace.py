@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from quino.domain.plotting import MetricDef, PlotDef
+
 
 @dataclass(slots=True)
 class ScalarValue:
@@ -65,12 +67,16 @@ class DynamicConfig:
     dt: float = 0.01
     integrator: str = "implicit"
     solver_settings: dict[str, Any] = field(default_factory=dict)
+    plots: list[PlotDef] = field(default_factory=list)
+    metrics: list[MetricDef] = field(default_factory=list)
 
 
 @dataclass(slots=True)
 class KinematicConfig:
     sweeps: list[SweepDef] = field(default_factory=list)
     allow_failed_steps: bool = True
+    plots: list[PlotDef] = field(default_factory=list)
+    metrics: list[MetricDef] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -79,6 +85,8 @@ class StaticConfig:
     tolerance: float = 1e-6
     report_reactions: bool = True
     report_spring_energy: bool = True
+    plots: list[PlotDef] = field(default_factory=list)
+    metrics: list[MetricDef] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -87,6 +95,8 @@ class EquilibriumConfig:
     initial_perturbations: list[float] = field(default_factory=lambda: [0.0, 0.05, -0.05])
     stability_check: bool = True
     pose_match_tolerance: float = 1e-3
+    plots: list[PlotDef] = field(default_factory=list)
+    metrics: list[MetricDef] = field(default_factory=list)
 
 
 @dataclass(slots=True)

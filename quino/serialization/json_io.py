@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from quino.domain.blocks import BlockDiagram, BlockInstance, Connection, PortSpec
+from quino.domain.plotting import MetricDef, PlotDef, YSeries
 from quino.domain.workspace import (
     Analysis,
     ArtifactRef,
@@ -1028,19 +1029,72 @@ class JsonMapper:
         )
 
     def _analysis_config_from_dict(self, kind: str, data: dict):
+        plots = [self._plot_def_from_dict(item) for item in data.get("plots", [])]
+        metrics = [self._metric_def_from_dict(item) for item in data.get("metrics", [])]
         if kind == "dynamic":
-            return DynamicConfig(**{k: v for k, v in data.items()
-                                     if k in {"duration", "steps", "dt", "integrator", "solver_settings"}})
+            return DynamicConfig(
+                **{k: v for k, v in data.items() if k in {"duration", "steps", "dt", "integrator", "solver_settings"}},
+                plots=plots,
+                metrics=metrics,
+            )
         if kind == "kinematic":
             sweeps = [SweepDef(**s) for s in data.get("sweeps", [])]
-            return KinematicConfig(sweeps=sweeps, allow_failed_steps=data.get("allow_failed_steps", True))
+            return KinematicConfig(
+                sweeps=sweeps,
+                allow_failed_steps=data.get("allow_failed_steps", True),
+                plots=plots,
+                metrics=metrics,
+            )
         if kind == "static":
-            return StaticConfig(**{k: v for k, v in data.items()
-                                    if k in {"gravity_enabled", "tolerance", "report_reactions", "report_spring_energy"}})
+            return StaticConfig(
+                **{
+                    k: v
+                    for k, v in data.items()
+                    if k in {"gravity_enabled", "tolerance", "report_reactions", "report_spring_energy"}
+                },
+                plots=plots,
+                metrics=metrics,
+            )
         if kind == "equilibrium":
-            return EquilibriumConfig(**{k: v for k, v in data.items()
-                                         if k in {"gravity_enabled", "initial_perturbations", "stability_check", "pose_match_tolerance"}})
+            return EquilibriumConfig(
+                **{
+                    k: v
+                    for k, v in data.items()
+                    if k in {"gravity_enabled", "initial_perturbations", "stability_check", "pose_match_tolerance"}
+                },
+                plots=plots,
+                metrics=metrics,
+            )
         raise ValueError(f"Unknown analysis_type {kind!r}")
+
+    def _y_series_from_dict(self, data: dict) -> YSeries:
+        return YSeries(
+            sensor_id=data["sensor_id"],
+            channel=data.get("channel", ""),
+            label=data.get("label", ""),
+            color=data.get("color", ""),
+        )
+
+    def _plot_def_from_dict(self, data: dict) -> PlotDef:
+        return PlotDef(
+            id=data["id"],
+            title=data["title"],
+            x_kind=data.get("x_kind", "time"),
+            x_target=data.get("x_target", ""),
+            y_series=[self._y_series_from_dict(item) for item in data.get("y_series", [])],
+            style=dict(data.get("style", {})),
+        )
+
+    def _metric_def_from_dict(self, data: dict) -> MetricDef:
+        return MetricDef(
+            id=data["id"],
+            key=data["key"],
+            name=data["name"],
+            kind=data.get("kind", "max"),
+            target=data.get("target", ""),
+            params=dict(data.get("params", {})),
+            tags=list(data.get("tags", [])),
+        )
 
     def _result_ref_to_dict(self, ref: ResultRef) -> dict:
         return {

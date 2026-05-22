@@ -6,6 +6,7 @@ from pathlib import Path
 
 from quino.analysis.runner import AnalysisResult, AnalysisRunner
 from quino.domain.workspace import ResultRef, Run
+from quino.services.metric_evaluator import evaluate_metrics
 from quino.services.mechanism_dof import compute_mechanism_dof
 from quino.services.static_solver import solve_static
 from quino.services.workspace_composition import compose_project
@@ -58,7 +59,9 @@ class StaticAnalysisRunner(AnalysisRunner):
                 error_message=str(exc),
             )
         if project_dir is not None and run is not None:
-            self._persist_artifact(project_dir, run, report)
+            artifact_path = self._persist_artifact(project_dir, run, report)
+            artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+            run.metrics = evaluate_metrics(list(analysis.config.metrics), artifact)
         return AnalysisResult(
             analysis_id=analysis.id,
             analysis_type="static",
@@ -72,7 +75,7 @@ class StaticAnalysisRunner(AnalysisRunner):
         )
         return compose_project(project, case=case)
 
-    def _persist_artifact(self, project_dir: Path, run: Run, report: dict) -> None:
+    def _persist_artifact(self, project_dir: Path, run: Run, report: dict) -> Path:
         artifact_dir = project_dir / "artifacts" / f"run_{run.id}"
         artifact_dir.mkdir(parents=True, exist_ok=True)
         path = artifact_dir / "result.json"
@@ -84,3 +87,4 @@ class StaticAnalysisRunner(AnalysisRunner):
             artifact_path=str(path.relative_to(project_dir)),
             checksum=f"sha256:{checksum}",
         )
+        return path

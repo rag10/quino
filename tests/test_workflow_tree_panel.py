@@ -5,6 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6 import QtWidgets
 from quino.application.service import ApplicationService
+from quino.domain.workspace import ResultRef, Run
 from quino.gui.panels.workflow_tree_panel import WorkflowTreePanel
 
 
@@ -295,3 +296,37 @@ def test_runs_appear_under_their_analysis_newest_first():
     # Newest-first order
     assert run_labels[0].endswith("stale") or "stale" in run_labels[0]
     assert "ok" in run_labels[-1]
+
+
+def test_context_menu_on_run_shows_export_options(qtbot, tmp_path):
+    svc = ApplicationService()
+    svc.new_project("Test")
+    svc.create_punctual_mass("M", x="0 mm", y="0 mm")
+    case = svc.workspace.create_case("Case")
+    pose = svc.workspace.create_pose("Pose", case_id=case.id)
+    analysis = svc.workspace.create_analysis("Dyn", analysis_type="dynamic", case_id=case.id, workspace_pose_id=pose.id)
+    svc.current_project_path = tmp_path
+    run = Run(id="run_001", analysis_id=analysis.id, created_at="now", status="ok")
+    svc.project.workspace.runs.append(run)
+    artifact_dir = tmp_path / "artifacts" / "run_run_001"
+    artifact_dir.mkdir(parents=True)
+    artifact_path = artifact_dir / "result.json"
+    artifact_path.write_text('{"type":"dynamic","time":[0.0],"frames":[{"sensor:s1:x":0.0}]}', encoding="utf-8")
+    run.result_ref = ResultRef(run_entry_id=run.id, artifact_path=str(artifact_path.relative_to(tmp_path)), checksum="sha256:test")
+    panel = WorkflowTreePanel(svc)
+    qtbot.addWidget(panel)
+    panel.refresh()
+    actions = panel._build_run_context_menu(run.id)
+    titles = [action.text() for action in actions]
+    assert "Run with same config" in titles
+    assert any("CSV" in title for title in titles)
+
+
+def test_run_status_widget_shows_pending_count(qtbot):
+    from quino.gui.widgets.run_status_widget import RunStatusWidget
+
+    widget = RunStatusWidget()
+    qtbot.addWidget(widget)
+    widget.show_running("run_1", "Demo", pending=3)
+    label = widget.findChildren(QtWidgets.QLabel)[0]
+    assert "3 pending" in label.text()

@@ -21,3 +21,13 @@ class ReportPanelWidget(QtWidgets.QTabWidget):
     def clear_tabs(self) -> None:
         while self.count() > 0:
             self.removeTab(0)
+
+    def replace_table_tab(self, name: str, headers: list[str], rows: list[list[str]]) -> None:
+        for index in range(self.count()):
+            if self.tabText(index) == name:
+                self.removeTab(index)
+                break
+        self.add_table_tab(name, headers, rows)
+
+    def replace_kv_tab(self, name: str, items: list[tuple[str, str]]) -> None:
+        self.replace_table_tab(name, ["Quantity", "Value"], [[key, value] for key, value in items])

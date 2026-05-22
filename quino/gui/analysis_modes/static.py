@@ -30,7 +30,9 @@ class StaticModeController(AnalysisModeController):
         reactions_action = bar.addAction("Show reactions")
         reactions_action.triggered.connect(self._on_show_reactions)
         plot_action = bar.addAction("New plot")
-        plot_action.triggered.connect(self.main_window.create_plot_window)
+        plot_action.triggered.connect(lambda: self.main_window._open_plot_editor_for_analysis(self._current_analysis))
+        compare_action = bar.addAction("Compare")
+        compare_action.triggered.connect(self.main_window._open_compare_runs_dialog)
         self.toolbar = bar
         return bar
 
@@ -114,6 +116,7 @@ class StaticModeController(AnalysisModeController):
             "Energy",
             [("Total spring potential energy", f'{data.get("total_energy_in_springs", 0.0):.4g} J')],
         )
+        self._refresh_metrics_tab(run)
         pose = data.get("pose")
         self.main_window.canvas.set_kinematic_pose(pose)
 
@@ -171,3 +174,11 @@ class StaticModeController(AnalysisModeController):
             if run.analysis_id == self._current_analysis.id and run.status in {"ok", "partial"} and run.result_ref is not None
         ]
         return runs[-1] if runs else None
+
+    def _refresh_metrics_tab(self, run) -> None:
+        if self.report is None:
+            return
+        rows = []
+        if run is not None:
+            rows = [[key, f"{value:.6g}"] for key, value in sorted(run.metrics.items())]
+        self.report.replace_table_tab("Metrics", ["Key", "Value"], rows)

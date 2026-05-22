@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from quino.application.service import ApplicationService
 from quino.domain.workspace import Analysis, Case as _Case
 from quino.gui.icons import get_icon
 from quino.gui.tree_branches import tree_branch_stylesheet
+from quino.services.batch_runner import (
+    enqueue_baseline_analyses,
+    enqueue_case_analyses,
+    enqueue_workspace_analyses,
+)
+from quino.services.plot_renderer import load_artifact
+from quino.services.run_export import export_matplotlib_script, export_run_csv, export_run_json
 
 
 _BASE_TREE_STYLESHEET = (
@@ -551,6 +560,8 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         menu = QtWidgets.QMenu(self)
         if item is None:
             menu.addAction("Add Baseline", self._action_add_baseline)
+            menu.addSeparator()
+            menu.addAction("Run All Analyses", self._action_run_workspace_analyses)
         else:
             data = item.data(0, _USER_ROLE)
             if data is None:
@@ -559,6 +570,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             if kind == "baseline":
                 menu.addAction("Add Subcase", lambda: self._action_add_case(baseline_id=obj_id))
                 menu.addAction("Add Pose", lambda: self._action_add_pose(baseline_id=obj_id))
+                menu.addAction("Run All Analyses In Scope", lambda: self._action_run_baseline_analyses(obj_id))
                 # Analyses hang off poses — added from the pose context menu.
                 menu.addSeparator()
                 menu.addAction("Set As Working Context", lambda: self._action_set_working(baseline_id=obj_id))
@@ -568,6 +580,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             elif kind == "case":
                 menu.addAction("Add Subcase", lambda: self._action_add_case(parent_case_id=obj_id))
                 menu.addAction("Add Pose", lambda: self._action_add_pose(case_id=obj_id))
+                menu.addAction("Run All Analyses In Scope", lambda: self._action_run_case_analyses(obj_id))
                 # Analyses hang off poses — added from the pose context menu.
                 menu.addSeparator()
                 menu.addAction("Set As Working Context", lambda: self._action_set_working(case_id=obj_id))
@@ -602,7 +615,8 @@ class WorkflowTreePanel(QtWidgets.QWidget):
                 menu.addAction("Rename", lambda: self._action_rename(kind, obj_id))
                 menu.addAction("Delete", lambda: self._delete_item(kind, obj_id, item.text(0)))
             elif kind == "run":
-                menu.addAction("Delete Run", lambda: self._delete_item(kind, obj_id, item.text(0)))
+                for action in self._build_run_context_menu(obj_id):
+                    menu.addAction(action)
         if not menu.isEmpty():
             menu.exec(self._tree.mapToGlobal(pos))
 
@@ -630,6 +644,18 @@ class WorkflowTreePanel(QtWidgets.QWidget):
                 name, baseline_id=baseline_id, parent_case_id=parent_case_id
             )
             self.refresh()
+
+    def _action_run_case_analyses(self, case_id: str) -> None:
+        enqueue_case_analyses(self.app_service, case_id)
+        self.refresh()
+
+    def _action_run_baseline_analyses(self, baseline_id: str) -> None:
+        enqueue_baseline_analyses(self.app_service, baseline_id)
+        self.refresh()
+
+    def _action_run_workspace_analyses(self) -> None:
+        enqueue_workspace_analyses(self.app_service)
+        self.refresh()
 
     def _action_duplicate_case(self, case_id: str) -> None:
         try:
@@ -762,3 +788,91 @@ class WorkflowTreePanel(QtWidgets.QWidget):
                 project_dir = Path(project_dir).parent if Path(project_dir).is_file() else Path(project_dir)
             delete_run(self.app_service.project.workspace, project_dir, obj_id)
         self.refresh()
+
+    def _build_run_context_menu(self, run_id: str) -> list[QtGui.QAction]:
+        actions: list[QtGui.QAction] = []
+        actions.append(QtGui.QAction("Run with same config", self, triggered=lambda: self._rerun_analysis_for_run(run_id)))
+        actions.append(QtGui.QAction("Rename", self, triggered=lambda: self._rename_run(run_id)))
+        actions.append(QtGui.QAction("Add note", self, triggered=lambda: self._edit_run_note(run_id)))
+        actions.append(QtGui.QAction("Open artefact folder", self, triggered=lambda: self._open_run_artifact_folder(run_id)))
+        actions.append(QtGui.QAction("Export CSV (wide)", self, triggered=lambda: self._export_run_action(run_id, "csv_wide")))
+        actions.append(QtGui.QAction("Export CSV (per sensor)", self, triggered=lambda: self._export_run_action(run_id, "csv_per_sensor")))
+        actions.append(QtGui.QAction("Export JSON", self, triggered=lambda: self._export_run_action(run_id, "json")))
+        actions.append(QtGui.QAction("Export matplotlib script", self, triggered=lambda: self._export_run_action(run_id, "matplotlib")))
+        actions.append(QtGui.QAction("Delete Run", self, triggered=lambda: self._delete_item("run", run_id, run_id)))
+        return actions
+
+    def _find_run(self, run_id: str):
+        project = self.app_service.project
+        if project is None or project.workspace is None:
+            return None
+        return next((run for run in project.workspace.runs if run.id == run_id), None)
+
+    def _rerun_analysis_for_run(self, run_id: str) -> None:
+        run = self._find_run(run_id)
+        if run is None:
+            return
+        self.app_service.ensure_executor().enqueue(run.analysis_id)
+        self.refresh()
+
+    def _rename_run(self, run_id: str) -> None:
+        run = self._find_run(run_id)
+        if run is None:
+            return
+        text, ok = QtWidgets.QInputDialog.getText(self, "Rename Run", "Label / note:", text=run.note or run.id)
+        if not ok:
+            return
+        run.note = text.strip()
+        self.refresh()
+
+    def _edit_run_note(self, run_id: str) -> None:
+        run = self._find_run(run_id)
+        if run is None:
+            return
+        text, ok = QtWidgets.QInputDialog.getText(self, "Run Note", "Note:", text=run.note)
+        if not ok:
+            return
+        run.note = text.strip()
+        self.refresh()
+
+    def _open_run_artifact_folder(self, run_id: str) -> None:
+        run = self._find_run(run_id)
+        project_dir = self.app_service.current_project_dir
+        if run is None or run.result_ref is None or project_dir is None:
+            return
+        folder = (project_dir / run.result_ref.artifact_path).parent
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(folder)))
+
+    def _export_run_action(self, run_id: str, kind: str) -> None:
+        run = self._find_run(run_id)
+        project = self.app_service.project
+        if run is None or project is None:
+            return
+        artifact = load_artifact(self.app_service.current_project_dir, run)
+        if not artifact:
+            QtWidgets.QMessageBox.information(self, "No artefact", "This run has no persisted artefact.")
+            return
+        if kind == "csv_wide":
+            path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export CSV", f"{run.id}.csv", "CSV Files (*.csv)")
+            if path:
+                export_run_csv(run, artifact, Path(path), mode="wide")
+            return
+        if kind == "csv_per_sensor":
+            path = QtWidgets.QFileDialog.getExistingDirectory(self, "Export per-sensor CSV")
+            if path:
+                export_run_csv(run, artifact, Path(path), mode="per_sensor")
+            return
+        if kind == "json":
+            path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export JSON", f"{run.id}.json", "JSON Files (*.json)")
+            if path:
+                export_run_json(run, artifact, Path(path))
+            return
+        if kind == "matplotlib":
+            analysis = next((item for item in project.workspace.analyses if item.id == run.analysis_id), None)
+            if analysis is None or not getattr(analysis.config, "plots", []):
+                QtWidgets.QMessageBox.information(self, "No plots", "This analysis has no saved plot definitions.")
+                return
+            plot_def = analysis.config.plots[0]
+            path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export matplotlib script", f"{run.id}_{plot_def.id}.py", "Python Files (*.py)")
+            if path:
+                export_matplotlib_script(plot_def, artifact, Path(path))

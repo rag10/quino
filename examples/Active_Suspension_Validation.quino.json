@@ -1104,6 +1104,18 @@
       "name": "Static load - failure",
       "body_poses": {},
       "metadata": {}
+    },
+    {
+      "id": "pose_008",
+      "name": "Locked pose",
+      "body_poses": {},
+      "metadata": {}
+    },
+    {
+      "id": "pose_009",
+      "name": "Free settle",
+      "body_poses": {},
+      "metadata": {}
     }
   ],
   "workspace": {
@@ -1284,6 +1296,31 @@
           }
         },
         "metadata": {}
+      },
+      {
+        "id": "case_031",
+        "name": "Locked strut (static)",
+        "baseline_id": "baseline_001",
+        "parent_case_id": null,
+        "model_snapshot_id": null,
+        "invariant_values": {},
+        "metadata": {},
+        "added_entities": {
+          "drivers": [
+            {
+              "id": "driver_001",
+              "name": "LockStrut",
+              "type": "translation",
+              "target_joint_id": "joint_005",
+              "law": {
+                "expression": "0 mm",
+                "unit": "mm",
+                "expected_dimension": "length"
+              },
+              "metadata": {}
+            }
+          ]
+        }
       }
     ],
     "poses": [
@@ -1466,6 +1503,44 @@
         "requires_recompute": true,
         "solve_failed": false,
         "metadata": {}
+      },
+      {
+        "id": "wpose_032",
+        "name": "Pose default",
+        "baseline_id": null,
+        "case_id": "case_031",
+        "project_pose_id": null,
+        "is_default": true,
+        "parent_pose_id": "wpose_002",
+        "requires_recompute": false,
+        "solve_failed": false,
+        "metadata": {
+          "solved_state": {}
+        }
+      },
+      {
+        "id": "wpose_033",
+        "name": "Locked pose",
+        "baseline_id": null,
+        "case_id": "case_031",
+        "project_pose_id": "pose_008",
+        "is_default": false,
+        "parent_pose_id": null,
+        "requires_recompute": true,
+        "solve_failed": false,
+        "metadata": {}
+      },
+      {
+        "id": "wpose_035",
+        "name": "Free settle",
+        "baseline_id": "baseline_001",
+        "case_id": null,
+        "project_pose_id": "pose_009",
+        "is_default": false,
+        "parent_pose_id": null,
+        "requires_recompute": true,
+        "solve_failed": false,
+        "metadata": {}
       }
     ],
     "analyses": [
@@ -1481,7 +1556,9 @@
           "steps": 100,
           "dt": 0.01,
           "integrator": "implicit",
-          "solver_settings": {}
+          "solver_settings": {},
+          "plots": [],
+          "metrics": []
         },
         "metadata": {}
       },
@@ -1497,7 +1574,9 @@
           "steps": 100,
           "dt": 0.01,
           "integrator": "implicit",
-          "solver_settings": {}
+          "solver_settings": {},
+          "plots": [],
+          "metrics": []
         },
         "metadata": {}
       },
@@ -1513,7 +1592,9 @@
           "steps": 100,
           "dt": 0.01,
           "integrator": "implicit",
-          "solver_settings": {}
+          "solver_settings": {},
+          "plots": [],
+          "metrics": []
         },
         "metadata": {}
       },
@@ -1529,7 +1610,9 @@
           "steps": 100,
           "dt": 0.01,
           "integrator": "implicit",
-          "solver_settings": {}
+          "solver_settings": {},
+          "plots": [],
+          "metrics": []
         },
         "metadata": {}
       },
@@ -1545,7 +1628,9 @@
           "steps": 100,
           "dt": 0.01,
           "integrator": "implicit",
-          "solver_settings": {}
+          "solver_settings": {},
+          "plots": [],
+          "metrics": []
         },
         "metadata": {}
       },
@@ -1561,7 +1646,9 @@
           "steps": 100,
           "dt": 0.01,
           "integrator": "implicit",
-          "solver_settings": {}
+          "solver_settings": {},
+          "plots": [],
+          "metrics": []
         },
         "metadata": {}
       },
@@ -1577,7 +1664,9 @@
           "steps": 100,
           "dt": 0.01,
           "integrator": "implicit",
-          "solver_settings": {}
+          "solver_settings": {},
+          "plots": [],
+          "metrics": []
         },
         "metadata": {}
       },
@@ -1593,7 +1682,9 @@
           "steps": 100,
           "dt": 0.01,
           "integrator": "implicit",
-          "solver_settings": {}
+          "solver_settings": {},
+          "plots": [],
+          "metrics": []
         },
         "metadata": {}
       },
@@ -1609,7 +1700,47 @@
           "steps": 100,
           "dt": 0.01,
           "integrator": "implicit",
-          "solver_settings": {}
+          "solver_settings": {},
+          "plots": [],
+          "metrics": []
+        },
+        "metadata": {}
+      },
+      {
+        "id": "analysis_034",
+        "name": "Static \u2014 locked",
+        "analysis_type": "static",
+        "baseline_id": null,
+        "case_id": "case_031",
+        "workspace_pose_id": "wpose_033",
+        "config": {
+          "gravity_enabled": true,
+          "tolerance": 1e-06,
+          "report_reactions": true,
+          "report_spring_energy": true,
+          "plots": [],
+          "metrics": []
+        },
+        "metadata": {}
+      },
+      {
+        "id": "analysis_036",
+        "name": "Equilibrium \u2014 free settle",
+        "analysis_type": "equilibrium",
+        "baseline_id": "baseline_001",
+        "case_id": null,
+        "workspace_pose_id": "wpose_035",
+        "config": {
+          "gravity_enabled": true,
+          "initial_perturbations": [
+            0.0,
+            0.05,
+            -0.05
+          ],
+          "stability_check": true,
+          "pose_match_tolerance": 0.001,
+          "plots": [],
+          "metrics": []
         },
         "metadata": {}
       }
@@ -2019,6 +2150,6 @@
     },
     "model_snapshots": {},
     "promotion_history": [],
-    "next_sequence": 31
+    "next_sequence": 37
   }
 }

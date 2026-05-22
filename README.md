@@ -79,6 +79,20 @@ quino-gui
 4. Edit the mechanism on the canvas, configure parameters, and run simulation
 5. Play back results with the timeline controls
 
+## Running An Analysis
+
+1. Create or open a project.
+2. Add a baseline or case in the workspace tree.
+3. Add a workspace pose under that scope.
+4. Right-click the pose and add an analysis.
+5. For dynamic analyses, configure duration, frames, and `dt`.
+6. Click `Run` in analysis mode.
+7. Click a past run in the workflow tree to replay it.
+8. Use `Plot` to save a plot recipe for that analysis.
+9. Right-click a run and use `Export` workflows such as CSV or JSON.
+
+The workflow tree now keeps a full run history per analysis, including notes, metrics, and persisted artefacts.
+
 ### Using the Library
 
 ```python
@@ -183,6 +197,23 @@ pytest --cov=src/quino tests/
 ```
 
 All 9 GUI tests pass ✅
+
+## Analysis Types
+
+The workspace-driven analysis system is described in:
+
+- [Master plan](docs/superpowers/plans/2026-05-22-analysis-mode-master-plan.md)
+- [Phase 1](docs/superpowers/plans/2026-05-22-phase-1-analysis-schema.md)
+- [Phase 2](docs/superpowers/plans/2026-05-22-phase-2-background-executor.md)
+- [Phase 3](docs/superpowers/plans/2026-05-22-phase-3-kinematic-infrastructure.md)
+- [Phase 4](docs/superpowers/plans/2026-05-22-phase-4-static-equilibrium-solver.md)
+- [Phase 5](docs/superpowers/plans/2026-05-22-phase-5-dynamic-mode-rewrite.md)
+- [Phase 6](docs/superpowers/plans/2026-05-22-phase-6-kinematic-mode-ux.md)
+- [Phase 7](docs/superpowers/plans/2026-05-22-phase-7-static-equilibrium-mode-ux.md)
+- [Phase 8](docs/superpowers/plans/2026-05-22-phase-8-plots-metrics-compare.md)
+- [Phase 9](docs/superpowers/plans/2026-05-22-phase-9-exports-batch-polish.md)
+
+Open-ended follow-up ideas live in [docs/FUTURE_IDEAS.md](docs/FUTURE_IDEAS.md).
 
 ## Roadmap
 

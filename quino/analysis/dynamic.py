@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from quino.domain.model import SimulationResult
 from quino.analysis.runner import AnalysisResult, AnalysisRunner
 
@@ -51,7 +53,11 @@ class DynamicAnalysisRunner(AnalysisRunner):
                 )
 
             if project_dir is not None and run is not None:
-                save_result_artifact(project_dir, run, result)
+                artifact_path = save_result_artifact(project_dir, run, result)
+                artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+                from quino.services.metric_evaluator import evaluate_metrics
+
+                run.metrics = evaluate_metrics(list(analysis.config.metrics), artifact)
 
             status = "ok" if result.success else "failed"
             return AnalysisResult(

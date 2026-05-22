@@ -29,7 +29,9 @@ class EquilibriumModeController(AnalysisModeController):
         run_action = bar.addAction("Run")
         run_action.triggered.connect(self.on_run_clicked)
         plot_action = bar.addAction("New plot")
-        plot_action.triggered.connect(self.main_window.create_plot_window)
+        plot_action.triggered.connect(lambda: self.main_window._open_plot_editor_for_analysis(self._current_analysis))
+        compare_action = bar.addAction("Compare")
+        compare_action.triggered.connect(self.main_window._open_compare_runs_dialog)
         self.toolbar = bar
         return bar
 
@@ -106,6 +108,8 @@ class EquilibriumModeController(AnalysisModeController):
             self.list_widget.addItem(f"Equilibrium #{index} (perturbation={perturbation})")
         if self._loaded_equilibria:
             self.list_widget.setCurrentRow(0)
+        else:
+            self._refresh_metrics_tab(run)
 
     def on_run_finished(self, run_id: str, status: str) -> None:
         if status not in {"ok", "partial"}:
@@ -130,6 +134,7 @@ class EquilibriumModeController(AnalysisModeController):
             f"Equilibrium #{index + 1}",
             [("Perturbation seed", str(equilibrium.get("perturbation", "?")))],
         )
+        self._refresh_metrics_tab(self._latest_report_run())
 
     def _populate_config_from(self, cfg) -> None:
         self._gravity_cb.setChecked(cfg.gravity_enabled)
@@ -164,3 +169,11 @@ class EquilibriumModeController(AnalysisModeController):
             if run.analysis_id == self._current_analysis.id and run.status in {"ok", "partial"} and run.result_ref is not None
         ]
         return runs[-1] if runs else None
+
+    def _refresh_metrics_tab(self, run) -> None:
+        if self.report is None:
+            return
+        rows = []
+        if run is not None:
+            rows = [[key, f"{value:.6g}"] for key, value in sorted(run.metrics.items())]
+        self.report.replace_table_tab("Metrics", ["Key", "Value"], rows)

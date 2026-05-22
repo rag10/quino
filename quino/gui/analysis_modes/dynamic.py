@@ -7,6 +7,7 @@ from PySide6 import QtWidgets
 
 from quino.gui.analysis_modes import register_mode
 from quino.gui.analysis_modes._base import AnalysisModeController
+from quino.gui.widgets.report_panel import ReportPanelWidget
 from quino.pose.geometry import pose_to_state_overlay
 from quino.services.workspace_runner import load_result_artifact
 
@@ -16,6 +17,7 @@ class DynamicModeController(AnalysisModeController):
     def __init__(self, main_window) -> None:
         super().__init__(main_window)
         self._current_analysis = None
+        self._metrics_panel: ReportPanelWidget | None = None
 
     def build_toolbar(self, parent: QtWidgets.QWidget) -> QtWidgets.QToolBar:
         self.toolbar = self.main_window._analysis_toolbar
@@ -28,7 +30,7 @@ class DynamicModeController(AnalysisModeController):
         self.main_window._add_toolbar_sep(self.toolbar)
         self.main_window._add_toolbar_block(
             self.toolbar,
-            [[self.main_window.action_new_plot, self.main_window.action_show_trajectories]],
+            [[self.main_window.action_new_plot, self.main_window.action_compare_runs, self.main_window.action_show_trajectories]],
             "View",
         )
         self.main_window._add_toolbar_sep(self.toolbar)
@@ -44,6 +46,9 @@ class DynamicModeController(AnalysisModeController):
         return self.config_widget
 
     def build_bottom_panel(self, parent: QtWidgets.QWidget) -> QtWidgets.QWidget:
+        if self._metrics_panel is None:
+            self._metrics_panel = ReportPanelWidget(self.main_window._playback_widget)
+            self.main_window._playback_widget.layout().addWidget(self._metrics_panel)
         self.bottom_panel = self.main_window._playback_widget
         return self.bottom_panel
 
@@ -51,10 +56,22 @@ class DynamicModeController(AnalysisModeController):
         self._current_analysis = analysis
         self._populate_config_from_analysis()
         self.main_window.canvas.set_mode_badge_suffix("(dynamic)")
+        if self._metrics_panel is not None:
+            self._metrics_panel.setVisible(True)
+        latest = self._latest_run()
+        if latest is not None:
+            self.on_run_selected(latest)
+        else:
+            self.clear_simulation_state()
+            self._refresh_metrics_tab(None)
+            self.main_window._append_message("No persisted runs for this analysis yet.")
 
     def on_leave(self) -> None:
         self.stop_playback()
         self.main_window.canvas.set_mode_badge_suffix("")
+        if self._metrics_panel is not None:
+            self._metrics_panel.clear_tabs()
+            self._metrics_panel.setVisible(False)
         self._current_analysis = None
 
     def on_run_clicked(self) -> None:
@@ -71,6 +88,7 @@ class DynamicModeController(AnalysisModeController):
         self.update_timeline_controls()
         self.apply_current_frame()
         self.update_trajectories(result=result)
+        self._refresh_metrics_tab(run)
 
     def on_run_finished(self, run_id: str, status: str) -> None:
         if self._current_analysis is None or status not in {"ok", "partial"}:
@@ -82,6 +100,26 @@ class DynamicModeController(AnalysisModeController):
         if run is None or run.analysis_id != self._current_analysis.id:
             return
         self.on_run_selected(run)
+
+    def _refresh_metrics_tab(self, run) -> None:
+        if self._metrics_panel is None:
+            return
+        rows = []
+        if run is not None:
+            rows = [[key, f"{value:.6g}"] for key, value in sorted(run.metrics.items())]
+        self._metrics_panel.replace_table_tab("Metrics", ["Key", "Value"], rows)
+
+    def _latest_run(self):
+        project = self.main_window.app_service.project
+        if project is None or project.workspace is None or self._current_analysis is None:
+            return None
+        runs = [
+            run for run in project.workspace.runs
+            if run.analysis_id == self._current_analysis.id
+            and run.status in {"ok", "partial"}
+            and run.result_ref is not None
+        ]
+        return runs[-1] if runs else None
 
     def export_to_python_script(self) -> None:
         if self.main_window.app_service.simulation_runner.backend_name() != "exudyn":

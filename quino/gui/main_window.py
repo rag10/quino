@@ -49,6 +49,7 @@ from quino.pose.geometry import assembled_reference_mechanism, marker_world_posi
 from quino.pose.kinematics import _pose_at_angle, build_drag_initial_pose, get_drag_driver, has_ground_revolute
 from quino.pose.model import PoseConstraint, PoseSolveResult, PoseSolveSettings
 from quino.services.expressions import DimensionMismatchError
+from quino.services.plot_renderer import load_artifact, render_plot
 from quino.simulation.sensor_expressions import safe_sensor_var, sensor_channel_keys
 from quino.viewer.plot_window import PlotWindow
 from quino.gui.widgets.inspector_widget import InspectorPropertyWidget
@@ -491,8 +492,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_add_rotational_actuator = self._tool_action("RotActuator", CanvasMode.CREATE_ROTATIONAL_ACTUATOR, get_icon("rot-actuator", color_dynamic), "Add a rotational torque actuator at a revolute joint (click the joint)")
 
         self.action_new_plot = QtGui.QAction(get_icon("new-graph", color_dynamic), "Plot", self)
-        self.action_new_plot.triggered.connect(self.create_plot_window)
+        self.action_new_plot.triggered.connect(self._on_new_plot_triggered)
         self.action_new_plot.setToolTip("Create a new plot from sensor data")
+
+        self.action_compare_runs = QtGui.QAction(get_icon("new-graph", color_dynamic), "Compare", self)
+        self.action_compare_runs.triggered.connect(self._open_compare_runs_dialog)
+        self.action_compare_runs.setToolTip("Compare persisted runs")
 
         self.action_export_script = QtGui.QAction(get_icon("content-save", color_dynamic), "Export Script", self)
         self.action_export_script.triggered.connect(self.export_to_python_script)
@@ -990,22 +995,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._analysis_toolbar.setIconSize(QtCore.QSize(28, 28))
         self._analysis_toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         self._analysis_toolbar.setMovable(False)
-        t = self._analysis_toolbar
-
-        self._add_toolbar_block(t, [
-            [self.action_validate, self.action_run, self.action_play_pause, self.action_stop],
-        ], "Run")
-        self._add_toolbar_sep(t)
-
-        self._add_toolbar_block(t, [
-            [self.action_new_plot, self.action_show_trajectories],
-        ], "View")
-        self._add_toolbar_sep(t)
-
-        self._add_toolbar_block(t, [
-            [self.action_export_script],
-        ], "Export")
-
         self._analysis_toolbar.setVisible(False)
 
     def _set_app_mode(self, mode: str) -> None:
@@ -1260,40 +1249,6 @@ class MainWindow(QtWidgets.QMainWindow):
         project.workspace.selected_analysis_id = analysis_id
         self._set_app_mode("analysis")
         self._set_app_mode_analysis(analysis)
-        if analysis.analysis_type == "dynamic":
-            result = self._load_latest_run_result(analysis_id)
-            self._last_simulation_result = result
-            self._current_frame_index = 0
-            self._update_timeline_controls()
-            self._apply_current_frame()
-            self._update_trajectories(result=result)
-            if result is None:
-                self._append_message("No persisted runs for this analysis yet.")
-
-    def _load_latest_run_result(self, analysis_id: str) -> "SimulationResult | None":
-        """Return the SimulationResult of the latest ok run for *analysis_id*,
-        loaded from disk via load_result_artifact. Returns None if there are
-        no runs, no ok run, or no on-disk artifact path is known."""
-        project = self.app_service.project
-        if project is None or project.workspace is None:
-            return None
-        ws = project.workspace
-        candidate_run = None
-        for run in reversed(ws.runs):
-            if getattr(run, "analysis_id", None) != analysis_id:
-                continue
-            if run.status == "ok" and run.result_ref is not None:
-                candidate_run = run
-                break
-        if candidate_run is None:
-            return None
-        from quino.services.workspace_runner import load_result_artifact
-        project_dir = (
-            self._current_project_path.parent
-            if self._current_project_path is not None
-            else None
-        )
-        return load_result_artifact(project_dir, candidate_run)
 
     def _on_run_selected(self, run_id: str) -> None:
         project = self.app_service.project
@@ -1387,7 +1342,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         analysis = next((a for a in project.workspace.analyses if a.id == run.analysis_id), None)
         label = analysis.name if analysis is not None else run_id
-        self.run_status.show_running(run_id, label)
+        pending = self.app_service.executor.pending_count() if self.app_service.executor is not None else 0
+        self.run_status.show_running(run_id, label, pending=pending)
         if self._active_mode_controller is not None:
             self._active_mode_controller.on_run_started(run_id)
         if hasattr(self, "workflow_panel"):
@@ -1675,6 +1631,52 @@ class MainWindow(QtWidgets.QMainWindow):
         win.show()
         win.prompt_import_from_simulation()
         self._plot_windows.append(win)
+
+    def _on_new_plot_triggered(self) -> None:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            analysis = getattr(self._active_mode_controller, "_current_analysis", None)
+            if analysis is not None:
+                self._open_plot_editor_for_analysis(analysis)
+                return
+        self.create_plot_window()
+
+    def _open_plot_editor_for_analysis(self, analysis) -> None:
+        from quino.gui.dialogs.plot_editor_dialog import PlotEditorDialog
+
+        project = self.app_service.display_project
+        if project is None:
+            return
+        dialog = PlotEditorDialog(
+            analysis_type=analysis.analysis_type,
+            project=project,
+            sweeps=getattr(analysis.config, "sweeps", []),
+            parent=self,
+        )
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted or dialog.result_plot is None:
+            return
+        analysis.config.plots.append(dialog.result_plot)
+        self._render_plot_for_analysis(analysis, dialog.result_plot)
+
+    def _render_plot_for_analysis(self, analysis, plot_def) -> None:
+        project = self.app_service.project
+        if project is None or project.workspace is None:
+            return
+        runs = [
+            run for run in project.workspace.runs
+            if run.analysis_id == analysis.id and run.result_ref is not None and run.status in {"ok", "partial"}
+        ]
+        if not runs:
+            self._append_message("No persisted runs available for this analysis yet.")
+            return
+        artifacts = [(run.id, load_artifact(self.app_service.current_project_dir, run)) for run in runs[-1:]]
+        figure = render_plot(plot_def, artifacts)
+        figure.show()
+
+    def _open_compare_runs_dialog(self) -> None:
+        from quino.gui.dialogs.run_comparison_dialog import RunComparisonDialog
+
+        dialog = RunComparisonDialog(self.app_service, parent=self)
+        dialog.exec()
 
     def delete_selected_entity(self) -> None:
         if not self._editing_allowed():

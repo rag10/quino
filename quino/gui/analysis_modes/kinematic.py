@@ -6,6 +6,7 @@ from quino.gui.analysis_modes import register_mode
 from quino.gui.analysis_modes._base import AnalysisModeController
 from quino.gui.dialogs.add_sweep_dialog import AddSweepDialog
 from quino.gui.dialogs.sweep_editor_dialog import SweepEditorDialog
+from quino.gui.widgets.report_panel import ReportPanelWidget
 from quino.gui.widgets.sweep_slider_row import SweepSliderRow
 from quino.services.kinematic_cache import KinematicCache
 
@@ -18,6 +19,7 @@ class KinematicModeController(AnalysisModeController):
         self._panel: QtWidgets.QWidget | None = None
         self._panel_layout: QtWidgets.QVBoxLayout | None = None
         self._summary_label: QtWidgets.QLabel | None = None
+        self._report: ReportPanelWidget | None = None
         self._cache: KinematicCache | None = None
         self._current_analysis = None
 
@@ -35,7 +37,9 @@ class KinematicModeController(AnalysisModeController):
         self.action_show_traj.toggled.connect(self._on_toggle_trajectories)
         bar.addSeparator()
         plot_action = bar.addAction("New plot")
-        plot_action.triggered.connect(self.main_window.create_plot_window)
+        plot_action.triggered.connect(lambda: self.main_window._open_plot_editor_for_analysis(self._current_analysis))
+        compare_action = bar.addAction("Compare")
+        compare_action.triggered.connect(self.main_window._open_compare_runs_dialog)
         self.toolbar = bar
         return bar
 
@@ -51,6 +55,8 @@ class KinematicModeController(AnalysisModeController):
         layout.setSpacing(4)
         self._summary_label = QtWidgets.QLabel("", panel)
         layout.addWidget(self._summary_label)
+        self._report = ReportPanelWidget(panel)
+        layout.addWidget(self._report)
         self._panel = panel
         self._panel_layout = layout
         self.bottom_panel = panel
@@ -66,6 +72,7 @@ class KinematicModeController(AnalysisModeController):
             self.on_run_selected(latest)
         else:
             self._clear_canvas()
+        self._refresh_metrics_tab(latest)
 
     def on_leave(self):
         self.main_window.canvas.set_mode_badge_suffix("")
@@ -82,6 +89,7 @@ class KinematicModeController(AnalysisModeController):
     def on_run_selected(self, run) -> None:
         self._cache = KinematicCache.load(self.main_window.app_service.current_project_dir, run)
         self._refresh_canvas_from_current_indices()
+        self._refresh_metrics_tab(run)
 
     def on_run_finished(self, run_id: str, status: str) -> None:
         for row in self._rows:
@@ -205,3 +213,11 @@ class KinematicModeController(AnalysisModeController):
         self.main_window.canvas.set_kinematic_pose(None)
         self.main_window.canvas.set_kinematic_cloud([])
         self.main_window.canvas.set_kinematic_trajectory([])
+
+    def _refresh_metrics_tab(self, run) -> None:
+        if self._report is None:
+            return
+        rows = []
+        if run is not None:
+            rows = [[key, f"{value:.6g}"] for key, value in sorted(run.metrics.items())]
+        self._report.replace_table_tab("Metrics", ["Key", "Value"], rows)

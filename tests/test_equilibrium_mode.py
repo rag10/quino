@@ -16,7 +16,7 @@ def test_equilibrium_mode_lists_found_equilibria(qtbot, tmp_path) -> None:
     pose = svc.workspace.create_pose("P", case_id=case.id)
     analysis = svc.workspace.create_analysis("Eq", analysis_type="equilibrium", case_id=case.id, workspace_pose_id=pose.id)
     svc.current_project_path = tmp_path
-    run = Run(id="run_001", analysis_id=analysis.id, created_at="now", status="ok")
+    run = Run(id="run_001", analysis_id=analysis.id, created_at="now", status="ok", metrics={"stable_count": 1.0})
     svc.project.workspace.runs.append(run)
     artifact_dir = tmp_path / "artifacts" / f"run_{run.id}"
     artifact_dir.mkdir(parents=True)
@@ -38,3 +38,5 @@ def test_equilibrium_mode_lists_found_equilibria(qtbot, tmp_path) -> None:
     window._on_run_selected(run.id)
     ctrl = window._active_mode_controller
     assert ctrl.list_widget.count() == 1
+    tabs = [ctrl.report.tabText(i) for i in range(ctrl.report.count())]
+    assert "Metrics" in tabs

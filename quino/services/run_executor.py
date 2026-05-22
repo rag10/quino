@@ -87,6 +87,10 @@ class RunExecutor(QtCore.QObject):
         self._queue.put(None)
         self._worker.join(timeout=2.0)
 
+    def pending_count(self) -> int:
+        count = self._queue.qsize()
+        return max(0, count - 1 if self._stopping.is_set() else count)
+
     def _loop(self) -> None:
         while not self._stopping.is_set():
             try:

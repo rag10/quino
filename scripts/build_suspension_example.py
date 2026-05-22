@@ -550,6 +550,50 @@ def build_active_suspension(app: ApplicationService) -> None:
         workspace_pose_id=fail_pose.id,
     )
 
+    # --- Static analysis: lock strut at zero stroke -------------------
+    # Static requires DoF=0. We add a constant translational driver on the
+    # strut prismatic joint (StrutSlide) that pins the stroke at 0 mm. The
+    # driver is added as a case-scoped entity so the dynamic analyses on
+    # the baseline keep their freely-moving strut.
+    static_case = app.workspace.create_case(
+        "Locked strut (static)", baseline_id=baseline.id,
+    )
+    strut_joint_id = next(
+        joint.id for joint in app.project.model.joints if joint.name == "StrutSlide"
+    )
+    app.set_working_context(case_id=static_case.id)
+    app.create_driver(
+        "LockStrut",
+        "translation",
+        strut_joint_id,
+        "0 mm",
+        "mm",
+    )
+    app.set_working_context(baseline_id=baseline.id)
+    static_pose = app.workspace.create_pose(
+        "Locked pose", case_id=static_case.id,
+    )
+    app.workspace.create_analysis(
+        "Static — locked",
+        analysis_type="static",
+        case_id=static_case.id,
+        workspace_pose_id=static_pose.id,
+    )
+
+    # --- Equilibrium analysis: free settle under gravity --------------
+    # No case override required — the baseline model already has DoF > 0
+    # (free strut prismatic) and a gravity + spring force source, so
+    # find_stable_equilibria can integrate to the rest position.
+    free_settle_pose = app.workspace.create_pose(
+        "Free settle", baseline_id=baseline.id,
+    )
+    app.workspace.create_analysis(
+        "Equilibrium — free settle",
+        analysis_type="equilibrium",
+        baseline_id=baseline.id,
+        workspace_pose_id=free_settle_pose.id,
+    )
+
     # Default to the baseline view when the project opens.
     app.set_working_context(baseline_id=baseline.id)
 

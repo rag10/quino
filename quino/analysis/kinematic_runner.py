@@ -21,6 +21,7 @@ from quino.domain.workspace import KinematicConfig, ResultRef, Run
 from quino.pose.geometry import create_reference_pose, marker_world_position
 from quino.pose.model import PoseSolveSettings
 from quino.services.sensor_extraction_kinematic import extract_sensors_from_pose
+from quino.services.metric_evaluator import evaluate_metrics
 
 
 @dataclass(slots=True)
@@ -151,10 +152,12 @@ class KinematicAnalysisRunner(AnalysisRunner):
             failed_mask=failed_mask,
         )
         if project_dir is not None and run is not None:
-            self._persist_artifact(project_dir, run, result)
+            artifact_path = self._persist_artifact(project_dir, run, result)
+            artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+            run.metrics = evaluate_metrics(list(analysis.config.metrics), artifact)
         return result
 
-    def _persist_artifact(self, project_dir: Path, run: Run, result: KinematicResult) -> None:
+    def _persist_artifact(self, project_dir: Path, run: Run, result: KinematicResult) -> Path:
         artifact_dir = project_dir / "artifacts" / f"run_{run.id}"
         artifact_dir.mkdir(parents=True, exist_ok=True)
         path = artifact_dir / "result.json"
@@ -173,6 +176,7 @@ class KinematicAnalysisRunner(AnalysisRunner):
             artifact_path=str(path.relative_to(project_dir)),
             checksum=f"sha256:{checksum}",
         )
+        return path
 
     def _initial_pose(self, project) -> Pose:
         return create_reference_pose(project, pose_id="kinematic_reference", name="Kinematic Reference")
