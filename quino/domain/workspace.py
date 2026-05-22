@@ -38,6 +38,58 @@ class ParameterDescriptor:
 
 
 @dataclass(slots=True)
+class SweepDef:
+    id: str
+    variable_kind: str  # see master plan §5.1 for the 6 allowed kinds
+    target_ids: list[str] = field(default_factory=list)
+    mode: str = "linear"     # "linear" | "list"
+    start: float = 0.0
+    end: float = 0.0
+    steps: int = 1
+    values: list[float] = field(default_factory=list)
+    label: str = ""
+
+    def resolved_values(self) -> list[float]:
+        if self.mode == "list":
+            return list(self.values)
+        if self.steps <= 1:
+            return [self.start]
+        delta = (self.end - self.start) / (self.steps - 1)
+        return [self.start + delta * i for i in range(self.steps)]
+
+
+@dataclass(slots=True)
+class DynamicConfig:
+    duration: float = 1.0
+    steps: int = 100
+    dt: float = 0.01
+    integrator: str = "implicit"
+    solver_settings: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class KinematicConfig:
+    sweeps: list[SweepDef] = field(default_factory=list)
+    allow_failed_steps: bool = True
+
+
+@dataclass(slots=True)
+class StaticConfig:
+    gravity_enabled: bool = True
+    tolerance: float = 1e-6
+    report_reactions: bool = True
+    report_spring_energy: bool = True
+
+
+@dataclass(slots=True)
+class EquilibriumConfig:
+    gravity_enabled: bool = True
+    initial_perturbations: list[float] = field(default_factory=lambda: [0.0, 0.05, -0.05])
+    stability_check: bool = True
+    pose_match_tolerance: float = 1e-3
+
+
+@dataclass(slots=True)
 class Baseline:
     id: str
     name: str
