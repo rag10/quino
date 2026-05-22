@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.1.0",
+  "schema_version": "0.2.0",
   "project": {
     "id": "proj_001",
     "name": "Umbrella Mechanism",
@@ -82,7 +82,7 @@
           "unit": "mm"
         },
         "y": {
-          "text": "52.5527 mm",
+          "text": "52.553 mm",
           "unit": "mm"
         }
       },
@@ -101,11 +101,11 @@
         },
         "metadata": {},
         "x": {
-          "text": "51.6221 mm",
+          "text": "51.622 mm",
           "unit": "mm"
         },
         "y": {
-          "text": "126.277 mm",
+          "text": "126.276 mm",
           "unit": "mm"
         }
       },
@@ -391,7 +391,9 @@
               "line_width": 1.0,
               "marker_size": 6.0
             },
-            "metadata": {}
+            "metadata": {
+              "position_percent": 50.0
+            }
           }
         ],
         "edge_order": [
@@ -401,7 +403,6 @@
         ],
         "closed_shape": true,
         "mass": null,
-        "inertia": null,
         "style": {
           "color": "#000000",
           "visible": true,
@@ -482,7 +483,9 @@
               "line_width": 1.0,
               "marker_size": 6.0
             },
-            "metadata": {}
+            "metadata": {
+              "position_percent": 50.0
+            }
           }
         ],
         "edge_order": [
@@ -491,11 +494,10 @@
         ],
         "closed_shape": false,
         "mass": null,
-        "inertia": null,
         "style": {
           "color": "#000000",
           "visible": true,
-          "line_width": 2.0,
+          "line_width": 1.0,
           "marker_size": 6.0
         },
         "metadata": {}
@@ -618,6 +620,7 @@
         "metadata": {}
       }
     ],
+    "loads": [],
     "sensors": [
       {
         "id": "sensor_001",
@@ -639,24 +642,25 @@
         "metadata": {}
       }
     ],
-    "loads": [],
-    "springs": []
+    "springs": [],
+    "gravity": null,
+    "control_graph": null
   },
   "view_state": {
     "zoom": 1.0,
     "pan_x": 0.0,
     "pan_y": 0.0,
     "show_grid": true,
+    "show_sensors": true,
     "show_markers": true,
     "show_com": false,
-    "show_sliders": true,
-    "show_sensors": true
+    "show_sliders": true
   },
   "workspace": {
     "baselines": [
       {
         "id": "baseline_001",
-        "name": "Baseline",
+        "name": "Umbrella Mechanism",
         "description": "",
         "source_run_id": null,
         "model_snapshot_id": null,
@@ -674,14 +678,25 @@
     "selected_pose_id": null,
     "selected_analysis_id": null,
     "cases": [],
-    "poses": [],
+    "poses": [
+      {
+        "id": "wpose_002",
+        "name": "Pose default",
+        "baseline_id": "baseline_001",
+        "case_id": null,
+        "project_pose_id": null,
+        "is_default": true,
+        "parent_pose_id": null,
+        "requires_recompute": true,
+        "solve_failed": false,
+        "metadata": {}
+      }
+    ],
     "analyses": [],
-    "case_groups": [],
-    "studies": [],
     "runs": [],
     "parameter_catalog": {},
     "model_snapshots": {},
     "promotion_history": [],
-    "next_sequence": 2
+    "next_sequence": 3
   }
 }

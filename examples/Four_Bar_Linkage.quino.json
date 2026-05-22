@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.1.0",
+  "schema_version": "0.2.0",
   "project": {
     "id": "proj_fourbar",
     "name": "Four-Bar Linkage",
@@ -454,7 +454,10 @@
         "parent_case_id": null,
         "model_snapshot_id": null,
         "invariant_values": {
-          "bodies/body_002/mass": {"value": 2.5, "unit": "kg"}
+          "bodies/body_002/mass": {
+            "value": 2.5,
+            "unit": "kg"
+          }
         },
         "metadata": {}
       },
@@ -465,9 +468,18 @@
         "parent_case_id": null,
         "model_snapshot_id": null,
         "invariant_values": {
-          "bodies/body_001/mass": {"value": 0.1, "unit": "kg"},
-          "bodies/body_002/mass": {"value": 0.2, "unit": "kg"},
-          "bodies/body_003/mass": {"value": 0.15, "unit": "kg"}
+          "bodies/body_001/mass": {
+            "value": 0.1,
+            "unit": "kg"
+          },
+          "bodies/body_002/mass": {
+            "value": 0.2,
+            "unit": "kg"
+          },
+          "bodies/body_003/mass": {
+            "value": 0.15,
+            "unit": "kg"
+          }
         },
         "metadata": {}
       }
@@ -475,7 +487,7 @@
     "poses": [
       {
         "id": "wpose_001",
-        "name": "Crank at 0° (default)",
+        "name": "Crank at 0\u00b0 (default)",
         "baseline_id": "baseline_001",
         "case_id": null,
         "project_pose_id": null,
@@ -484,7 +496,7 @@
       },
       {
         "id": "wpose_002",
-        "name": "Crank at 0° (default)",
+        "name": "Crank at 0\u00b0 (default)",
         "baseline_id": "baseline_001",
         "case_id": "case_001",
         "project_pose_id": null,
@@ -493,7 +505,7 @@
       },
       {
         "id": "wpose_003",
-        "name": "Crank at 0° (default)",
+        "name": "Crank at 0\u00b0 (default)",
         "baseline_id": "baseline_001",
         "case_id": "case_002",
         "project_pose_id": null,

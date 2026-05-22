@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.1.0",
+  "schema_version": "0.2.0",
   "project": {
     "id": "proj_001",
     "name": "Slider Crank with Sketch",
@@ -280,7 +280,9 @@
               "line_width": 1.0,
               "marker_size": 6.0
             },
-            "metadata": {}
+            "metadata": {
+              "position_percent": 50.0
+            }
           }
         ],
         "edge_order": [
@@ -289,11 +291,10 @@
         ],
         "closed_shape": false,
         "mass": null,
-        "inertia": null,
         "style": {
           "color": "#000000",
           "visible": true,
-          "line_width": 2.0,
+          "line_width": 1.0,
           "marker_size": 6.0
         },
         "metadata": {}
@@ -370,7 +371,9 @@
               "line_width": 1.0,
               "marker_size": 6.0
             },
-            "metadata": {}
+            "metadata": {
+              "position_percent": 50.0
+            }
           }
         ],
         "edge_order": [
@@ -379,11 +382,10 @@
         ],
         "closed_shape": false,
         "mass": null,
-        "inertia": null,
         "style": {
           "color": "#000000",
           "visible": true,
-          "line_width": 2.0,
+          "line_width": 1.0,
           "marker_size": 6.0
         },
         "metadata": {}
@@ -506,6 +508,7 @@
         "metadata": {}
       }
     ],
+    "loads": [],
     "sensors": [
       {
         "id": "sensor_001",
@@ -517,24 +520,25 @@
         "metadata": {}
       }
     ],
-    "loads": [],
-    "springs": []
+    "springs": [],
+    "gravity": null,
+    "control_graph": null
   },
   "view_state": {
     "zoom": 1.0,
     "pan_x": 0.0,
     "pan_y": 0.0,
     "show_grid": true,
+    "show_sensors": true,
     "show_markers": true,
     "show_com": false,
-    "show_sliders": true,
-    "show_sensors": true
+    "show_sliders": true
   },
   "workspace": {
     "baselines": [
       {
         "id": "baseline_001",
-        "name": "Baseline",
+        "name": "Slider Crank with Sketch",
         "description": "",
         "source_run_id": null,
         "model_snapshot_id": null,
@@ -552,14 +556,25 @@
     "selected_pose_id": null,
     "selected_analysis_id": null,
     "cases": [],
-    "poses": [],
+    "poses": [
+      {
+        "id": "wpose_002",
+        "name": "Pose default",
+        "baseline_id": "baseline_001",
+        "case_id": null,
+        "project_pose_id": null,
+        "is_default": true,
+        "parent_pose_id": null,
+        "requires_recompute": true,
+        "solve_failed": false,
+        "metadata": {}
+      }
+    ],
     "analyses": [],
-    "case_groups": [],
-    "studies": [],
     "runs": [],
     "parameter_catalog": {},
     "model_snapshots": {},
     "promotion_history": [],
-    "next_sequence": 2
+    "next_sequence": 3
   }
 }

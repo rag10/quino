@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.1.0",
+  "schema_version": "0.2.0",
   "project": {
     "id": "proj_001",
     "name": "Spring Oscillator",
@@ -275,7 +275,10 @@
         "parent_case_id": null,
         "model_snapshot_id": null,
         "invariant_values": {
-          "bodies/body_001/mass": {"value": 3.0, "unit": "kg"}
+          "bodies/body_001/mass": {
+            "value": 3.0,
+            "unit": "kg"
+          }
         },
         "metadata": {}
       },
@@ -286,7 +289,10 @@
         "parent_case_id": null,
         "model_snapshot_id": null,
         "invariant_values": {
-          "bodies/body_001/mass": {"value": 0.25, "unit": "kg"}
+          "bodies/body_001/mass": {
+            "value": 0.25,
+            "unit": "kg"
+          }
         },
         "metadata": {}
       }
