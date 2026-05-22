@@ -79,3 +79,28 @@ def test_analysis_explicit_config_wins():
     cfg = DynamicConfig(duration=5.0, steps=500)
     a = Analysis(id="a", name="x", analysis_type="dynamic", config=cfg)
     assert a.config is cfg
+
+
+def test_analysis_config_roundtrip(tmp_path):
+    from quino.application.service import ApplicationService
+
+    svc = ApplicationService()
+    svc.new_project("test")
+    case = svc.workspace.create_case("C")
+    pose = svc.workspace.create_pose("P", case_id=case.id)
+    a = svc.workspace.create_analysis(
+        "kin", analysis_type="kinematic", case_id=case.id, workspace_pose_id=pose.id,
+    )
+    a.config.sweeps.append(SweepDef(id="sw_1", variable_kind="marker_x",
+                                    target_ids=["m1"], mode="linear",
+                                    start=0, end=10, steps=11))
+    path = tmp_path / "p.quino.json"
+    svc.save_project(str(path))
+
+    svc2 = ApplicationService()
+    svc2.load_project(str(path))
+    loaded = next(x for x in svc2.project.workspace.analyses if x.id == a.id)
+    assert isinstance(loaded.config, KinematicConfig)
+    assert len(loaded.config.sweeps) == 1
+    assert loaded.config.sweeps[0].variable_kind == "marker_x"
+    assert loaded.config.sweeps[0].steps == 11
