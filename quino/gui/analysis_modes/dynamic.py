@@ -18,6 +18,8 @@ class DynamicModeController(AnalysisModeController):
         super().__init__(main_window)
         self._current_analysis = None
         self._metrics_panel: ReportPanelWidget | None = None
+        self._config_panel: QtWidgets.QWidget | None = None
+        self._playback_panel: QtWidgets.QGroupBox | None = None
 
     def build_toolbar(self, parent: QtWidgets.QWidget) -> QtWidgets.QToolBar:
         self.toolbar = self.main_window._analysis_toolbar
@@ -42,14 +44,49 @@ class DynamicModeController(AnalysisModeController):
         return self.toolbar
 
     def build_config_widget(self, parent: QtWidgets.QWidget) -> QtWidgets.QWidget:
-        self.config_widget = self.main_window._playback_widget
+        if self._config_panel is None:
+            panel = QtWidgets.QWidget(parent)
+            layout = QtWidgets.QHBoxLayout(panel)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(10)
+            layout.addWidget(QtWidgets.QLabel("Duration:"))
+            layout.addWidget(self.main_window.duration_spin)
+            layout.addSpacing(20)
+            layout.addWidget(QtWidgets.QLabel("Frames:"))
+            layout.addWidget(self.main_window.steps_spin)
+            layout.addSpacing(20)
+            layout.addWidget(QtWidgets.QLabel("Dt:"))
+            layout.addWidget(self.main_window.dt_spin)
+            layout.addStretch()
+            self._config_panel = panel
+        self.config_widget = self._config_panel
         return self.config_widget
 
     def build_bottom_panel(self, parent: QtWidgets.QWidget) -> QtWidgets.QWidget:
-        if self._metrics_panel is None:
-            self._metrics_panel = ReportPanelWidget(self.main_window._playback_widget)
-            self.main_window._playback_widget.layout().addWidget(self._metrics_panel)
-        self.bottom_panel = self.main_window._playback_widget
+        if self._playback_panel is None:
+            playback_panel = QtWidgets.QGroupBox("Analysis", parent)
+            playback_panel.setFlat(True)
+            layout = QtWidgets.QVBoxLayout(playback_panel)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(4)
+
+            controls_layout = QtWidgets.QHBoxLayout()
+            controls_layout.addWidget(self.main_window.action_run_button)
+            controls_layout.addWidget(self.main_window.action_play_button)
+            controls_layout.addWidget(self.main_window.action_stop_button)
+            controls_layout.addSpacing(12)
+            controls_layout.addWidget(QtWidgets.QLabel("Frame:"))
+            controls_layout.addWidget(self.main_window.timeline_slider)
+            controls_layout.addWidget(self.main_window.timeline_label)
+            controls_layout.addSpacing(12)
+            controls_layout.addWidget(QtWidgets.QLabel("Speed:"))
+            controls_layout.addWidget(self.main_window.playback_speed_spin)
+            layout.addLayout(controls_layout)
+
+            self._metrics_panel = ReportPanelWidget(playback_panel)
+            layout.addWidget(self._metrics_panel)
+            self._playback_panel = playback_panel
+        self.bottom_panel = self._playback_panel
         return self.bottom_panel
 
     def on_enter(self, analysis) -> None:
@@ -72,6 +109,18 @@ class DynamicModeController(AnalysisModeController):
         if self._metrics_panel is not None:
             self._metrics_panel.clear_tabs()
             self._metrics_panel.setVisible(False)
+        for widget in (
+            self.main_window.action_run_button,
+            self.main_window.action_play_button,
+            self.main_window.action_stop_button,
+            self.main_window.timeline_slider,
+            self.main_window.timeline_label,
+            self.main_window.playback_speed_spin,
+            self.main_window.duration_spin,
+            self.main_window.steps_spin,
+            self.main_window.dt_spin,
+        ):
+            widget.setParent(self.main_window._playback_widget)
         self._current_analysis = None
 
     def on_run_clicked(self) -> None:

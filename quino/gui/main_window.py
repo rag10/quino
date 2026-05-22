@@ -230,78 +230,45 @@ class MainWindow(QtWidgets.QMainWindow):
         playback_layout.setContentsMargins(6, 6, 6, 6)
         playback_layout.setSpacing(6)
 
-        playback_group = QtWidgets.QGroupBox("Analysis")
-        self._dynamic_playback_group = playback_group
-        playback_group.setFlat(True)
-        playback_group_layout = QtWidgets.QVBoxLayout(playback_group)
-        playback_group_layout.setContentsMargins(0, 0, 0, 0)
-        playback_group_layout.setSpacing(4)
-
-        controls_layout = QtWidgets.QHBoxLayout()
         self.action_run_button = QtWidgets.QToolButton()
         self.action_play_button = QtWidgets.QToolButton()
         self.action_stop_button = QtWidgets.QToolButton()
         self.action_run_button.setDefaultAction(self.action_run)
         self.action_play_button.setDefaultAction(self.action_play_pause)
         self.action_stop_button.setDefaultAction(self.action_stop)
-        controls_layout.addWidget(self.action_run_button)
-        controls_layout.addWidget(self.action_play_button)
-        controls_layout.addWidget(self.action_stop_button)
-        controls_layout.addSpacing(12)
-        controls_layout.addWidget(QtWidgets.QLabel("Frame:"))
         self.timeline_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         self.timeline_slider.setRange(0, 0)
         self.timeline_slider.valueChanged.connect(self._on_timeline_changed)
-        controls_layout.addWidget(self.timeline_slider)
         self.timeline_label = QtWidgets.QLabel("0 / 0")
         self.timeline_label.setMinimumWidth(80)
-        controls_layout.addWidget(self.timeline_label)
-        controls_layout.addSpacing(12)
-        controls_layout.addWidget(QtWidgets.QLabel("Speed:"))
         self.playback_speed_spin = QtWidgets.QDoubleSpinBox()
         self.playback_speed_spin.setRange(0.0005, 100.0)
         self.playback_speed_spin.setDecimals(6)
         self.playback_speed_spin.setValue(1.0)
         self.playback_speed_spin.setSuffix(" x")
         self.playback_speed_spin.setMaximumWidth(80)
-        controls_layout.addWidget(self.playback_speed_spin)
-        playback_group_layout.addLayout(controls_layout)
-
-        config_layout = QtWidgets.QHBoxLayout()
-        config_layout.addWidget(QtWidgets.QLabel("Duration:"))
         self.duration_spin = QtWidgets.QDoubleSpinBox()
         self.duration_spin.setRange(0.001, 999999.0)
         self.duration_spin.setDecimals(3)
         self.duration_spin.setValue(1.0)
         self.duration_spin.setSuffix(" s")
         self.duration_spin.setMaximumWidth(100)
-        config_layout.addWidget(self.duration_spin)
-        config_layout.addSpacing(20)
-        config_layout.addWidget(QtWidgets.QLabel("Frames:"))
         self.steps_spin = QtWidgets.QSpinBox()
         self.steps_spin.setRange(1, 99999999)
         self.steps_spin.setValue(100)
         self.steps_spin.setMaximumWidth(100)
-        config_layout.addWidget(self.steps_spin)
-        config_layout.addSpacing(20)
-        config_layout.addWidget(QtWidgets.QLabel("Δt:"))
         self.dt_spin = QtWidgets.QDoubleSpinBox()
         self.dt_spin.setRange(1e-9, 999999.0)
         self.dt_spin.setDecimals(6)
         self.dt_spin.setValue(0.01)
         self.dt_spin.setSuffix(" s")
         self.dt_spin.setMaximumWidth(100)
-        config_layout.addWidget(self.dt_spin)
-        config_layout.addStretch()
-        playback_group_layout.addLayout(config_layout)
 
         self.duration_spin.valueChanged.connect(self._on_duration_changed)
         self.steps_spin.valueChanged.connect(self._on_steps_changed)
         self.dt_spin.valueChanged.connect(self._on_dt_changed)
         self.playback_speed_spin.valueChanged.connect(self._on_playback_speed_changed)
         self._update_simulation_spin_steps()
-
-        playback_layout.addWidget(playback_group)
         center_panel.addWidget(self._playback_widget)
         # The Analysis bar (run/play/stop + duration/frames/dt) is reserved
         # for analysis mode. Other modes don't need it and seeing it on
@@ -1296,9 +1263,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _mount_active_mode_panel(self, controller) -> None:
         self._teardown_active_mode_panel()
-        if controller.bottom_panel is self._playback_widget:
-            self._dynamic_playback_group.setVisible(True)
-            return
         host = QtWidgets.QWidget(self._playback_widget)
         layout = QtWidgets.QVBoxLayout(host)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1307,7 +1271,6 @@ class MainWindow(QtWidgets.QMainWindow):
             layout.addWidget(controller.config_widget)
         if controller.bottom_panel is not None:
             layout.addWidget(controller.bottom_panel, stretch=1)
-        self._dynamic_playback_group.setVisible(False)
         self._playback_widget.layout().addWidget(host)
         self._mounted_analysis_panel = host
 
@@ -1316,7 +1279,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self._mounted_analysis_panel.setParent(None)
             self._mounted_analysis_panel.deleteLater()
             self._mounted_analysis_panel = None
-        self._dynamic_playback_group.setVisible(True)
 
     def _on_run_analysis_requested(self, analysis_id: str) -> None:
         try:

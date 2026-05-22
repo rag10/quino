@@ -100,3 +100,27 @@ def test_selecting_dynamic_analysis_loads_latest_persisted_run(qtbot, tmp_path) 
     assert window._last_simulation_result is not None
     assert len(window._last_simulation_result.frames) == 2
     assert window.timeline_slider.maximum() == 1
+
+
+def test_dynamic_controller_widgets_survive_unmount_and_remount(qtbot) -> None:
+    svc = ApplicationService()
+    svc.new_project("t")
+    svc.create_punctual_mass("M", x="0 mm", y="0 mm")
+    case = svc.workspace.create_case("C")
+    pose = svc.workspace.create_pose("P", case_id=case.id)
+    analysis = svc.workspace.create_analysis("D", analysis_type="dynamic", case_id=case.id, workspace_pose_id=pose.id)
+
+    window = MainWindow(svc)
+    qtbot.addWidget(window)
+    window._set_app_mode("analysis")
+    window._set_app_mode_analysis(analysis)
+    first_slider = window.timeline_slider
+    first_steps_spin = window.steps_spin
+
+    window._set_app_mode("model")
+    window._set_app_mode("analysis")
+    window._set_app_mode_analysis(analysis)
+
+    assert window.timeline_slider is first_slider
+    assert window.steps_spin is first_steps_spin
+    assert window._active_mode_controller.__class__.__name__ == "DynamicModeController"
