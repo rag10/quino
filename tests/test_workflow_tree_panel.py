@@ -252,6 +252,28 @@ def test_subcase_uses_distinct_icon_from_top_case():
     assert parent_pix != child_pix
 
 
+def test_delete_run_context_action_removes_run(monkeypatch):
+    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    from quino.domain.workspace import Run
+    svc = ApplicationService()
+    svc.new_project("t")
+    case = svc.workspace.create_case("C")
+    pose = svc.workspace.create_pose("P", case_id=case.id)
+    a = svc.workspace.create_analysis("Bump", case_id=case.id, workspace_pose_id=pose.id)
+    svc.project.workspace.runs.append(
+        Run(id="r1", analysis_id=a.id, created_at="...", status="ok")
+    )
+    panel = WorkflowTreePanel(svc)
+    panel.refresh()
+    # Auto-accept confirmation dialog.
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox, "question",
+        staticmethod(lambda *a, **k: QtWidgets.QMessageBox.StandardButton.Yes),
+    )
+    panel._delete_item("run", "r1", "Run …")
+    assert not any(r.id == "r1" for r in svc.project.workspace.runs)
+
+
 def test_runs_appear_under_their_analysis_newest_first():
     _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     from quino.domain.workspace import Run

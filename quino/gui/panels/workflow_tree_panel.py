@@ -593,6 +593,8 @@ class WorkflowTreePanel(QtWidgets.QWidget):
                 menu.addSeparator()
                 menu.addAction("Rename", lambda: self._action_rename(kind, obj_id))
                 menu.addAction("Delete", lambda: self._delete_item(kind, obj_id, item.text(0)))
+            elif kind == "run":
+                menu.addAction("Delete Run", lambda: self._delete_item(kind, obj_id, item.text(0)))
         if not menu.isEmpty():
             menu.exec(self._tree.mapToGlobal(pos))
 
@@ -744,4 +746,11 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             self.app_service.workspace.delete_pose(obj_id)
         elif kind == "analysis":
             self.app_service.workspace.delete_analysis(obj_id)
+        elif kind == "run":
+            from quino.services.run_invalidation import delete_run
+            project_dir = getattr(self.app_service, "current_project_path", None)
+            if project_dir is not None:
+                from pathlib import Path
+                project_dir = Path(project_dir).parent if Path(project_dir).is_file() else Path(project_dir)
+            delete_run(self.app_service.project.workspace, project_dir, obj_id)
         self.refresh()

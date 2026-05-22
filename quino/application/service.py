@@ -62,6 +62,7 @@ class ApplicationService:
         self.validation_service = ValidationService()
         self.json_mapper = JsonMapper()
         self.project: Project | None = None
+        self.current_project_path: Path | None = None
         self._undo_stack: list[Project] = []
         self._redo_stack: list[Project] = []
         self._in_operation = False
@@ -146,6 +147,8 @@ class ApplicationService:
         return self.project
 
     def load_project(self, path: str) -> Project:
+        from pathlib import Path
+        self.current_project_path = Path(path)
         self.project = self.json_mapper.load_file(path)
         if self.project is not None:
             version = getattr(self.project, "schema_version", "0.0.0")
@@ -184,8 +187,10 @@ class ApplicationService:
         self._structural_case_warning_acknowledged = True
 
     def save_project(self, path: str) -> None:
+        from pathlib import Path
         project = self._require_project()
         self.json_mapper.save_file(project, path)
+        self.current_project_path = Path(path)
 
     @property
     def display_project(self):
