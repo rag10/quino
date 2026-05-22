@@ -9,18 +9,16 @@ from quino.domain.workspace import (
     ArtifactRef,
     Baseline,
     Case,
-    CaseGroup,
+    DynamicConfig,
+    EquilibriumConfig,
+    KinematicConfig,
     MetricDefinition,
     ParameterDescriptor,
     ResultRef,
     Run,
-    RunEntry,
     ScalarValue,
-    Study,
-    StudyConfig,
-    StudyMask,
-    StudyOverlay,
-    SweepParameter,
+    StaticConfig,
+    SweepDef,
     Tolerance,
     Workspace,
     WorkspacePose,
@@ -787,8 +785,7 @@ class JsonMapper:
             "cases": [self._case_to_dict(c) for c in workspace.cases],
             "poses": [self._workspace_pose_to_dict(p) for p in workspace.poses],
             "analyses": [self._analysis_to_dict(a) for a in workspace.analyses],
-            "case_groups": [self._case_group_to_dict(cg) for cg in workspace.case_groups],
-            "studies": [self._study_to_dict(s) for s in workspace.studies],
+
             "runs": [self._run_to_dict(r) for r in workspace.runs],
             "parameter_catalog": {
                 k: self._parameter_descriptor_to_dict(v) for k, v in workspace.parameter_catalog.items()
@@ -810,8 +807,7 @@ class JsonMapper:
             cases=[self._case_from_dict(c) for c in data.get("cases", [])],
             poses=[self._workspace_pose_from_dict(p) for p in data.get("poses", [])],
             analyses=[self._analysis_from_dict(a) for a in data.get("analyses", [])],
-            case_groups=[self._case_group_from_dict(cg) for cg in data.get("case_groups", [])],
-            studies=[self._study_from_dict(s) for s in data.get("studies", [])],
+
             runs=[self._run_from_dict(r) for r in data.get("runs", [])],
             parameter_catalog={
                 k: self._parameter_descriptor_from_dict(v)
@@ -1009,145 +1005,42 @@ class JsonMapper:
             "baseline_id": analysis.baseline_id,
             "case_id": analysis.case_id,
             "workspace_pose_id": analysis.workspace_pose_id,
-            "config": self._study_config_to_dict(analysis.config),
-            "metadata": analysis.metadata,
+            "config": self._analysis_config_to_dict(analysis.analysis_type, analysis.config),
+            "metadata": dict(analysis.metadata),
         }
 
+    def _analysis_config_to_dict(self, kind: str, cfg) -> dict:
+        from dataclasses import asdict
+        return asdict(cfg)
+
     def _analysis_from_dict(self, data: dict) -> Analysis:
+        kind = data.get("analysis_type", "dynamic")
+        cfg = self._analysis_config_from_dict(kind, data.get("config") or {})
         return Analysis(
             id=data["id"],
             name=data["name"],
-            analysis_type=data.get("analysis_type", "dynamic"),
+            analysis_type=kind,
             baseline_id=data.get("baseline_id"),
             case_id=data.get("case_id"),
             workspace_pose_id=data.get("workspace_pose_id"),
-            config=self._study_config_from_dict(data.get("config", {})),
-            metadata=data.get("metadata", {}),
+            config=cfg,
+            metadata=dict(data.get("metadata", {})),
         )
 
-    def _sweep_parameter_to_dict(self, sp: SweepParameter) -> dict:
-        return {
-            "parameter_path": sp.parameter_path,
-            "values": [self._scalar_value_to_dict(v) for v in sp.values],
-        }
-
-    def _sweep_parameter_from_dict(self, data: dict) -> SweepParameter:
-        return SweepParameter(
-            parameter_path=data["parameter_path"],
-            values=[
-                self._scalar_value_from_dict(v) for v in data.get("values", [])
-            ],
-        )
-
-    def _case_group_to_dict(self, cg: CaseGroup) -> dict:
-        return {
-            "id": cg.id,
-            "name": cg.name,
-            "baseline_id": cg.baseline_id,
-            "sweep_parameters": [
-                self._sweep_parameter_to_dict(sp) for sp in cg.sweep_parameters
-            ],
-            "generated_case_ids": cg.generated_case_ids,
-        }
-
-    def _case_group_from_dict(self, data: dict) -> CaseGroup:
-        return CaseGroup(
-            id=data["id"],
-            name=data["name"],
-            baseline_id=data.get("baseline_id", ""),
-            sweep_parameters=[
-                self._sweep_parameter_from_dict(sp)
-                for sp in data.get("sweep_parameters", [])
-            ],
-            generated_case_ids=data.get("generated_case_ids", []),
-        )
-
-    def _study_config_to_dict(self, config: StudyConfig) -> dict:
-        return {
-            "duration": config.duration,
-            "steps": config.steps,
-            "translation_driver_mode": config.translation_driver_mode,
-            "solver_settings": config.solver_settings,
-        }
-
-    def _study_config_from_dict(self, data: dict) -> StudyConfig:
-        return StudyConfig(
-            duration=data.get("duration", 1.0),
-            steps=data.get("steps", 100),
-            translation_driver_mode=data.get("translation_driver_mode", "constraint"),
-            solver_settings=data.get("solver_settings", {}),
-        )
-
-    def _study_mask_to_dict(self, mask: StudyMask) -> dict:
-        return {
-            "include_cases": mask.include_cases,
-            "exclude_cases": mask.exclude_cases,
-            "include_baseline": mask.include_baseline,
-        }
-
-    def _study_mask_from_dict(self, data: dict) -> StudyMask:
-        return StudyMask(
-            include_cases=data.get("include_cases"),
-            exclude_cases=data.get("exclude_cases"),
-            include_baseline=data.get("include_baseline", True),
-        )
-
-    def _study_overlay_to_dict(self, overlay: StudyOverlay | None) -> dict | None:
-        if overlay is None:
-            return None
-        result: dict = {
-            "parameter_overrides": {
-                k: self._scalar_value_to_dict(v)
-                for k, v in overlay.parameter_overrides.items()
-            },
-        }
-        if overlay.block_diagram_overlay is not None:
-            result["block_diagram_overlay"] = self._block_diagram_to_dict(
-                overlay.block_diagram_overlay
-            )
-        return result
-
-    def _study_overlay_from_dict(self, data: dict | None) -> StudyOverlay | None:
-        if data is None:
-            return None
-        return StudyOverlay(
-            parameter_overrides={
-                k: self._scalar_value_from_dict(v)
-                for k, v in data.get("parameter_overrides", {}).items()
-            },
-            block_diagram_overlay=self._block_diagram_from_dict(
-                data.get("block_diagram_overlay")
-            ),
-        )
-
-    def _study_to_dict(self, study: Study) -> dict:
-        result: dict = {
-            "id": study.id,
-            "name": study.name,
-            "study_type": study.study_type,
-            "config": self._study_config_to_dict(study.config),
-            "variable_values": {
-                k: self._scalar_value_to_dict(v) for k, v in study.variable_values.items()
-            },
-            "mask": self._study_mask_to_dict(study.mask),
-        }
-        if study.overlay is not None:
-            result["overlay"] = self._study_overlay_to_dict(study.overlay)
-        return result
-
-    def _study_from_dict(self, data: dict) -> Study:
-        return Study(
-            id=data["id"],
-            name=data["name"],
-            study_type=data.get("study_type", "dynamic"),
-            config=self._study_config_from_dict(data.get("config", {})),
-            variable_values={
-                k: self._scalar_value_from_dict(v)
-                for k, v in data.get("variable_values", {}).items()
-            },
-            mask=self._study_mask_from_dict(data.get("mask", {})),
-            overlay=self._study_overlay_from_dict(data.get("overlay")),
-        )
+    def _analysis_config_from_dict(self, kind: str, data: dict):
+        if kind == "dynamic":
+            return DynamicConfig(**{k: v for k, v in data.items()
+                                     if k in {"duration", "steps", "dt", "integrator", "solver_settings"}})
+        if kind == "kinematic":
+            sweeps = [SweepDef(**s) for s in data.get("sweeps", [])]
+            return KinematicConfig(sweeps=sweeps, allow_failed_steps=data.get("allow_failed_steps", True))
+        if kind == "static":
+            return StaticConfig(**{k: v for k, v in data.items()
+                                    if k in {"gravity_enabled", "tolerance", "report_reactions", "report_spring_energy"}})
+        if kind == "equilibrium":
+            return EquilibriumConfig(**{k: v for k, v in data.items()
+                                         if k in {"gravity_enabled", "initial_perturbations", "stability_check", "pose_match_tolerance"}})
+        raise ValueError(f"Unknown analysis_type {kind!r}")
 
     def _result_ref_to_dict(self, ref: ResultRef) -> dict:
         return {
@@ -1179,61 +1072,38 @@ class JsonMapper:
             metadata=data.get("metadata", {}),
         )
 
-    def _run_entry_to_dict(self, entry: RunEntry) -> dict:
-        result: dict = {
-            "id": entry.id,
-            "scope": entry.scope,
-            "baseline_id": entry.baseline_id,
-            "case_id": entry.case_id,
-            "status": entry.status,
-            "fingerprint": entry.fingerprint,
-            "stale_reasons": entry.stale_reasons,
-            "started_at": entry.started_at,
-            "finished_at": entry.finished_at,
-            "updated_at": entry.updated_at,
-            "artifacts": [self._artifact_ref_to_dict(a) for a in entry.artifacts],
-            "metrics": entry.metrics,
-            "error_message": entry.error_message,
-        }
-        if entry.result_ref is not None:
-            result["result_ref"] = self._result_ref_to_dict(entry.result_ref)
-        return result
-
-    def _run_entry_from_dict(self, data: dict) -> RunEntry:
-        ref_data = data.get("result_ref")
-        return RunEntry(
-            id=data["id"],
-            scope=data["scope"],
-            baseline_id=data.get("baseline_id"),
-            case_id=data.get("case_id"),
-            status=data.get("status", "not_run"),
-            fingerprint=data.get("fingerprint", ""),
-            stale_reasons=data.get("stale_reasons", []),
-            started_at=data.get("started_at"),
-            finished_at=data.get("finished_at"),
-            updated_at=data.get("updated_at"),
-            result_ref=self._result_ref_from_dict(ref_data) if ref_data else None,
-            artifacts=[self._artifact_ref_from_dict(a) for a in data.get("artifacts", [])],
-            metrics=data.get("metrics", {}),
-            error_message=data.get("error_message", ""),
-        )
-
     def _run_to_dict(self, run: Run) -> dict:
-        return {
+        out: dict[str, Any] = {
             "id": run.id,
-            "study_id": run.study_id,
-            "created_at": run.created_at,
             "analysis_id": run.analysis_id,
+            "created_at": run.created_at,
+            "finished_at": run.finished_at,
             "status": run.status,
-            "entries": [self._run_entry_to_dict(e) for e in run.entries],
+            "note": run.note,
+            "metrics": dict(run.metrics),
+            "warnings": list(run.warnings),
+            "error_message": run.error_message,
+            "config_snapshot": dict(run.config_snapshot),
         }
+        if run.result_ref is not None:
+            out["result_ref"] = self._result_ref_to_dict(run.result_ref)
+        if run.artifacts:
+            out["artifacts"] = [self._artifact_ref_to_dict(a) for a in run.artifacts]
+        return out
 
     def _run_from_dict(self, data: dict) -> Run:
         return Run(
             id=data["id"],
-            study_id=data.get("study_id"),
+            analysis_id=data["analysis_id"],
             created_at=data["created_at"],
-            analysis_id=data.get("analysis_id"),
-            status=data.get("status", "not_run"),
-            entries=[self._run_entry_from_dict(e) for e in data.get("entries", [])],
+            finished_at=data.get("finished_at"),
+            status=data.get("status", "to_be_run"),
+            note=data.get("note", ""),
+            result_ref=(self._result_ref_from_dict(data["result_ref"])
+                        if data.get("result_ref") else None),
+            artifacts=[self._artifact_ref_from_dict(a) for a in data.get("artifacts", [])],
+            metrics=dict(data.get("metrics", {})),
+            warnings=list(data.get("warnings", [])),
+            error_message=data.get("error_message", ""),
+            config_snapshot=dict(data.get("config_snapshot", {})),
         )

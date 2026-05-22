@@ -19,7 +19,7 @@ from quino.domain.model import (
     Slider,
     Spring,
 )
-from quino.domain.workspace import Case, ScalarValue, Study, StudyOverlay
+from quino.domain.workspace import Case, ScalarValue
 from quino.services.workspace_catalog import build_parameter_catalog
 
 
@@ -55,18 +55,16 @@ def _block_connections_view(project: Project) -> list:
     return project.model.control_graph.connections
 
 
-def compose_project(base: Project, study: Study | None = None, case: Case | None = None) -> Project:
+def compose_project(base: Project, case: Case | None = None) -> Project:
     """Return a deep-copied Project with structural deltas and parameter overrides applied.
 
     Override priority (lowest to highest):
     1. Project base
     2. Case structural deltas (remove / add / reference overrides)
     3. Case.invariant_values
-    4. Study.variable_values
-    5. StudyOverlay.parameter_overrides
     """
     composed = copy.deepcopy(base)
-    _validate_workspace_override_scope(base, study, case)
+    _validate_workspace_override_scope(base, case)
 
     if case is not None:
         for inherited_case in _resolve_case_chain(base, case):
@@ -74,18 +72,10 @@ def compose_project(base: Project, study: Study | None = None, case: Case | None
             for path, scalar in inherited_case.invariant_values.items():
                 _apply_parameter_override(composed, path, scalar)
 
-    if study is not None:
-        for path, scalar in study.variable_values.items():
-            _apply_parameter_override(composed, path, scalar)
-
-        if study.overlay is not None:
-            for path, scalar in study.overlay.parameter_overrides.items():
-                _apply_parameter_override(composed, path, scalar)
-
     return composed
 
 
-def _validate_workspace_override_scope(base: Project, study: Study | None, case: Case | None) -> None:
+def _validate_workspace_override_scope(base: Project, case: Case | None) -> None:
     workspace = base.workspace
     if workspace is None:
         return
@@ -113,16 +103,6 @@ def _validate_workspace_override_scope(base: Project, study: Study | None, case:
                 "Case modifies non-invariant parameters: " + ", ".join(sorted(bad_case_paths))
             )
 
-    if study is not None:
-        bad_study_paths = [
-            path for path in study.variable_values
-            if not _is_variable_path(path, catalog, baseline_invariant_keys)
-        ]
-        if bad_study_paths:
-            raise ValueError(
-                "Study modifies non-variable parameters: " + ", ".join(sorted(bad_study_paths))
-            )
-
 
 def _is_invariant_path(
     path: str,
@@ -135,19 +115,6 @@ def _is_invariant_path(
     if descriptor is None:
         return True
     return getattr(descriptor, "tag", "invariant") == "invariant"
-
-
-def _is_variable_path(
-    path: str,
-    catalog: dict[str, object],
-    baseline_invariant_keys: set[str],
-) -> bool:
-    if path in baseline_invariant_keys:
-        return False
-    descriptor = catalog.get(path)
-    if descriptor is None:
-        return True
-    return getattr(descriptor, "tag", "invariant") == "variable"
 
 
 # ------------------------------------------------------------------

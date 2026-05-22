@@ -6,7 +6,7 @@ from quino import ApplicationService, MarkerInput
 from quino.domain.blocks import BlockDiagram, BlockInstance
 from quino.domain.model import SpringEndpoint
 from quino.domain.types import SpringEndpointKind
-from quino.domain.workspace import Case, ScalarValue, Study, Workspace
+from quino.domain.workspace import Case, ScalarValue, Workspace
 from quino.services.workspace_catalog import build_parameter_catalog
 from quino.services.workspace_composition import compose_project
 
@@ -50,53 +50,3 @@ def test_build_parameter_catalog_derives_paths_and_tags() -> None:
     assert "block_diagram/instances/pid_001/parameters/kp" in catalog
 
 
-def test_compose_project_rejects_case_override_on_variable_path() -> None:
-    app = ApplicationService()
-    base = app.new_project("Base")
-    param_id = app.create_parameter("L1", "120 mm", "mm")
-    base.model.control_graph = BlockDiagram(
-        instances={
-            "pid_001": BlockInstance(
-                instance_id="pid_001",
-                block_type="PID",
-                parameters={"kp": 1.0},
-            )
-        },
-        connections=[],
-    )
-    base.workspace = Workspace()
-
-    study = Study(id="s1", name="Study")
-    case = Case(
-        id="c1",
-        name="Case1",
-        invariant_values={"model/control_graph/instances/pid_001/parameters/kp": ScalarValue(5.0, "")},
-    )
-
-    with pytest.raises(ValueError, match="non-invariant"):
-        compose_project(base, study, case)
-
-    # sanity: invariant project parameters still work
-    ok_case = Case(
-        id="c2",
-        name="Case2",
-        invariant_values={f"parameters/{param_id}": ScalarValue(200.0, "mm")},
-    )
-    composed = compose_project(base, study, ok_case)
-    assert composed.parameters[0].expression == "200 mm"
-
-
-def test_compose_project_rejects_study_override_on_invariant_path() -> None:
-    app = ApplicationService()
-    base = app.new_project("Base")
-    param_id = app.create_parameter("L1", "120 mm", "mm")
-    base.workspace = Workspace()
-
-    study = Study(
-        id="s1",
-        name="Study",
-        variable_values={f"parameters/{param_id}": ScalarValue(300.0, "mm")},
-    )
-
-    with pytest.raises(ValueError, match="non-variable"):
-        compose_project(base, study, None)

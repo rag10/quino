@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from quino.domain.workspace import Analysis, Case, Run, RunEntry, Workspace
+from quino.domain.workspace import Analysis, Case, Run, Workspace
 from quino.services.workspace_staleness import mark_descendants_stale
 
 
@@ -17,29 +17,26 @@ def test_mark_descendants_stale_single_child() -> None:
         runs=[
             Run(
                 id="r1",
-                study_id=None,
                 analysis_id="a1",
                 created_at="2026-05-19T10:00:00Z",
-                entries=[RunEntry(id="e1", scope="case", case_id="c1", status="ok")],
+                status="ok",
             ),
             Run(
                 id="r2",
-                study_id=None,
                 analysis_id="a2",
                 created_at="2026-05-19T10:00:00Z",
-                entries=[RunEntry(id="e2", scope="case", case_id="c2", status="ok")],
+                status="ok",
             ),
         ],
     )
 
     count = mark_descendants_stale(workspace, "c1")
 
-    # Both c1 and c2 (descendant of c1) should have stale entries
-    assert workspace.runs[0].entries[0].status == "stale"
-    assert workspace.runs[1].entries[0].status == "stale"
+    assert workspace.runs[0].status == "stale"
+    assert workspace.runs[1].status == "stale"
     assert count == 2
-    assert "ancestor edited" in workspace.runs[0].entries[0].stale_reasons
-    assert "ancestor edited" in workspace.runs[1].entries[0].stale_reasons
+    assert "ancestor edited" in workspace.runs[0].warnings
+    assert "ancestor edited" in workspace.runs[1].warnings
 
 
 def test_mark_descendants_stale_nested_hierarchy() -> None:
@@ -60,42 +57,37 @@ def test_mark_descendants_stale_nested_hierarchy() -> None:
         runs=[
             Run(
                 id="r1",
-                study_id=None,
                 analysis_id="a1",
                 created_at="2026-05-19T10:00:00Z",
-                entries=[RunEntry(id="e1", scope="case", case_id="c1", status="ok")],
+                status="ok",
             ),
             Run(
                 id="r2",
-                study_id=None,
                 analysis_id="a2",
                 created_at="2026-05-19T10:00:00Z",
-                entries=[RunEntry(id="e2", scope="case", case_id="c2", status="ok")],
+                status="ok",
             ),
             Run(
                 id="r3",
-                study_id=None,
                 analysis_id="a3",
                 created_at="2026-05-19T10:00:00Z",
-                entries=[RunEntry(id="e3", scope="case", case_id="c3", status="ok")],
+                status="ok",
             ),
             Run(
                 id="r4",
-                study_id=None,
                 analysis_id="a4",
                 created_at="2026-05-19T10:00:00Z",
-                entries=[RunEntry(id="e4", scope="case", case_id="c4", status="ok")],
+                status="ok",
             ),
         ],
     )
 
     count = mark_descendants_stale(workspace, "c2")
 
-    # c1 (parent) should NOT be stale, c2 and c3 (descendants) should be
-    assert workspace.runs[0].entries[0].status == "ok"
-    assert workspace.runs[1].entries[0].status == "stale"
-    assert workspace.runs[2].entries[0].status == "stale"
-    assert workspace.runs[3].entries[0].status == "ok"
+    assert workspace.runs[0].status == "ok"
+    assert workspace.runs[1].status == "stale"
+    assert workspace.runs[2].status == "stale"
+    assert workspace.runs[3].status == "ok"
     assert count == 2
 
 
@@ -114,31 +106,28 @@ def test_mark_descendants_stale_sibling_unaffected() -> None:
         runs=[
             Run(
                 id="r2",
-                study_id=None,
                 analysis_id="a2",
                 created_at="2026-05-19T10:00:00Z",
-                entries=[RunEntry(id="e2", scope="case", case_id="c2", status="ok")],
+                status="ok",
             ),
             Run(
                 id="r3",
-                study_id=None,
                 analysis_id="a3",
                 created_at="2026-05-19T10:00:00Z",
-                entries=[RunEntry(id="e3", scope="case", case_id="c3", status="ok")],
+                status="ok",
             ),
         ],
     )
 
     count = mark_descendants_stale(workspace, "c2")
 
-    # Only c2 and its descendants should be stale; c3 (sibling) should not
-    assert workspace.runs[0].entries[0].status == "stale"
-    assert workspace.runs[1].entries[0].status == "ok"
+    assert workspace.runs[0].status == "stale"
+    assert workspace.runs[1].status == "ok"
     assert count == 1
 
 
 def test_mark_descendants_stale_respects_running() -> None:
-    """Test that running entries are not marked as stale."""
+    """Test that running runs are not marked as stale."""
     c1 = Case(id="c1", name="Parent")
     c2 = Case(id="c2", name="Child", parent_case_id="c1")
 
@@ -151,31 +140,28 @@ def test_mark_descendants_stale_respects_running() -> None:
         runs=[
             Run(
                 id="r1",
-                study_id=None,
                 analysis_id="a1",
                 created_at="2026-05-19T10:00:00Z",
-                entries=[RunEntry(id="e1", scope="case", case_id="c1", status="ok")],
+                status="ok",
             ),
             Run(
                 id="r2",
-                study_id=None,
                 analysis_id="a2",
                 created_at="2026-05-19T10:00:00Z",
-                entries=[RunEntry(id="e2", scope="case", case_id="c2", status="running")],
+                status="running",
             ),
         ],
     )
 
     count = mark_descendants_stale(workspace, "c1")
 
-    # ok entry should be stale, running should stay running
-    assert workspace.runs[0].entries[0].status == "stale"
-    assert workspace.runs[1].entries[0].status == "running"
+    assert workspace.runs[0].status == "stale"
+    assert workspace.runs[1].status == "running"
     assert count == 1
 
 
-def test_mark_descendants_stale_multiple_entries_per_run() -> None:
-    """Test handling multiple entries in a single run."""
+def test_mark_descendants_stale_multiple_runs() -> None:
+    """Test handling multiple runs for the same analysis."""
     c1 = Case(id="c1", name="Parent")
     c2 = Case(id="c2", name="Child", parent_case_id="c1")
 
@@ -187,24 +173,30 @@ def test_mark_descendants_stale_multiple_entries_per_run() -> None:
         runs=[
             Run(
                 id="r1",
-                study_id=None,
                 analysis_id="a2",
                 created_at="2026-05-19T10:00:00Z",
-                entries=[
-                    RunEntry(id="e1", scope="case", case_id="c2", status="ok"),
-                    RunEntry(id="e2", scope="case", case_id="c2", status="ok"),
-                    RunEntry(id="e3", scope="case", case_id="c2", status="running"),
-                ],
+                status="ok",
+            ),
+            Run(
+                id="r2",
+                analysis_id="a2",
+                created_at="2026-05-19T10:00:00Z",
+                status="ok",
+            ),
+            Run(
+                id="r3",
+                analysis_id="a2",
+                created_at="2026-05-19T10:00:00Z",
+                status="running",
             ),
         ],
     )
 
     count = mark_descendants_stale(workspace, "c1")
 
-    # First two should be stale, third should remain running
-    assert workspace.runs[0].entries[0].status == "stale"
-    assert workspace.runs[0].entries[1].status == "stale"
-    assert workspace.runs[0].entries[2].status == "running"
+    assert workspace.runs[0].status == "stale"
+    assert workspace.runs[1].status == "stale"
+    assert workspace.runs[2].status == "running"
     assert count == 2
 
 
@@ -218,7 +210,7 @@ def test_mark_descendants_stale_empty_workspace() -> None:
 
 
 def test_mark_descendants_stale_already_stale() -> None:
-    """Test that already stale entries don't get reason duplicated."""
+    """Test that already stale runs don't get reason duplicated."""
     c1 = Case(id="c1", name="Parent")
 
     a1 = Analysis(id="a1", name="A1", case_id="c1")
@@ -229,26 +221,16 @@ def test_mark_descendants_stale_already_stale() -> None:
         runs=[
             Run(
                 id="r1",
-                study_id=None,
                 analysis_id="a1",
                 created_at="2026-05-19T10:00:00Z",
-                entries=[
-                    RunEntry(
-                        id="e1",
-                        scope="case",
-                        case_id="c1",
-                        status="stale",
-                        stale_reasons=["ancestor edited"]
-                    )
-                ],
+                status="stale",
+                warnings=["ancestor edited"],
             ),
         ],
     )
 
     count = mark_descendants_stale(workspace, "c1")
 
-    # Should still be stale, no change
-    assert workspace.runs[0].entries[0].status == "stale"
-    # Reason should not be duplicated
-    assert workspace.runs[0].entries[0].stale_reasons.count("ancestor edited") == 1
-    assert count == 0  # No entries flipped from "ok" to "stale"
+    assert workspace.runs[0].status == "stale"
+    assert workspace.runs[0].warnings.count("ancestor edited") == 1
+    assert count == 0

@@ -8,11 +8,7 @@ from quino.domain.workspace import (
     Analysis,
     Baseline,
     Case,
-    CaseGroup,
     Run,
-    Study,
-    StudyConfig,
-    StudyMask,
     Workspace,
     WorkspacePose,
 )
@@ -21,10 +17,8 @@ from quino.services.workspace_invalidation import (
     invalidate_on_baseline_change,
     invalidate_on_case_change,
     invalidate_on_pose_change,
-    invalidate_on_study_change,
 )
 from quino.services.workspace_catalog import build_parameter_catalog
-from quino.services.workspace_runner import run_study as _run_study
 from quino.services.workspace_runner import run_analysis as _run_analysis
 
 
@@ -308,7 +302,7 @@ class WorkspaceCommands:
         baseline_id: str | None = None,
         case_id: str | None = None,
         workspace_pose_id: str | None = None,
-        config: StudyConfig | None = None,
+        config=None,
     ) -> Analysis:
         # Every analysis must hang off a workspace pose.
         if workspace_pose_id is None:
@@ -324,7 +318,7 @@ class WorkspaceCommands:
             baseline_id=baseline_id,
             case_id=case_id,
             workspace_pose_id=workspace_pose_id,
-            config=config or StudyConfig(),
+            config=config,
         )
         self._ensure_workspace().analyses.append(analysis)
         return analysis
@@ -402,122 +396,6 @@ class WorkspaceCommands:
         ws = self._ensure_workspace()
         ws.selected_analysis_id = analysis_id
 
-    def update_case_invariants(self, case_id: str, invariants: dict[str, float | str]) -> None:
-        """Set invariant values on a case.
-
-        *invariants* is a dict of path → value. If value is a float, unit is
-        assumed empty; if a str, it is parsed as ``value unit``.
-        """
-        self._ctx.snapshot()
-        self.refresh_parameter_catalog()
-        case = self._find_case(case_id)
-        from quino.domain.workspace import ScalarValue
-
-        parsed: dict[str, ScalarValue] = {}
-        for path, value in invariants.items():
-            if isinstance(value, str):
-                parts = value.split()
-                if len(parts) == 2:
-                    parsed[path] = ScalarValue(float(parts[0]), parts[1])
-                else:
-                    parsed[path] = ScalarValue(float(parts[0]), "")
-            else:
-                parsed[path] = ScalarValue(float(value), "")
-        case.invariant_values = parsed
-        invalidate_on_case_change(self._project, case_id)
-
-    # --- case group --------------------------------------------------------
-
-    def create_case_group(self, name: str, baseline_id: str) -> CaseGroup:
-        self._ctx.snapshot()
-        cg = CaseGroup(id=self._next_id("casegroup"), name=name, baseline_id=baseline_id)
-        self._ensure_workspace().case_groups.append(cg)
-        return cg
-
-    def rename_case_group(self, case_group_id: str, name: str) -> None:
-        self._ctx.snapshot()
-        cg = self._find_case_group(case_group_id)
-        cg.name = name
-
-    def delete_case_group(self, case_group_id: str) -> None:
-        self._ctx.snapshot()
-        ws = self._ensure_workspace()
-        ws.case_groups = [cg for cg in ws.case_groups if cg.id != case_group_id]
-
-    # --- study -------------------------------------------------------------
-
-    def create_study(
-        self,
-        name: str,
-        study_type: str = "dynamic",
-        config: StudyConfig | None = None,
-        mask: StudyMask | None = None,
-    ) -> Study:
-        self._ctx.snapshot()
-        study = Study(
-            id=self._next_id("study"),
-            name=name,
-            study_type=study_type,
-            config=config or StudyConfig(),
-            mask=mask or StudyMask(),
-        )
-        self._ensure_workspace().studies.append(study)
-        return study
-
-    def rename_study(self, study_id: str, name: str) -> None:
-        self._ctx.snapshot()
-        study = self._find_study(study_id)
-        study.name = name
-        invalidate_on_study_change(self._project, study_id)
-
-    def delete_study(self, study_id: str) -> None:
-        self._ctx.snapshot()
-        ws = self._ensure_workspace()
-        ws.studies = [s for s in ws.studies if s.id != study_id]
-        invalidate_on_study_change(self._project, study_id)
-
-    def update_study_config(self, study_id: str, config: StudyConfig) -> None:
-        self._ctx.snapshot()
-        study = self._find_study(study_id)
-        study.config = config
-        invalidate_on_study_change(self._project, study_id)
-
-    def update_study_variables(self, study_id: str, values: dict[str, float | str]) -> None:
-        self._ctx.snapshot()
-        self.refresh_parameter_catalog()
-        study = self._find_study(study_id)
-        from quino.domain.workspace import ScalarValue
-
-        parsed: dict[str, ScalarValue] = {}
-        for path, value in values.items():
-            if isinstance(value, str):
-                parts = value.split()
-                if len(parts) == 2:
-                    parsed[path] = ScalarValue(float(parts[0]), parts[1])
-                else:
-                    parsed[path] = ScalarValue(float(parts[0]), "")
-            else:
-                parsed[path] = ScalarValue(float(value), "")
-        study.variable_values = parsed
-        invalidate_on_study_change(self._project, study_id)
-
-    def run_study(
-        self,
-        study_id: str,
-        simulation_runner,
-        project_dir: Path | None = None,
-        progress_callback: Callable[[int, int], None] | None = None,
-    ) -> Run:
-        self._ctx.snapshot()
-        run = _run_study(
-            self._project,
-            study_id,
-            simulation_runner,
-            project_dir=project_dir,
-            progress_callback=progress_callback,
-        )
-        return run
-
     def run_analysis(
         self,
         analysis_id: str,
@@ -545,18 +423,6 @@ class WorkspaceCommands:
             if c.id == case_id:
                 return c
         raise ValueError(f"Case {case_id!r} not found")
-
-    def _find_case_group(self, case_group_id: str) -> CaseGroup:
-        for cg in self._ensure_workspace().case_groups:
-            if cg.id == case_group_id:
-                return cg
-        raise ValueError(f"CaseGroup {case_group_id!r} not found")
-
-    def _find_study(self, study_id: str) -> Study:
-        for s in self._ensure_workspace().studies:
-            if s.id == study_id:
-                return s
-        raise ValueError(f"Study {study_id!r} not found")
 
     def _find_pose(self, workspace_pose_id: str) -> WorkspacePose:
         for pose in self._ensure_workspace().poses:

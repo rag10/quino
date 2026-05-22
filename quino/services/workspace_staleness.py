@@ -7,7 +7,7 @@ def mark_descendants_stale(workspace: Workspace, root_id: str) -> int:
     """Mark all analyses under root (case) and descendant cases as stale.
 
     Traverses the case hierarchy starting from root_id and finds all descendant
-    cases. For each descendant case, marks all run entries belonging to its analyses
+    cases. For each descendant case, marks all runs belonging to its analyses
     as "stale" (if they were "ok").
 
     Args:
@@ -15,7 +15,7 @@ def mark_descendants_stale(workspace: Workspace, root_id: str) -> int:
         root_id: The ID of the case to start from (must be a case ID).
 
     Returns:
-        The number of RunEntry instances flipped from "ok" to "stale".
+        The number of Run instances flipped from "ok" to "stale".
     """
     affected_case_ids = _collect_descendant_case_ids(workspace, root_id)
     affected_analyses = [
@@ -28,13 +28,11 @@ def mark_descendants_stale(workspace: Workspace, root_id: str) -> int:
     for run in workspace.runs:
         if run.analysis_id not in affected_analysis_ids:
             continue
-        for entry in run.entries:
-            if entry.status == "ok":
-                entry.status = "stale"
-                # Add stale reason if it's not already there
-                if "ancestor edited" not in entry.stale_reasons:
-                    entry.stale_reasons.append("ancestor edited")
-                count += 1
+        if run.status == "ok":
+            run.status = "stale"
+            if "ancestor edited" not in run.warnings:
+                run.warnings.append("ancestor edited")
+            count += 1
     return count
 
 

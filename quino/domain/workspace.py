@@ -126,53 +126,6 @@ class Case:
 
 
 @dataclass(slots=True)
-class SweepParameter:
-    parameter_path: str
-    values: list[ScalarValue] = field(default_factory=list)
-
-
-@dataclass(slots=True)
-class CaseGroup:
-    id: str
-    name: str
-    baseline_id: str = ""
-    sweep_parameters: list[SweepParameter] = field(default_factory=list)
-    generated_case_ids: list[str] = field(default_factory=list)
-
-
-@dataclass(slots=True)
-class StudyConfig:
-    duration: float = 1.0
-    steps: int = 100
-    translation_driver_mode: str = "constraint"
-    solver_settings: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class StudyMask:
-    include_cases: list[str] | None = None
-    exclude_cases: list[str] | None = None
-    include_baseline: bool = True
-
-
-@dataclass(slots=True)
-class StudyOverlay:
-    parameter_overrides: dict[str, ScalarValue] = field(default_factory=dict)
-    block_diagram_overlay: "BlockDiagram | None" = None  # type: ignore[name-defined]
-
-
-@dataclass(slots=True)
-class Study:
-    id: str
-    name: str
-    study_type: str = "dynamic"
-    config: StudyConfig = field(default_factory=StudyConfig)
-    variable_values: dict[str, ScalarValue] = field(default_factory=dict)
-    mask: StudyMask = field(default_factory=StudyMask)
-    overlay: StudyOverlay | None = None
-
-
-@dataclass(slots=True)
 class WorkspacePose:
     id: str
     name: str
@@ -230,32 +183,27 @@ class ArtifactRef:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(slots=True)
-class RunEntry:
-    id: str
-    scope: str  # "baseline" | "case"
-    baseline_id: str | None = None
-    case_id: str | None = None
-    status: str = "not_run"  # "not_run" | "running" | "ok" | "failed" | "stale"
-    fingerprint: str = ""
-    stale_reasons: list[str] = field(default_factory=list)
-    started_at: str | None = None
-    finished_at: str | None = None
-    updated_at: str | None = None
-    result_ref: ResultRef | None = None
-    artifacts: list[ArtifactRef] = field(default_factory=list)
-    metrics: dict[str, float] = field(default_factory=dict)
-    error_message: str = ""
+_RUN_STATUSES = {"to_be_run", "queued", "running", "ok", "partial", "failed", "stale"}
 
 
 @dataclass(slots=True)
 class Run:
     id: str
-    study_id: str | None
+    analysis_id: str
     created_at: str
-    analysis_id: str | None = None
-    status: str = "not_run"  # "running" | "completed" | "failed" | "cancelled"
-    entries: list[RunEntry] = field(default_factory=list)
+    finished_at: str | None = None
+    status: str = "to_be_run"
+    note: str = ""
+    result_ref: ResultRef | None = None
+    artifacts: list[ArtifactRef] = field(default_factory=list)
+    metrics: dict[str, float] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+    error_message: str = ""
+    config_snapshot: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.status not in _RUN_STATUSES:
+            raise ValueError(f"Run status {self.status!r} is not allowed")
 
 
 @dataclass(slots=True)
@@ -268,8 +216,6 @@ class Workspace:
     cases: list[Case] = field(default_factory=list)
     poses: list[WorkspacePose] = field(default_factory=list)
     analyses: list[Analysis] = field(default_factory=list)
-    case_groups: list[CaseGroup] = field(default_factory=list)
-    studies: list[Study] = field(default_factory=list)
     runs: list[Run] = field(default_factory=list)
     parameter_catalog: dict[str, ParameterDescriptor] = field(default_factory=dict)
     model_snapshots: dict[str, str] = field(default_factory=dict)
@@ -286,8 +232,6 @@ class Workspace:
             and not self.cases
             and not self.poses
             and not self.analyses
-            and not self.case_groups
-            and not self.studies
             and not self.runs
             and not self.parameter_catalog
             and not self.model_snapshots

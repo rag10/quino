@@ -7,10 +7,6 @@ from quino.domain.workspace import (
     Analysis,
     Baseline,
     Case,
-    CaseGroup,
-    Study,
-    StudyConfig,
-    StudyMask,
     WorkspacePose,
 )
 
@@ -84,24 +80,6 @@ def test_workspace_rename_and_delete_pose_and_analysis() -> None:
     assert not any(p.id == pose.id for p in app.project.workspace.poses)
 
 
-def test_workspace_create_study() -> None:
-    app = ApplicationService()
-    app.new_project("Test")
-    study = app.workspace.create_study("Dynamic Sweep", study_type="dynamic")
-    assert isinstance(study, Study)
-    assert study.study_type == "dynamic"
-    assert study.config.duration == 1.0
-
-
-def test_workspace_create_study_with_config() -> None:
-    app = ApplicationService()
-    app.new_project("Test")
-    config = StudyConfig(duration=2.0, steps=200)
-    study = app.workspace.create_study("Sweep", config=config)
-    assert study.config.duration == 2.0
-    assert study.config.steps == 200
-
-
 def test_workspace_rename_baseline() -> None:
     app = ApplicationService()
     app.new_project("Test")
@@ -132,38 +110,4 @@ def test_workspace_update_case_invariants() -> None:
     assert updated.invariant_values["bodies/bar/mass"].value == 1.0
 
 
-def test_workspace_create_case_group() -> None:
-    app = ApplicationService()
-    app.new_project("Test")
-    cg = app.workspace.create_case_group("Sweep", baseline_id="b1")
-    assert isinstance(cg, CaseGroup)
-    assert cg.baseline_id == "b1"
 
-
-def test_workspace_update_study_config_invalidates() -> None:
-    app = ApplicationService()
-    app.new_project("Test")
-    study = app.workspace.create_study("Study1")
-    # Create a run manually to check invalidation
-    from quino.domain.workspace import Run, RunEntry
-
-    app.project.workspace.runs.append(
-        Run(
-            id="run_001",
-            study_id=study.id,
-            created_at="t",
-            entries=[RunEntry(id="e1", scope="baseline", status="ok")],
-        )
-    )
-    app.workspace.update_study_config(study.id, StudyConfig(duration=5.0))
-    assert app.project.workspace.runs[0].entries[0].status == "stale"
-
-
-def test_workspace_update_study_variables() -> None:
-    app = ApplicationService()
-    app.new_project("Test")
-    study = app.workspace.create_study("Study1")
-    app.workspace.update_study_variables(study.id, {"drivers/d1/law": "2.5 N"})
-    updated = app.project.workspace.studies[0]
-    assert updated.variable_values["drivers/d1/law"].value == 2.5
-    assert updated.variable_values["drivers/d1/law"].unit == "N"
