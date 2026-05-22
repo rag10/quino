@@ -381,7 +381,7 @@ def build_active_suspension(app: ApplicationService) -> None:
         "Smooth road @ 2.5 Hz",
         analysis_type="dynamic",
         baseline_id=baseline.id,
-        workspace_pose_id=None,
+        workspace_pose_id=static_pose_base.id,
     )
     app.workspace.create_analysis(
         "Smooth road under load",
@@ -428,10 +428,14 @@ def build_active_suspension(app: ApplicationService) -> None:
             f"parameters/{road_freq}": "6.0",
         },
     )
+    pothole_pose = app.workspace.create_pose(
+        "Static load - pothole", case_id=pothole_case.id,
+    )
     app.workspace.create_analysis(
         "Single pothole impact",
         analysis_type="dynamic",
         case_id=pothole_case.id,
+        workspace_pose_id=pothole_pose.id,
     )
 
     # --- Case 3: Resonance test ---------------------------------------
@@ -450,10 +454,14 @@ def build_active_suspension(app: ApplicationService) -> None:
             f"springs_meta/{spring_id}/damping": "300",
         },
     )
+    resonance_pose = app.workspace.create_pose(
+        "Static load - resonance", case_id=resonance_case.id,
+    )
     app.workspace.create_analysis(
         "Drive at natural frequency",
         analysis_type="dynamic",
         case_id=resonance_case.id,
+        workspace_pose_id=resonance_pose.id,
     )
 
     # --- Case 4: Active suspension (PID enabled, softer base) ----------
@@ -532,10 +540,14 @@ def build_active_suspension(app: ApplicationService) -> None:
             f"model/control_graph/instances/{pid_block}/parameters/kd": "0.0",
         },
     )
+    fail_pose = app.workspace.create_pose(
+        "Static load - failure", case_id=fail_case.id,
+    )
     app.workspace.create_analysis(
         "Failure on rough road",
         analysis_type="dynamic",
         case_id=fail_case.id,
+        workspace_pose_id=fail_pose.id,
     )
 
     # Default to the baseline view when the project opens.

@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.1.0",
+  "schema_version": "0.2.0",
   "project": {
     "id": "proj_001",
     "name": "Active Suspension Validation Rig",
@@ -1077,13 +1077,31 @@
     },
     {
       "id": "pose_003",
-      "name": "Settled (active)",
+      "name": "Static load - pothole",
       "body_poses": {},
       "metadata": {}
     },
     {
       "id": "pose_004",
+      "name": "Static load - resonance",
+      "body_poses": {},
+      "metadata": {}
+    },
+    {
+      "id": "pose_005",
+      "name": "Settled (active)",
+      "body_poses": {},
+      "metadata": {}
+    },
+    {
+      "id": "pose_006",
       "name": "Static load - heavy",
+      "body_poses": {},
+      "metadata": {}
+    },
+    {
+      "id": "pose_007",
+      "name": "Static load - failure",
       "body_poses": {},
       "metadata": {}
     }
@@ -1160,7 +1178,7 @@
         "metadata": {}
       },
       {
-        "id": "case_013",
+        "id": "case_014",
         "name": "Resonance sweep",
         "baseline_id": "baseline_001",
         "parent_case_id": null,
@@ -1182,7 +1200,7 @@
         "metadata": {}
       },
       {
-        "id": "case_016",
+        "id": "case_018",
         "name": "Active suspension",
         "baseline_id": "baseline_001",
         "parent_case_id": null,
@@ -1224,10 +1242,10 @@
         "metadata": {}
       },
       {
-        "id": "case_020",
+        "id": "case_022",
         "name": "Heavy passenger",
         "baseline_id": "baseline_001",
-        "parent_case_id": "case_016",
+        "parent_case_id": "case_018",
         "model_snapshot_id": null,
         "invariant_values": {
           "bodies/body_004/mass": {
@@ -1242,10 +1260,10 @@
         "metadata": {}
       },
       {
-        "id": "case_025",
+        "id": "case_027",
         "name": "Actuator failure",
         "baseline_id": "baseline_001",
-        "parent_case_id": "case_016",
+        "parent_case_id": "case_018",
         "model_snapshot_id": null,
         "invariant_values": {
           "model/control_graph/instances/blk_002/parameters/k": {
@@ -1334,38 +1352,10 @@
         }
       },
       {
-        "id": "wpose_014",
-        "name": "Pose default",
+        "id": "wpose_012",
+        "name": "Static load - pothole",
         "baseline_id": null,
-        "case_id": "case_013",
-        "project_pose_id": null,
-        "is_default": true,
-        "parent_pose_id": "wpose_002",
-        "requires_recompute": false,
-        "solve_failed": false,
-        "metadata": {
-          "solved_state": {}
-        }
-      },
-      {
-        "id": "wpose_017",
-        "name": "Pose default",
-        "baseline_id": null,
-        "case_id": "case_016",
-        "project_pose_id": null,
-        "is_default": true,
-        "parent_pose_id": "wpose_002",
-        "requires_recompute": false,
-        "solve_failed": false,
-        "metadata": {
-          "solved_state": {}
-        }
-      },
-      {
-        "id": "wpose_018",
-        "name": "Settled (active)",
-        "baseline_id": null,
-        "case_id": "case_016",
+        "case_id": "case_010",
         "project_pose_id": "pose_003",
         "is_default": false,
         "parent_pose_id": null,
@@ -1374,13 +1364,13 @@
         "metadata": {}
       },
       {
-        "id": "wpose_021",
+        "id": "wpose_015",
         "name": "Pose default",
         "baseline_id": null,
-        "case_id": "case_020",
+        "case_id": "case_014",
         "project_pose_id": null,
         "is_default": true,
-        "parent_pose_id": "wpose_017",
+        "parent_pose_id": "wpose_002",
         "requires_recompute": false,
         "solve_failed": false,
         "metadata": {
@@ -1388,10 +1378,10 @@
         }
       },
       {
-        "id": "wpose_022",
-        "name": "Static load - heavy",
+        "id": "wpose_016",
+        "name": "Static load - resonance",
         "baseline_id": null,
-        "case_id": "case_020",
+        "case_id": "case_014",
         "project_pose_id": "pose_004",
         "is_default": false,
         "parent_pose_id": null,
@@ -1400,18 +1390,82 @@
         "metadata": {}
       },
       {
-        "id": "wpose_026",
+        "id": "wpose_019",
         "name": "Pose default",
         "baseline_id": null,
-        "case_id": "case_025",
+        "case_id": "case_018",
         "project_pose_id": null,
         "is_default": true,
-        "parent_pose_id": "wpose_017",
+        "parent_pose_id": "wpose_002",
         "requires_recompute": false,
         "solve_failed": false,
         "metadata": {
           "solved_state": {}
         }
+      },
+      {
+        "id": "wpose_020",
+        "name": "Settled (active)",
+        "baseline_id": null,
+        "case_id": "case_018",
+        "project_pose_id": "pose_005",
+        "is_default": false,
+        "parent_pose_id": null,
+        "requires_recompute": true,
+        "solve_failed": false,
+        "metadata": {}
+      },
+      {
+        "id": "wpose_023",
+        "name": "Pose default",
+        "baseline_id": null,
+        "case_id": "case_022",
+        "project_pose_id": null,
+        "is_default": true,
+        "parent_pose_id": "wpose_019",
+        "requires_recompute": false,
+        "solve_failed": false,
+        "metadata": {
+          "solved_state": {}
+        }
+      },
+      {
+        "id": "wpose_024",
+        "name": "Static load - heavy",
+        "baseline_id": null,
+        "case_id": "case_022",
+        "project_pose_id": "pose_006",
+        "is_default": false,
+        "parent_pose_id": null,
+        "requires_recompute": true,
+        "solve_failed": false,
+        "metadata": {}
+      },
+      {
+        "id": "wpose_028",
+        "name": "Pose default",
+        "baseline_id": null,
+        "case_id": "case_027",
+        "project_pose_id": null,
+        "is_default": true,
+        "parent_pose_id": "wpose_019",
+        "requires_recompute": false,
+        "solve_failed": false,
+        "metadata": {
+          "solved_state": {}
+        }
+      },
+      {
+        "id": "wpose_029",
+        "name": "Static load - failure",
+        "baseline_id": null,
+        "case_id": "case_027",
+        "project_pose_id": "pose_007",
+        "is_default": false,
+        "parent_pose_id": null,
+        "requires_recompute": true,
+        "solve_failed": false,
+        "metadata": {}
       }
     ],
     "analyses": [
@@ -1421,11 +1475,12 @@
         "analysis_type": "dynamic",
         "baseline_id": "baseline_001",
         "case_id": null,
-        "workspace_pose_id": null,
+        "workspace_pose_id": "wpose_003",
         "config": {
           "duration": 1.0,
           "steps": 100,
-          "translation_driver_mode": "constraint",
+          "dt": 0.01,
+          "integrator": "implicit",
           "solver_settings": {}
         },
         "metadata": {}
@@ -1440,7 +1495,8 @@
         "config": {
           "duration": 1.0,
           "steps": 100,
-          "translation_driver_mode": "constraint",
+          "dt": 0.01,
+          "integrator": "implicit",
           "solver_settings": {}
         },
         "metadata": {}
@@ -1455,104 +1511,109 @@
         "config": {
           "duration": 1.0,
           "steps": 100,
-          "translation_driver_mode": "constraint",
+          "dt": 0.01,
+          "integrator": "implicit",
           "solver_settings": {}
         },
         "metadata": {}
       },
       {
-        "id": "analysis_012",
+        "id": "analysis_013",
         "name": "Single pothole impact",
         "analysis_type": "dynamic",
         "baseline_id": null,
         "case_id": "case_010",
-        "workspace_pose_id": null,
+        "workspace_pose_id": "wpose_012",
         "config": {
           "duration": 1.0,
           "steps": 100,
-          "translation_driver_mode": "constraint",
+          "dt": 0.01,
+          "integrator": "implicit",
           "solver_settings": {}
         },
         "metadata": {}
       },
       {
-        "id": "analysis_015",
+        "id": "analysis_017",
         "name": "Drive at natural frequency",
         "analysis_type": "dynamic",
         "baseline_id": null,
-        "case_id": "case_013",
-        "workspace_pose_id": null,
+        "case_id": "case_014",
+        "workspace_pose_id": "wpose_016",
         "config": {
           "duration": 1.0,
           "steps": 100,
-          "translation_driver_mode": "constraint",
+          "dt": 0.01,
+          "integrator": "implicit",
           "solver_settings": {}
         },
         "metadata": {}
       },
       {
-        "id": "analysis_019",
+        "id": "analysis_021",
         "name": "Comfort cruise (PID on)",
         "analysis_type": "dynamic",
         "baseline_id": null,
-        "case_id": "case_016",
-        "workspace_pose_id": "wpose_018",
+        "case_id": "case_018",
+        "workspace_pose_id": "wpose_020",
         "config": {
           "duration": 1.0,
           "steps": 100,
-          "translation_driver_mode": "constraint",
+          "dt": 0.01,
+          "integrator": "implicit",
           "solver_settings": {}
         },
         "metadata": {}
       },
       {
-        "id": "analysis_023",
+        "id": "analysis_025",
         "name": "Heavy comfort cruise",
         "analysis_type": "dynamic",
         "baseline_id": null,
-        "case_id": "case_020",
-        "workspace_pose_id": "wpose_022",
+        "case_id": "case_022",
+        "workspace_pose_id": "wpose_024",
         "config": {
           "duration": 1.0,
           "steps": 100,
-          "translation_driver_mode": "constraint",
+          "dt": 0.01,
+          "integrator": "implicit",
           "solver_settings": {}
         },
         "metadata": {}
       },
       {
-        "id": "analysis_024",
+        "id": "analysis_026",
         "name": "Heavy + pothole",
         "analysis_type": "dynamic",
         "baseline_id": null,
-        "case_id": "case_020",
-        "workspace_pose_id": "wpose_022",
+        "case_id": "case_022",
+        "workspace_pose_id": "wpose_024",
         "config": {
           "duration": 1.0,
           "steps": 100,
-          "translation_driver_mode": "constraint",
+          "dt": 0.01,
+          "integrator": "implicit",
           "solver_settings": {}
         },
         "metadata": {}
       },
       {
-        "id": "analysis_027",
+        "id": "analysis_030",
         "name": "Failure on rough road",
         "analysis_type": "dynamic",
         "baseline_id": null,
-        "case_id": "case_025",
-        "workspace_pose_id": null,
+        "case_id": "case_027",
+        "workspace_pose_id": "wpose_029",
         "config": {
           "duration": 1.0,
           "steps": 100,
-          "translation_driver_mode": "constraint",
+          "dt": 0.01,
+          "integrator": "implicit",
           "solver_settings": {}
         },
         "metadata": {}
       }
     ],
-    "case_groups": [],
-    "studies": [],
     "runs": [],
     "parameter_catalog": {
       "parameters/param_001": {
@@ -1958,6 +2019,6 @@
     },
     "model_snapshots": {},
     "promotion_history": [],
-    "next_sequence": 28
+    "next_sequence": 31
   }
 }
