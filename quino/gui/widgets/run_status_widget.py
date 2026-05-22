@@ -35,6 +35,19 @@ class RunStatusWidget(QtWidgets.QWidget):
         self._label.setText("Idle")
         self._cancel_btn.setEnabled(False)
 
+    def show_finished(self, status: str, label: str, error: str | None = None) -> None:
+        self._current_id = None
+        self._cancel_btn.setEnabled(False)
+        if status in {"ok", "partial"}:
+            self._label.setText(f"Finished ({status}): {label}")
+        elif status == "failed":
+            tooltip = f"Failed: {label}"
+            if error:
+                tooltip += f" — {error}"
+            self._label.setText(tooltip)
+        else:
+            self._label.setText("Idle")
+
     def _on_cancel(self) -> None:
         if self._current_id is not None:
             self.cancel_requested.emit(self._current_id)

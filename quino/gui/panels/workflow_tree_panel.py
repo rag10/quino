@@ -342,9 +342,59 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             p_item.setData(0, _OWNER_ROLE, ("case" if case_id else "baseline", case_id or baseline_id))
             self._item_map[pose.id] = p_item
             parent_item.addChild(p_item)
+            self._add_prescribe_items(p_item, pose)
             pose_analyses = [a for a in ws.analyses if a.workspace_pose_id == pose.id]
             for analysis in pose_analyses:
                 self._add_analysis_item(p_item, analysis)
+
+    def _add_prescribe_items(
+        self, pose_item: QtWidgets.QTreeWidgetItem, workspace_pose,
+    ) -> None:
+        """Show every prescribe attached to *workspace_pose* as a child node."""
+        if workspace_pose.is_default or workspace_pose.project_pose_id is None:
+            return
+        project = self.app_service.project
+        if project is None:
+            return
+        backing = next(
+            (p for p in project.poses if p.id == workspace_pose.project_pose_id), None
+        )
+        if backing is None:
+            return
+        raw_items = backing.metadata.values.get("pose_constraints", [])
+        if not isinstance(raw_items, list):
+            return
+        for entry in raw_items:
+            if not isinstance(entry, dict):
+                continue
+            key = entry.get("key")
+            constraint = entry.get("constraint", {})
+            if not isinstance(key, str) or not isinstance(constraint, dict):
+                continue
+            label = self._prescribe_label(constraint)
+            item = self._make_item(key, "prescribe", label)
+            item.setData(0, _OWNER_ROLE, ("pose", workspace_pose.id))
+            item.setForeground(0, QtGui.QBrush(QtGui.QColor("#7a4a00")))
+            pose_item.addChild(item)
+
+    def _prescribe_label(self, constraint: dict) -> str:
+        import math
+        kind = constraint.get("kind", "?")
+        metadata = constraint.get("metadata", {}) if isinstance(
+            constraint.get("metadata"), dict
+        ) else {}
+        if kind == "marker_projected_coordinate":
+            axis = "X" if float(metadata.get("axis_x", 0.0)) else "Y"
+            return f"Prescribe {axis}: {float(metadata.get('value', 0.0)):.6g} mm"
+        if kind == "body_angle":
+            return f"Prescribe angle: {math.degrees(float(metadata.get('angle', 0.0))):.6g} deg"
+        if kind == "relative_body_angle":
+            return f"Prescribe rel angle: {math.degrees(float(metadata.get('angle', 0.0))):.6g} deg"
+        if kind == "marker_position":
+            x = float(metadata.get('x', 0.0))
+            y = float(metadata.get('y', 0.0))
+            return f"Prescribe marker: ({x:.4g}, {y:.4g})"
+        return f"Prescribe ({kind})"
 
     def _populate_analyses(
         self,
@@ -541,6 +591,12 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         if not item:
             return
         kind, obj_id = item.data(0, _USER_ROLE)
+        if kind == "prescribe":
+            owner = item.data(0, _OWNER_ROLE)
+            pose_id = owner[1] if isinstance(owner, tuple) and len(owner) == 2 else None
+            if pose_id is not None:
+                self._action_delete_prescribe(pose_id, obj_id)
+            return
         self._delete_item(kind, obj_id, item.text(0))
 
     def _on_run(self) -> None:
@@ -617,6 +673,14 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             elif kind == "run":
                 for action in self._build_run_context_menu(obj_id):
                     menu.addAction(action)
+            elif kind == "prescribe":
+                owner = item.data(0, _OWNER_ROLE)
+                pose_id = owner[1] if isinstance(owner, tuple) and len(owner) == 2 else None
+                if pose_id is not None:
+                    menu.addAction(
+                        "Delete prescribe",
+                        lambda key=obj_id, pid=pose_id: self._action_delete_prescribe(pid, key),
+                    )
         if not menu.isEmpty():
             menu.exec(self._tree.mapToGlobal(pos))
 
@@ -671,6 +735,50 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             self.app_service.workspace.create_pose(name, baseline_id=baseline_id, case_id=case_id)
             self.refresh()
 
+    def _action_delete_prescribe(self, workspace_pose_id: str, key: str) -> None:
+        """Drop the prescribe with id *key* from *workspace_pose_id*'s backing pose."""
+        ws = self.app_service.project.workspace if self.app_service.project else None
+        if ws is None:
+            return
+        wp = next((p for p in ws.poses if p.id == workspace_pose_id), None)
+        if wp is None or wp.project_pose_id is None:
+            return
+        project = self.app_service.project
+        if project is None:
+            return
+        pose = next((p for p in project.poses if p.id == wp.project_pose_id), None)
+        if pose is None:
+            return
+        raw = pose.metadata.values.get("pose_constraints", [])
+        if not isinstance(raw, list):
+            return
+        pose.metadata.values["pose_constraints"] = [
+            entry for entry in raw
+            if not (isinstance(entry, dict) and entry.get("key") == key)
+        ]
+        self.refresh()
+        # If the deleted prescribe belongs to the currently-edited pose, the
+        # main window must drop it from its in-memory cache and re-render the
+        # canvas.
+        main_window = self._find_main_window()
+        if main_window is not None and hasattr(main_window, "_pose_constraints"):
+            current = self.app_service.get_current_pose()
+            if current is not None and current.id == pose.id:
+                main_window._pose_constraints.pop(key, None)
+                main_window.canvas.set_pose_constraints(
+                    main_window._pose_constraints.values()
+                )
+                if hasattr(main_window, "pose_constraints_strip"):
+                    main_window.pose_constraints_strip.refresh()
+
+    def _find_main_window(self):
+        widget = self.parent()
+        while widget is not None:
+            if widget.__class__.__name__ == "MainWindow":
+                return widget
+            widget = widget.parent() if hasattr(widget, "parent") else None
+        return None
+
     def _action_add_analysis(
         self,
         *,
@@ -695,7 +803,10 @@ class WorkflowTreePanel(QtWidgets.QWidget):
                 self, "No poses", "Cannot create analysis: no poses exist for this scope."
             )
             return
-        dialog = NewAnalysisDialog(poses=poses, parent=self)
+        default_pose_id = pose_id if pose_id is not None else ws.selected_pose_id
+        dialog = NewAnalysisDialog(
+            poses=poses, parent=self, default_pose_id=default_pose_id,
+        )
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
         self.app_service.workspace.create_analysis(

@@ -1155,8 +1155,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.canvas.set_pose_constraints([])
                 return
         if self.app_service.get_current_pose() is not None:
-            if not self._pose_constraints:
-                self._load_pose_constraints_from_current_pose()
+            # Always reload from the active pose: prescribes are per-pose
+            # state and must not bleed across pose switches.
+            self._load_pose_constraints_from_current_pose()
             return
         # If the project already has poses, select the simulation initial
         # (or the first one) as the editing target. Otherwise create one.
@@ -1282,12 +1283,45 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_run_analysis_requested(self, analysis_id: str) -> None:
         try:
+            errors = self._validate_analysis_pre_run(analysis_id)
+            if errors:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Cannot run analysis",
+                    "Fix the following before running:\n\n - " + "\n - ".join(errors),
+                )
+                return
             self.app_service.ensure_executor().enqueue(analysis_id)
             self._mark_project_dirty()
             if hasattr(self, "workflow_panel"):
                 self.workflow_panel.refresh()
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self, "Run Analysis Failed", str(exc))
+
+    def _validate_analysis_pre_run(self, analysis_id: str) -> list[str]:
+        project = self.app_service.project
+        if project is None or project.workspace is None:
+            return ["No active project."]
+        analysis = next(
+            (a for a in project.workspace.analyses if a.id == analysis_id), None
+        )
+        if analysis is None:
+            return [f"Analysis {analysis_id!r} not found."]
+        try:
+            from quino.analysis.registry import get_runner_for_type
+            from quino.services.workspace_composition import compose_project
+            case = (
+                next((c for c in project.workspace.cases if c.id == analysis.case_id), None)
+                if analysis.case_id else None
+            )
+            composed = compose_project(project, case=case)
+            runner = get_runner_for_type(analysis.analysis_type)
+            return [
+                msg for msg in runner.validate(composed, analysis)
+                if not msg.startswith("WARNING")
+            ]
+        except Exception as exc:
+            return [f"Validation failed: {exc}"]
 
     def _on_executor_run_queued(self, run_id: str) -> None:
         if self._active_mode_controller is not None:
@@ -1312,7 +1346,29 @@ class MainWindow(QtWidgets.QMainWindow):
             self.workflow_panel.refresh()
 
     def _on_executor_run_finished(self, run_id: str, status: str) -> None:
-        self.run_status.show_idle()
+        project = self.app_service.project
+        run = None
+        analysis_label = run_id
+        if project is not None and project.workspace is not None:
+            run = next((r for r in project.workspace.runs if r.id == run_id), None)
+            if run is not None:
+                analysis = next(
+                    (a for a in project.workspace.analyses if a.id == run.analysis_id), None
+                )
+                if analysis is not None:
+                    analysis_label = analysis.name
+        if run is not None and status == "failed":
+            error_text = run.error_message or "(no error message)"
+            self.run_status.show_finished(status, analysis_label, error=error_text)
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Analysis run failed",
+                f"Analysis '{analysis_label}' failed:\n\n{error_text}",
+            )
+        elif run is not None and status in {"ok", "partial"}:
+            self.run_status.show_finished(status, analysis_label)
+        else:
+            self.run_status.show_idle()
         if self._active_mode_controller is not None:
             self._active_mode_controller.on_run_finished(run_id, status)
         if hasattr(self, "workflow_panel"):
@@ -1347,7 +1403,16 @@ class MainWindow(QtWidgets.QMainWindow):
         # non-default poses enter the editable pose mode.
         self.app_service.set_selected_pose(pose_id)
         self.canvas.set_pose_readonly(pose.is_default)
+        already_in_pose_mode = self._app_mode == "pose"
         self._set_app_mode("pose")
+        if already_in_pose_mode:
+            # _set_app_mode short-circuits when the mode is unchanged; we still
+            # need to refresh per-pose state (prescribes + canvas) when the
+            # active pose itself just changed.
+            self._load_pose_constraints_from_current_pose()
+            if hasattr(self, "pose_constraints_strip"):
+                self.pose_constraints_strip.refresh()
+            self._apply_current_frame()
 
     def _on_workflow_selection_changed(self, kind: str, obj_id: str) -> None:
         ws = self.app_service.project.workspace if self.app_service.project else None
@@ -1374,7 +1439,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.app_service.set_working_context(baseline_id=pose.baseline_id)
             self.app_service.set_selected_pose(obj_id)
             self.canvas.set_pose_readonly(pose.is_default)
+            already_in_pose_mode = self._app_mode == "pose"
             self._set_app_mode("pose")
+            if already_in_pose_mode:
+                self._load_pose_constraints_from_current_pose()
+                if hasattr(self, "pose_constraints_strip"):
+                    self.pose_constraints_strip.refresh()
+                self._apply_current_frame()
         elif kind == "analysis":
             analysis = next((a for a in ws.analyses if a.id == obj_id), None)
             if analysis is None:

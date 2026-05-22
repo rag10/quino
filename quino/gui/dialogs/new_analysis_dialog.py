@@ -3,15 +3,21 @@ from __future__ import annotations
 from PySide6 import QtWidgets
 
 _TYPE_OPTIONS = [
-    ("dynamic", "Dynamic", "Time integration", True),
-    ("static", "Static", "Not yet implemented", False),
-    ("kinematic", "Kinematic", "Not yet implemented", False),
-    ("equilibrium", "Equilibrium", "Not yet implemented", False),
+    ("dynamic", "Dynamic", "Time integration with Exudyn"),
+    ("kinematic", "Kinematic", "Multi-axis pose sweep"),
+    ("static", "Static", "DoF=0 reaction + spring-energy report"),
+    ("equilibrium", "Equilibrium", "Stable equilibria via damped settle"),
 ]
 
 
 class NewAnalysisDialog(QtWidgets.QDialog):
-    def __init__(self, *, poses: list[tuple[str, str]], parent=None) -> None:
+    def __init__(
+        self,
+        *,
+        poses: list[tuple[str, str]],
+        parent=None,
+        default_pose_id: str | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("New Analysis")
         layout = QtWidgets.QFormLayout(self)
@@ -22,15 +28,14 @@ class NewAnalysisDialog(QtWidgets.QDialog):
         type_group = QtWidgets.QGroupBox("Type")
         type_layout = QtWidgets.QVBoxLayout(type_group)
         self._type_buttons: dict[str, QtWidgets.QRadioButton] = {}
-        for key, label, hint, operative in _TYPE_OPTIONS:
+        for key, label, hint in _TYPE_OPTIONS:
             btn = QtWidgets.QRadioButton(label)
             row_widget = QtWidgets.QWidget()
             row_layout = QtWidgets.QHBoxLayout(row_widget)
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.addWidget(btn)
             hint_lbl = QtWidgets.QLabel(f"— {hint}")
-            if not operative:
-                hint_lbl.setStyleSheet("color: #b07000;")
+            hint_lbl.setStyleSheet("color: #606060;")
             row_layout.addWidget(hint_lbl)
             row_layout.addStretch(1)
             type_layout.addWidget(row_widget)
@@ -41,6 +46,10 @@ class NewAnalysisDialog(QtWidgets.QDialog):
         self._pose_combo = QtWidgets.QComboBox()
         for pose_id, pose_name in poses:
             self._pose_combo.addItem(pose_name, userData=pose_id)
+        if default_pose_id is not None:
+            idx = self._pose_combo.findData(default_pose_id)
+            if idx >= 0:
+                self._pose_combo.setCurrentIndex(idx)
         layout.addRow("Initial pose:", self._pose_combo)
 
         buttons = QtWidgets.QDialogButtonBox(

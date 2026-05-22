@@ -198,6 +198,34 @@ pytest --cov=src/quino tests/
 
 All 9 GUI tests pass ✅
 
+## Running an analysis
+
+The workspace-driven analysis system lets you run dynamic / kinematic /
+static / equilibrium studies against any pose. End-to-end walkthrough:
+
+1. **Create a project** — `File → New` (or `python -m quino.gui` for a
+   blank session).
+2. **Add a workspace pose** under the active baseline or case. The
+   pose is the configuration the analysis solves from.
+3. **Add an analysis** under the pose with the type you want
+   (`dynamic`, `kinematic`, `static`, or `equilibrium`).
+4. **Configure parameters** in the bottom analysis panel — duration /
+   steps / dt for dynamic, sweeps for kinematic, tolerance for static,
+   perturbations for equilibrium.
+5. **Click Run.** The background executor queues the run; a status
+   strip shows queue depth and per-run progress, and you can cancel
+   any time.
+6. **Click a past run** in the workflow tree to replay it on the canvas
+   from its persisted artefact.
+7. **New plot** — `Analysis toolbar → New plot` opens the plot editor;
+   plots are saved on the analysis and reopen with the project.
+8. **Export** — right-click a run → `Export → CSV / JSON / matplotlib
+   script` to dump the result artefact.
+
+Right-clicking a case, baseline or the workspace root also gives
+`Run all in case / Run baseline / Run workspace`, which enqueue every
+analysis under that scope through the same executor.
+
 ## Analysis Types
 
 The workspace-driven analysis system is described in:
