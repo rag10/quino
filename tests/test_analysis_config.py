@@ -4,6 +4,7 @@ from quino.domain.workspace import (
     StaticConfig,
     EquilibriumConfig,
     SweepDef,
+    Analysis,
 )
 
 
@@ -58,3 +59,23 @@ def test_sweepdef_list_passes_through():
         values=[0.0, 3.0, 5.5],
     )
     assert s.resolved_values() == [0.0, 3.0, 5.5]
+
+
+def test_analysis_default_config_matches_type():
+    a = Analysis(id="a1", name="run1", analysis_type="dynamic")
+    assert isinstance(a.config, DynamicConfig)
+
+    a = Analysis(id="a2", name="run2", analysis_type="kinematic")
+    assert isinstance(a.config, KinematicConfig)
+
+    a = Analysis(id="a3", name="run3", analysis_type="static")
+    assert isinstance(a.config, StaticConfig)
+
+    a = Analysis(id="a4", name="run4", analysis_type="equilibrium")
+    assert isinstance(a.config, EquilibriumConfig)
+
+
+def test_analysis_explicit_config_wins():
+    cfg = DynamicConfig(duration=5.0, steps=500)
+    a = Analysis(id="a", name="x", analysis_type="dynamic", config=cfg)
+    assert a.config is cfg

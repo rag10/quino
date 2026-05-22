@@ -186,6 +186,16 @@ class WorkspacePose:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+AnalysisConfig = DynamicConfig | KinematicConfig | StaticConfig | EquilibriumConfig
+
+_DEFAULT_ANALYSIS_CONFIG = {
+    "dynamic":     DynamicConfig,
+    "kinematic":   KinematicConfig,
+    "static":      StaticConfig,
+    "equilibrium": EquilibriumConfig,
+}
+
+
 @dataclass(slots=True)
 class Analysis:
     id: str
@@ -194,8 +204,15 @@ class Analysis:
     baseline_id: str | None = None
     case_id: str | None = None
     workspace_pose_id: str | None = None
-    config: StudyConfig = field(default_factory=StudyConfig)
+    config: AnalysisConfig = field(default=None)  # type: ignore[assignment]
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.config is None:
+            ctor = _DEFAULT_ANALYSIS_CONFIG.get(self.analysis_type)
+            if ctor is None:
+                raise ValueError(f"Unknown analysis_type {self.analysis_type!r}")
+            self.config = ctor()
 
 
 @dataclass(slots=True)
