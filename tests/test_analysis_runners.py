@@ -33,7 +33,7 @@ def test_dynamic_runner_validate_returns_list():
         ("equilibrium", "EquilibriumAnalysisRunner"),
     ],
 )
-def test_unimplemented_runners_raise_with_clear_message(runner_module, runner_class):
+def test_non_dynamic_runners_expose_validate(runner_module, runner_class):
     from quino.application.service import ApplicationService
     from quino.domain.workspace import Analysis
 
@@ -43,9 +43,8 @@ def test_unimplemented_runners_raise_with_clear_message(runner_module, runner_cl
     app.new_project("test")
     analysis = Analysis(id="a", name="A", analysis_type=runner_module)
     runner = runner_cls()
-    with pytest.raises(NotImplementedError) as exc:
-        runner.run(app.project, analysis, initial_pose=None)
-    assert "not yet implemented" in str(exc.value).lower()
+    errors = runner.validate(app.project, analysis)
+    assert isinstance(errors, list)
 
 
 def test_application_run_analysis_dispatches_to_dynamic():
@@ -64,7 +63,7 @@ def test_application_run_analysis_dispatches_to_dynamic():
     assert result.status in ("ok", "failed")
 
 
-def test_application_run_analysis_returns_failed_for_unimplemented_type():
+def test_application_run_analysis_returns_analysis_result_for_static():
     from quino.application.service import ApplicationService
     from quino.domain.workspace import Analysis, Baseline, Workspace
 
@@ -76,5 +75,5 @@ def test_application_run_analysis_returns_failed_for_unimplemented_type():
         active_baseline_id="b",
     )
     result = app.run_analysis("a")
-    assert result.status == "failed"
-    assert "not yet implemented" in result.error_message.lower()
+    assert result.analysis_id == "a"
+    assert result.status in {"ok", "failed", "partial"}

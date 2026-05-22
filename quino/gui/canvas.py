@@ -218,6 +218,17 @@ _SKETCH_CONSTRAINT_TYPE_STR: dict[str, str] = {
 }
 
 
+def _nested_pose_to_overlay(pose: dict | None) -> dict[str, float] | None:
+    if pose is None:
+        return None
+    overlay: dict[str, float] = {}
+    for body_id, body_pose in pose.items():
+        overlay[f"{body_id}.x"] = float(body_pose.get("x", 0.0))
+        overlay[f"{body_id}.y"] = float(body_pose.get("y", 0.0))
+        overlay[f"{body_id}.angle"] = float(body_pose.get("theta", body_pose.get("angle", 0.0)))
+    return overlay
+
+
 class MechanismCanvas(QtWidgets.QWidget):
     entitySelected = QtCore.Signal(str)
     selectionCleared = QtCore.Signal()
@@ -265,6 +276,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._pose_readonly: bool = False
         self._playback_locked: bool = False
         self._playback_lock_reason: str = ""
+        self._mode_badge_suffix: str = ""
         self._creation_entity_ids: list[str] = []
         self._pending_distance_constraint_refs: list[str] = []
         self._hover_world: tuple[float, float] | None = None
@@ -299,6 +311,9 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._structural_edit_guard: Callable[[], bool] | None = None
         self._trajectories: list[list[tuple[float, float]]] = []
         self._show_trajectories: bool = True
+        self._kinematic_pose_overlay: dict[str, float] | None = None
+        self._kinematic_cloud: list[tuple[float, float]] = []
+        self._kinematic_trajectory: list[tuple[float, float]] = []
         self._snap_preview_world: tuple[float, float] | None = None
         self._snap_kind: str | None = None
         self._snap_entity_id: str | None = None
@@ -525,6 +540,24 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def is_playback_locked(self) -> bool:
         return self._playback_locked
+
+    def set_mode_badge_suffix(self, text: str) -> None:
+        self._mode_badge_suffix = text
+        self.update()
+
+    def set_kinematic_pose(self, pose: dict | None) -> None:
+        self._kinematic_pose_overlay = _nested_pose_to_overlay(pose)
+        if self._interaction_mode == "analysis" and self._mode_badge_suffix == "(kinematic)":
+            self._state_overlay = self._kinematic_pose_overlay
+        self.update()
+
+    def set_kinematic_cloud(self, points: list[tuple[float, float]]) -> None:
+        self._kinematic_cloud = points
+        self.update()
+
+    def set_kinematic_trajectory(self, line: list[tuple[float, float]]) -> None:
+        self._kinematic_trajectory = line
+        self.update()
 
     def _set_cursor_for_mode(self, mode: str) -> None:
         cursor_map = {
@@ -1092,6 +1125,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 and self._interaction_mode == "analysis"
             ):
                 self._draw_trajectories(painter, transform)
+            self._draw_kinematic_overlays(painter, transform)
             if not sketch_points and not sketch_entities and not project.model.bodies:
                 self._draw_empty_state(painter)
         else:
@@ -1119,6 +1153,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 and self._interaction_mode == "analysis"
             ):
                 self._draw_trajectories(painter, transform)
+            self._draw_kinematic_overlays(painter, transform)
 
         self._draw_creation_overlay(painter, transform)
         self._draw_edge_rulers(painter, transform)
@@ -1159,6 +1194,11 @@ class MechanismCanvas(QtWidgets.QWidget):
             if wp is not None:
                 tag = " [default]" if wp.is_default else ""
                 badges.append((f"Pose: {wp.name}{tag}", "#c75b12"))
+        if self._interaction_mode == "analysis":
+            text = "Analysis"
+            if self._mode_badge_suffix:
+                text += f" {self._mode_badge_suffix}"
+            badges.append((text, "#1a6ec2"))
         if not badges:
             return
         painter.save()
@@ -2386,6 +2426,28 @@ class MechanismCanvas(QtWidgets.QWidget):
             for pt in points[1:]:
                 path.lineTo(self._to_screen(*pt, transform))
             painter.drawPath(path)
+
+    def _draw_kinematic_overlays(self, painter: QtGui.QPainter, transform) -> None:
+        if self._interaction_mode != "analysis" or self._mode_badge_suffix != "(kinematic)":
+            return
+        if self._kinematic_cloud:
+            painter.save()
+            painter.setPen(QtCore.Qt.PenStyle.NoPen)
+            painter.setBrush(QtGui.QColor(47, 111, 159, 90))
+            for x, y in self._kinematic_cloud:
+                painter.drawEllipse(self._to_screen(x, y, transform), 2.0, 2.0)
+            painter.restore()
+        if self._kinematic_trajectory and self._show_trajectories:
+            painter.save()
+            pen = QtGui.QPen(QtGui.QColor("#c7781d"), 2.0)
+            pen.setStyle(QtCore.Qt.PenStyle.SolidLine)
+            painter.setPen(pen)
+            path = QtGui.QPainterPath()
+            path.moveTo(self._to_screen(*self._kinematic_trajectory[0], transform))
+            for pt in self._kinematic_trajectory[1:]:
+                path.lineTo(self._to_screen(*pt, transform))
+            painter.drawPath(path)
+            painter.restore()
 
     def _draw_empty_state(self, painter: QtGui.QPainter) -> None:
         painter.setPen(QtGui.QPen(QtGui.QColor("#7a7366")))

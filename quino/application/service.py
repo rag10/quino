@@ -1,6 +1,8 @@
 ﻿from __future__ import annotations
 
 import copy
+import threading
+from pathlib import Path
 
 from quino.domain.inputs import JointEndpointInput, MarkerInput, PropertyValueInput, SliderInput
 from quino.domain.model import (
@@ -63,6 +65,9 @@ class ApplicationService:
         self.json_mapper = JsonMapper()
         self.project: Project | None = None
         self.current_project_path: Path | None = None
+        self.executor = None
+        self.pending_run_handles: dict[str, object] = {}
+        self.workspace_lock = threading.Lock()
         self._undo_stack: list[Project] = []
         self._redo_stack: list[Project] = []
         self._in_operation = False
@@ -187,10 +192,22 @@ class ApplicationService:
         self._structural_case_warning_acknowledged = True
 
     def save_project(self, path: str) -> None:
-        from pathlib import Path
         project = self._require_project()
         self.json_mapper.save_file(project, path)
         self.current_project_path = Path(path)
+
+    @property
+    def current_project_dir(self) -> Path | None:
+        if self.current_project_path is None:
+            return None
+        return self.current_project_path.parent if self.current_project_path.suffix else self.current_project_path
+
+    def ensure_executor(self):
+        from quino.services.run_executor import RunExecutor
+
+        if self.executor is None:
+            self.executor = RunExecutor(self)
+        return self.executor
 
     @property
     def display_project(self):
@@ -1098,4 +1115,3 @@ class ApplicationService:
                 self.entities.invalidate_index()
                 return True
         return False
-

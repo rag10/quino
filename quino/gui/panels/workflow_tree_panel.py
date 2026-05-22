@@ -24,7 +24,9 @@ _OWNER_ROLE = _USER_ROLE + 1
 
 _STATUS_COLORS = {
     "not_run": "#aaaaaa",
+    "queued": "#6a6f7a",
     "ok": "#2a8c3f",
+    "partial": "#9a6a00",
     "stale": "#c07000",
     "running": "#1a6ec2",
     "failed": "#c02020",
@@ -372,10 +374,16 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             reverse=True,
         )
         for run in runs:
-            label = f"Run {run.created_at[:16].replace('T', ' ')}  {run.status}"
+            prefix = ""
+            if run.status == "running":
+                prefix = "⏳ "
+            elif run.status == "queued":
+                prefix = "⋯ "
+            label = f"{prefix}Run {run.created_at[:16].replace('T', ' ')}  {run.status}"
             if run.note:
                 label += f"  · {run.note}"
             run_item = self._make_item(run.id, "run", label)
+            run_item.setForeground(0, QtGui.QBrush(QtGui.QColor(_STATUS_COLORS.get(run.status, "#aaaaaa"))))
             a_item.addChild(run_item)
 
     _ITEM_ICONS = {

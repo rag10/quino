@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -20,4 +22,13 @@ class AnalysisRunner(ABC):
     def validate(self, project, analysis) -> list[str]: ...
 
     @abstractmethod
-    def run(self, project, analysis, *, initial_pose) -> AnalysisResult: ...
+    def run(
+        self,
+        project,
+        analysis,
+        *,
+        initial_pose=None,
+        cancel_event: threading.Event | None = None,
+        run=None,
+        project_dir: Path | None = None,
+    ) -> AnalysisResult: ...

@@ -11,6 +11,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from quino.application.example_registry import ExampleEntry, ExampleRegistry
 from quino.application.service import ApplicationService
+from quino.gui.analysis_modes import mode_controller_for
 from quino.domain.inputs import PropertyValueInput
 from quino.domain.types import DriverType, JointEndpointKind, MarkerType
 from quino.domain.blocks import BlockDiagram
@@ -43,6 +44,7 @@ from quino.gui.canvas import CanvasMode, MechanismCanvas
 
 from quino.gui.panels.pose_constraints_strip import PoseConstraintsStrip
 from quino.gui.panels.workflow_tree_panel import WorkflowTreePanel
+from quino.gui.widgets.run_status_widget import RunStatusWidget
 from quino.pose.geometry import assembled_reference_mechanism, marker_world_position, pose_to_state_overlay
 from quino.pose.kinematics import _pose_at_angle, build_drag_initial_pose, get_drag_driver, has_ground_revolute
 from quino.pose.model import PoseConstraint, PoseSolveResult, PoseSolveSettings
@@ -89,6 +91,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._current_project_path: Path | None = None
         self._project_dirty = False
         self._plot_windows: list[PlotWindow] = []
+        self._active_mode_controller = None
+        self._mounted_analysis_panel: QtWidgets.QWidget | None = None
         self._tree_items: dict[str, QtWidgets.QTreeWidgetItem] = {}
         self._expanded_tree_keys: set[str] = set()
         self._pose_constraints: dict[str, PoseConstraint] = {}
@@ -169,10 +173,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.workflow_panel.analysis_selected.connect(self._on_analysis_selected)
         self.workflow_panel.run_selected.connect(self._on_run_selected)
         self.workflow_panel.selection_changed.connect(self._on_workflow_selection_changed)
+        self.run_status = RunStatusWidget()
+        self.run_status.cancel_requested.connect(self._on_cancel_run_requested)
         self.left_column.addWidget(self.workflow_panel)
+        self.left_column.addWidget(self.run_status)
         self.left_column.addWidget(self.tree)
-        self.left_column.setSizes([180, 180])
+        self.left_column.setSizes([180, 36, 180])
         splitter.addWidget(self.left_column)
+
+        executor = self.app_service.ensure_executor()
+        executor.run_queued.connect(self._on_executor_run_queued)
+        executor.run_started.connect(self._on_executor_run_started)
+        executor.run_finished.connect(self._on_executor_run_finished)
 
         center_panel = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.canvas = MechanismCanvas(self.app_service)
@@ -218,6 +230,7 @@ class MainWindow(QtWidgets.QMainWindow):
         playback_layout.setSpacing(6)
 
         playback_group = QtWidgets.QGroupBox("Analysis")
+        self._dynamic_playback_group = playback_group
         playback_group.setFlat(True)
         playback_group_layout = QtWidgets.QVBoxLayout(playback_group)
         playback_group_layout.setContentsMargins(0, 0, 0, 0)
@@ -438,7 +451,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_validate.setToolTip("Validate model")
 
         self.action_run = QtGui.QAction(get_icon("run-simulation", color_dynamic), "Run", self)
-        self.action_run.triggered.connect(self.run_simulation)
+        self.action_run.triggered.connect(self._on_run_action_triggered)
         self.action_run.setToolTip("Run kinematic simulation")
 
         self._icon_play = get_icon("play", color_dynamic)
@@ -999,6 +1012,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if mode == self._app_mode:
             return
         previous_mode = self._app_mode
+        if previous_mode == "analysis" and mode != "analysis" and self._active_mode_controller is not None:
+            self._active_mode_controller.on_leave()
+            self._teardown_active_mode_panel()
+            self._active_mode_controller = None
         self._app_mode = mode
         self.canvas.set_interaction_mode(mode)
         if previous_mode == "pose" and mode != "pose":
@@ -1066,6 +1083,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self._center_stack.setCurrentIndex(0)
             is_exudyn = self.app_service.simulation_runner.backend_name() == "exudyn"
             self.action_export_script.setEnabled(is_exudyn)
+            workspace = self.app_service.project.workspace if self.app_service.project else None
+            if workspace is not None and workspace.selected_analysis_id is not None:
+                analysis = next((item for item in workspace.analyses if item.id == workspace.selected_analysis_id), None)
+                if analysis is not None:
+                    self._set_app_mode_analysis(analysis)
             self.refresh_all()
         else:
             self._mode_sketch_btn.setChecked(False)
@@ -1229,17 +1251,24 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Run Study Failed", str(exc))
 
     def _on_analysis_selected(self, analysis_id: str) -> None:
+        project = self.app_service.project
+        if project is None or project.workspace is None:
+            return
+        analysis = next((item for item in project.workspace.analyses if item.id == analysis_id), None)
+        if analysis is None:
+            return
+        project.workspace.selected_analysis_id = analysis_id
         self._set_app_mode("analysis")
-        # Recover the latest "ok" run for this analysis so the timeline /
-        # canvas pick up the persisted result instead of staying empty.
-        result = self._load_latest_run_result(analysis_id)
-        self._last_simulation_result = result
-        self._current_frame_index = 0
-        self._update_timeline_controls()
-        self._apply_current_frame()
-        self._update_trajectories(result=result)
-        if result is None:
-            self._append_message("No persisted runs for this analysis yet.")
+        self._set_app_mode_analysis(analysis)
+        if analysis.analysis_type == "dynamic":
+            result = self._load_latest_run_result(analysis_id)
+            self._last_simulation_result = result
+            self._current_frame_index = 0
+            self._update_timeline_controls()
+            self._apply_current_frame()
+            self._update_trajectories(result=result)
+            if result is None:
+                self._append_message("No persisted runs for this analysis yet.")
 
     def _load_latest_run_result(self, analysis_id: str) -> "SimulationResult | None":
         """Return the SimulationResult of the latest ok run for *analysis_id*,
@@ -1273,6 +1302,13 @@ class MainWindow(QtWidgets.QMainWindow):
         run = next((r for r in project.workspace.runs if r.id == run_id), None)
         if run is None:
             return
+        analysis = next((a for a in project.workspace.analyses if a.id == run.analysis_id), None)
+        if analysis is not None:
+            project.workspace.selected_analysis_id = analysis.id
+            self._set_app_mode("analysis")
+            self._set_app_mode_analysis(analysis)
+            if self._active_mode_controller is not None:
+                self._active_mode_controller.on_run_selected(run)
         if run.status == "stale":
             self.canvas.set_playback_locked(True, "Run is stale; data preserved for plots")
             self.action_play_pause.setEnabled(False)
@@ -1282,19 +1318,92 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_play_pause.setEnabled(True)
             self.action_stop.setEnabled(True)
 
+    def _on_run_action_triggered(self) -> None:
+        if self._app_mode == "analysis":
+            if self._active_mode_controller is not None:
+                self._active_mode_controller.on_run_clicked()
+                return
+        self.run_simulation()
+
+    def _set_app_mode_analysis(self, analysis) -> None:
+        controller_cls = mode_controller_for(analysis.analysis_type)
+        if self._active_mode_controller is None or not isinstance(self._active_mode_controller, controller_cls):
+            if self._active_mode_controller is not None:
+                self._active_mode_controller.on_leave()
+                self._teardown_active_mode_panel()
+            controller = controller_cls(self)
+            controller.build_toolbar(self)
+            controller.build_config_widget(self)
+            controller.build_bottom_panel(self)
+            self._active_mode_controller = controller
+            self._mount_active_mode_panel(controller)
+        self._active_mode_controller.on_enter(analysis)
+
+    def _mount_active_mode_panel(self, controller) -> None:
+        self._teardown_active_mode_panel()
+        if controller.bottom_panel is self._playback_widget:
+            self._dynamic_playback_group.setVisible(True)
+            return
+        host = QtWidgets.QWidget(self._playback_widget)
+        layout = QtWidgets.QVBoxLayout(host)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        if controller.config_widget is not None:
+            layout.addWidget(controller.config_widget)
+        if controller.bottom_panel is not None:
+            layout.addWidget(controller.bottom_panel, stretch=1)
+        self._dynamic_playback_group.setVisible(False)
+        self._playback_widget.layout().addWidget(host)
+        self._mounted_analysis_panel = host
+
+    def _teardown_active_mode_panel(self) -> None:
+        if self._mounted_analysis_panel is not None:
+            self._mounted_analysis_panel.setParent(None)
+            self._mounted_analysis_panel.deleteLater()
+            self._mounted_analysis_panel = None
+        self._dynamic_playback_group.setVisible(True)
+
     def _on_run_analysis_requested(self, analysis_id: str) -> None:
-        project_dir = self._current_project_path.parent if self._current_project_path else None
         try:
-            self.app_service.workspace.run_analysis(
-                analysis_id,
-                self.app_service.simulation_runner,
-                project_dir=project_dir,
-            )
+            self.app_service.ensure_executor().enqueue(analysis_id)
             self._mark_project_dirty()
             if hasattr(self, "workflow_panel"):
                 self.workflow_panel.refresh()
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self, "Run Analysis Failed", str(exc))
+
+    def _on_executor_run_queued(self, run_id: str) -> None:
+        if self._active_mode_controller is not None:
+            self._active_mode_controller.on_run_queued(run_id)
+        if hasattr(self, "workflow_panel"):
+            self.workflow_panel.refresh()
+
+    def _on_executor_run_started(self, run_id: str) -> None:
+        project = self.app_service.project
+        if project is None or project.workspace is None:
+            return
+        run = next((r for r in project.workspace.runs if r.id == run_id), None)
+        if run is None:
+            return
+        analysis = next((a for a in project.workspace.analyses if a.id == run.analysis_id), None)
+        label = analysis.name if analysis is not None else run_id
+        self.run_status.show_running(run_id, label)
+        if self._active_mode_controller is not None:
+            self._active_mode_controller.on_run_started(run_id)
+        if hasattr(self, "workflow_panel"):
+            self.workflow_panel.refresh()
+
+    def _on_executor_run_finished(self, run_id: str, status: str) -> None:
+        self.run_status.show_idle()
+        if self._active_mode_controller is not None:
+            self._active_mode_controller.on_run_finished(run_id, status)
+        if hasattr(self, "workflow_panel"):
+            self.workflow_panel.refresh()
+
+    def _on_cancel_run_requested(self, run_id: str) -> None:
+        handle = self.app_service.pending_run_handles.get(run_id)
+        if handle is not None:
+            handle.cancel()
 
     def _on_working_context_changed(self) -> None:
         project = self.app_service.display_project
@@ -1435,6 +1544,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.refresh_all()
 
     def export_to_python_script(self) -> None:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            exporter = getattr(self._active_mode_controller, "export_to_python_script", None)
+            if exporter is not None:
+                exporter()
+                return
         if self.app_service.simulation_runner.backend_name() != "exudyn":
             QtWidgets.QMessageBox.information(
                 self,
@@ -1468,6 +1582,11 @@ class MainWindow(QtWidgets.QMainWindow):
             )
 
     def run_simulation(self) -> None:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            runner = getattr(self._active_mode_controller, "run_simulation", None)
+            if runner is not None:
+                runner()
+                return
         self._playback_timer.stop()
         self._sync_play_pause_icon()
         result = self.app_service.run_kinematic_simulation(
@@ -1508,6 +1627,11 @@ class MainWindow(QtWidgets.QMainWindow):
             message_box.exec()
 
     def toggle_playback(self) -> None:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            handler = getattr(self._active_mode_controller, "toggle_playback", None)
+            if handler is not None:
+                handler()
+                return
         if self._last_simulation_result is None or not self._last_simulation_result.frames:
             return
         if self._playback_timer.isActive():
@@ -1520,6 +1644,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_interaction_state()
 
     def stop_playback(self) -> None:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            handler = getattr(self._active_mode_controller, "stop_playback", None)
+            if handler is not None:
+                handler()
+                return
         self._playback_timer.stop()
         self._current_frame_index = 0
         self._apply_current_frame()
@@ -1528,6 +1657,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_interaction_state()
 
     def _sync_play_pause_icon(self) -> None:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            handler = getattr(self._active_mode_controller, "sync_play_pause_icon", None)
+            if handler is not None:
+                handler()
+                return
         if self._playback_timer.isActive():
             self.action_play_pause.setIcon(self._icon_pause)
             self.action_play_pause.setText("Pause")
@@ -1655,6 +1789,11 @@ class MainWindow(QtWidgets.QMainWindow):
         return "cancel"
 
     def _advance_playback(self) -> None:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            handler = getattr(self._active_mode_controller, "advance_playback", None)
+            if handler is not None:
+                handler()
+                return
         if self._last_simulation_result is None or not self._last_simulation_result.frames:
             self.stop_playback()
             return
@@ -1673,11 +1812,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_timeline_controls()
 
     def _on_timeline_changed(self, value: int) -> None:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            handler = getattr(self._active_mode_controller, "on_timeline_changed", None)
+            if handler is not None:
+                handler(value)
+                return
         self._current_frame_index = value
         self._apply_current_frame()
         self._update_timeline_controls()
 
     def _on_duration_changed(self) -> None:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            handler = getattr(self._active_mode_controller, "on_duration_changed", None)
+            if handler is not None:
+                handler()
+                return
         if self._suspend_simulation_config_updates:
             return
         duration = self.duration_spin.value()
@@ -1695,6 +1844,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._discard_simulation_for_parameter_change("Simulation discarded because duration changed")
 
     def _on_steps_changed(self) -> None:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            handler = getattr(self._active_mode_controller, "on_steps_changed", None)
+            if handler is not None:
+                handler()
+                return
         if self._suspend_simulation_config_updates:
             return
         duration = self.duration_spin.value()
@@ -1710,6 +1864,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._discard_simulation_for_parameter_change("Simulation discarded because frame count changed")
 
     def _on_dt_changed(self) -> None:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            handler = getattr(self._active_mode_controller, "on_dt_changed", None)
+            if handler is not None:
+                handler()
+                return
         if self._suspend_simulation_config_updates:
             return
         duration = self.duration_spin.value()
@@ -1727,9 +1886,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self._discard_simulation_for_parameter_change("Simulation discarded because delta t changed")
 
     def _on_playback_speed_changed(self) -> None:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            handler = getattr(self._active_mode_controller, "on_playback_speed_changed", None)
+            if handler is not None:
+                handler()
+                return
         self._update_simulation_spin_steps()
 
     def _update_simulation_spin_steps(self) -> None:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            handler = getattr(self._active_mode_controller, "update_simulation_spin_steps", None)
+            if handler is not None:
+                handler()
+                return
         self.steps_spin.setSingleStep(self._adaptive_frame_step(self.steps_spin.value()))
         self.dt_spin.setSingleStep(self._adaptive_fractional_step(self.dt_spin.value()))
         self.playback_speed_spin.setSingleStep(self._adaptive_fractional_step(self.playback_speed_spin.value()))
@@ -1745,10 +1914,20 @@ class MainWindow(QtWidgets.QMainWindow):
         return 0.5 * (10 ** exponent)
 
     def _discard_simulation_for_parameter_change(self, message: str) -> None:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            handler = getattr(self._active_mode_controller, "discard_simulation_for_parameter_change", None)
+            if handler is not None:
+                handler(message)
+                return
         if self._has_simulation_frames():
             self._clear_simulation_state(message)
 
     def _rewind_simulation_to_start(self) -> None:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            handler = getattr(self._active_mode_controller, "rewind_simulation_to_start", None)
+            if handler is not None:
+                handler()
+                return
         self._playback_timer.stop()
         self._sync_play_pause_icon()
         self._current_frame_index = 0
@@ -1756,6 +1935,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_timeline_controls()
 
     def _apply_current_frame(self) -> None:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            handler = getattr(self._active_mode_controller, "apply_current_frame", None)
+            if handler is not None:
+                handler()
+                return
         frame = None
         time_value = 0.0
         if self._app_mode == "pose":
@@ -1781,6 +1965,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_interaction_state()
 
     def _update_timeline_controls(self) -> None:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            handler = getattr(self._active_mode_controller, "update_timeline_controls", None)
+            if handler is not None:
+                handler()
+                return
         result = self._last_simulation_result
         if result is None or not result.frames:
             self.timeline_slider.blockSignals(True)
@@ -1799,9 +1988,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.timeline_label.setText(f"{current + 1} / {len(result.frames)}  t={current_time:.3f}s")
 
     def _has_simulation_frames(self) -> bool:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            handler = getattr(self._active_mode_controller, "has_simulation_frames", None)
+            if handler is not None:
+                return bool(handler())
         return self._last_simulation_result is not None and bool(self._last_simulation_result.frames)
 
     def _clear_simulation_state(self, message: str | None = None) -> None:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            handler = getattr(self._active_mode_controller, "clear_simulation_state", None)
+            if handler is not None:
+                handler(message)
+                return
         self._playback_timer.stop()
         self._sync_play_pause_icon()
         self._last_simulation_result = None
@@ -1909,6 +2107,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.action_toggle_grid.setChecked(self.canvas.show_grid())
 
     def _update_trajectories(self, *, result: SimulationResult | None = None) -> None:
+        if self._app_mode == "analysis" and self._active_mode_controller is not None:
+            handler = getattr(self._active_mode_controller, "update_trajectories", None)
+            if handler is not None:
+                handler(result=result)
+                return
         """Refresh canvas trajectories.
 
         When *result* is given, we derive trajectories from its frames so
@@ -5295,6 +5498,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.refresh_all()
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # noqa: N802 - Qt override
+        if self.app_service.executor is not None:
+            self.app_service.executor.shutdown()
         if QtWidgets.QApplication.platformName().lower() == "offscreen":
             event.accept()
             return

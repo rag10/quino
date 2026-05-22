@@ -1,11 +1,1 @@
-from __future__ import annotations
-
-from quino.analysis.runner import AnalysisResult, AnalysisRunner
-
-
-class KinematicAnalysisRunner(AnalysisRunner):
-    def validate(self, project, analysis) -> list[str]:
-        return ["Kinematic analysis is not yet implemented"]
-
-    def run(self, project, analysis, *, initial_pose=None) -> AnalysisResult:
-        raise NotImplementedError("Kinematic analysis is not yet implemented")
+from quino.analysis.kinematic_runner import KinematicAnalysisRunner

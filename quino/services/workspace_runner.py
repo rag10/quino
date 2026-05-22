@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -27,6 +28,9 @@ def run_analysis(
     project: Project,
     analysis_id: str,
     simulation_runner: SimulationRunner,
+    *,
+    cancel_event=None,
+    run: Run | None = None,
     project_dir: Path | None = None,
 ) -> Run:
     workspace = project.workspace
@@ -38,13 +42,14 @@ def run_analysis(
     baseline = _find_baseline(workspace, analysis.baseline_id) if analysis.baseline_id is not None else None
     pose = _find_workspace_pose(workspace, analysis.workspace_pose_id) if analysis.workspace_pose_id is not None else None
 
-    run = Run(
-        id=_next_id(workspace, "run"),
-        analysis_id=analysis.id,
-        created_at=datetime.now().isoformat(),
-        status="running",
-        config_snapshot={f.name: getattr(analysis.config, f.name) for f in analysis.config.__dataclass_fields__.values()},
-    )
+    if run is None:
+        run = Run(
+            id=_next_id(workspace, "run"),
+            analysis_id=analysis.id,
+            created_at=datetime.now().isoformat(),
+            status="running",
+            config_snapshot=asdict(analysis.config),
+        )
 
     try:
         composed = compose_project(project, case=case)
@@ -57,22 +62,22 @@ def run_analysis(
             composed,
             duration=analysis.config.duration,
             steps=analysis.config.steps,
+            cancel_event=cancel_event,
         )
 
+        cancelled = (
+            cancel_event is not None and cancel_event.is_set()
+        ) or result.error == "Simulation cancelled by user"
+        if cancelled:
+            run.status = "to_be_run"
+            run.error_message = "Cancelled by user"
+            run.result_ref = None
+            run.artifacts.clear()
+            run.metrics.clear()
+            return run
+
         if project_dir is not None:
-            artifact_path = _save_result_artifact(project_dir, run, result)
-            run.result_ref = ResultRef(
-                run_entry_id=run.id,
-                artifact_path=str(artifact_path.relative_to(project_dir)),
-                checksum=_file_checksum(artifact_path),
-            )
-            run.artifacts.append(
-                ArtifactRef(
-                    kind="simulation_result",
-                    path=run.result_ref.artifact_path,
-                    checksum=run.result_ref.checksum,
-                )
-            )
+            save_result_artifact(project_dir, run, result)
 
         run.metrics = _extract_metrics(result, baseline)
         run.status = "ok" if result.success else "failed"
@@ -84,7 +89,8 @@ def run_analysis(
     finally:
         run.finished_at = datetime.now().isoformat()
 
-    workspace.runs.append(run)
+    if run not in workspace.runs:
+        workspace.runs.append(run)
     return run
 
 
@@ -195,7 +201,7 @@ def load_result_artifact(project_dir: Path, run: Run) -> SimulationResult | None
     )
 
 
-def _save_result_artifact(project_dir: Path, run: Run, result: SimulationResult) -> Path:
+def save_result_artifact(project_dir: Path, run: Run, result: SimulationResult) -> Path:
     artifact_dir = project_dir / "artifacts" / f"run_{run.id}"
     artifact_dir.mkdir(parents=True, exist_ok=True)
     path = artifact_dir / "result.json"
@@ -209,6 +215,20 @@ def _save_result_artifact(project_dir: Path, run: Run, result: SimulationResult)
         "backend": result.backend,
     }
     path.write_text(json.dumps(data), encoding="utf-8")
+    checksum = _file_checksum(path)
+    artifact_path = str(path.relative_to(project_dir))
+    run.result_ref = ResultRef(
+        run_entry_id=run.id,
+        artifact_path=artifact_path,
+        checksum=checksum,
+    )
+    run.artifacts = [
+        ArtifactRef(
+            kind="simulation_result",
+            path=artifact_path,
+            checksum=checksum,
+        )
+    ]
     return path
 
 
