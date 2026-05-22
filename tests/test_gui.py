@@ -3626,3 +3626,24 @@ def test_block_editor_set_selected_centers_view(qtbot):
     # The canvas should have centered on roughly (400, 300). Just sanity-check
     # the call doesn't raise and selection sticks.
     assert widget._scene._block_items["b1"].isSelected()
+
+
+def test_selecting_stale_run_locks_canvas_playback(qtbot):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from quino.domain.workspace import Run
+
+    svc = ApplicationService()
+    svc.new_project("t")
+    case = svc.workspace.create_case("C")
+    pose = svc.workspace.create_pose("P", case_id=case.id)
+    a = svc.workspace.create_analysis("D", case_id=case.id, workspace_pose_id=pose.id)
+    svc.project.workspace.runs.append(
+        Run(id="r1", analysis_id=a.id, created_at="...", status="stale")
+    )
+    window = MainWindow(svc)
+    qtbot.addWidget(window)
+
+    window._on_run_selected("r1")
+    assert window.canvas.is_playback_locked() is True
+    assert window.action_play_pause.isEnabled() is False

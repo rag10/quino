@@ -263,6 +263,8 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._pose_pick_marker_ids: list[str] = []
         self._pose_constraints: list[dict] = []
         self._pose_readonly: bool = False
+        self._playback_locked: bool = False
+        self._playback_lock_reason: str = ""
         self._creation_entity_ids: list[str] = []
         self._pending_distance_constraint_refs: list[str] = []
         self._hover_world: tuple[float, float] | None = None
@@ -515,6 +517,14 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def is_pose_readonly(self) -> bool:
         return self._pose_readonly
+
+    def set_playback_locked(self, locked: bool, reason: str = "") -> None:
+        self._playback_locked = bool(locked)
+        self._playback_lock_reason = reason
+        self.update()
+
+    def is_playback_locked(self) -> bool:
+        return self._playback_locked
 
     def _set_cursor_for_mode(self, mode: str) -> None:
         cursor_map = {
@@ -1117,6 +1127,16 @@ class MechanismCanvas(QtWidgets.QWidget):
 
         if self._pose_readonly:
             painter.fillRect(self.rect(), QtGui.QColor(180, 180, 180, 45))
+
+        if self._playback_locked:
+            painter.fillRect(self.rect(), QtGui.QColor(0, 0, 0, 35))
+            painter.setPen(QtGui.QPen(QtGui.QColor("#444")))
+            font = painter.font()
+            font.setPointSize(14)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(self.rect(), QtCore.Qt.AlignmentFlag.AlignCenter,
+                             self._playback_lock_reason or "Playback disabled")
 
     def _draw_active_case_badge(self, painter: QtGui.QPainter) -> None:
         """Top-left stack of badges showing the active context.

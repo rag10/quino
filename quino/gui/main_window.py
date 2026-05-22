@@ -1243,23 +1243,19 @@ class MainWindow(QtWidgets.QMainWindow):
     def _load_latest_run_result(self, analysis_id: str) -> "SimulationResult | None":
         """Return the SimulationResult of the latest ok run for *analysis_id*,
         loaded from disk via load_result_artifact. Returns None if there are
-        no runs, no ok entries, or no on-disk artifact path is known."""
+        no runs, no ok run, or no on-disk artifact path is known."""
         project = self.app_service.project
         if project is None or project.workspace is None:
             return None
         ws = project.workspace
-        # Walk runs newest-first; pick the most recent run with an ok entry.
-        candidate_entry = None
+        candidate_run = None
         for run in reversed(ws.runs):
             if getattr(run, "analysis_id", None) != analysis_id:
                 continue
-            for entry in run.entries:
-                if entry.status == "ok" and entry.result_ref is not None:
-                    candidate_entry = entry
-                    break
-            if candidate_entry is not None:
+            if run.status == "ok" and run.result_ref is not None:
+                candidate_run = run
                 break
-        if candidate_entry is None:
+        if candidate_run is None:
             return None
         from quino.services.workspace_runner import load_result_artifact
         project_dir = (
@@ -1267,7 +1263,23 @@ class MainWindow(QtWidgets.QMainWindow):
             if self._current_project_path is not None
             else None
         )
-        return load_result_artifact(project_dir, candidate_entry)
+        return load_result_artifact(project_dir, candidate_run)
+
+    def _on_run_selected(self, run_id: str) -> None:
+        project = self.app_service.project
+        if project is None or project.workspace is None:
+            return
+        run = next((r for r in project.workspace.runs if r.id == run_id), None)
+        if run is None:
+            return
+        if run.status == "stale":
+            self.canvas.set_playback_locked(True, "Run is stale; data preserved for plots")
+            self.action_play_pause.setEnabled(False)
+            self.action_stop.setEnabled(False)
+        else:
+            self.canvas.set_playback_locked(False)
+            self.action_play_pause.setEnabled(True)
+            self.action_stop.setEnabled(True)
 
     def _on_run_analysis_requested(self, analysis_id: str) -> None:
         project_dir = self._current_project_path.parent if self._current_project_path else None
