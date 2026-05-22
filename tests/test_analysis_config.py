@@ -1,3 +1,6 @@
+import pytest
+
+from quino.application.service import ApplicationService
 from quino.domain.workspace import (
     DynamicConfig,
     KinematicConfig,
@@ -104,3 +107,13 @@ def test_analysis_config_roundtrip(tmp_path):
     assert len(loaded.config.sweeps) == 1
     assert loaded.config.sweeps[0].variable_kind == "marker_x"
     assert loaded.config.sweeps[0].steps == 11
+
+
+def test_loading_old_schema_version_raises(tmp_path):
+    import json
+    path = tmp_path / "old.quino.json"
+    path.write_text(json.dumps({"schema_version": "0.1.0", "project": {"id": "p", "name": "x"},
+                                "parameters": [], "model": {}, "view_state": {}}))
+    svc = ApplicationService()
+    with pytest.raises(ValueError, match="schema"):
+        svc.load_project(str(path))

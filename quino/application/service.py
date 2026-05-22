@@ -53,7 +53,7 @@ from quino.services.workspace_composition import compose_project as _compose_pro
 
 
 class ApplicationService:
-    schema_version = "0.1.0"
+    schema_version = "0.2.0"
 
     def __init__(self) -> None:
         self.id_service = IdService()
@@ -147,6 +147,13 @@ class ApplicationService:
 
     def load_project(self, path: str) -> Project:
         self.project = self.json_mapper.load_file(path)
+        if self.project is not None:
+            version = getattr(self.project, "schema_version", "0.0.0")
+            if version != self.schema_version:
+                raise ValueError(
+                    f"This project uses schema {version!r}; QUINO expects {self.schema_version!r}. "
+                    f"Rebuild the project file (no auto-migration is provided)."
+                )
         self._sync_id_service()
         self._undo_stack.clear()
         self._redo_stack.clear()
@@ -157,20 +164,7 @@ class ApplicationService:
             self.project.sketch.solve_error = None
             self.sketch._apply_sketch_constraints(set())
         self._ensure_baseline()
-        self._drop_dangling_analyses()
         return self.project
-
-    def _drop_dangling_analyses(self) -> None:
-        """Analyses must hang off a workspace pose. Drop any legacy entry
-        with workspace_pose_id == None (also remove runs that reference it)."""
-        if self.project is None or self.project.workspace is None:
-            return
-        ws = self.project.workspace
-        dangling = {a.id for a in ws.analyses if a.workspace_pose_id is None}
-        if not dangling:
-            return
-        ws.analyses = [a for a in ws.analyses if a.id not in dangling]
-        ws.runs = [r for r in ws.runs if getattr(r, "analysis_id", None) not in dangling]
 
     def _ensure_baseline(self) -> None:
         """Guarantee the workspace always has at least one baseline."""
