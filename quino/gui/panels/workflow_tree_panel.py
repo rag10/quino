@@ -85,6 +85,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
     run_analysis_requested = QtCore.Signal(str)  # analysis_id
     pose_selected = QtCore.Signal(str)           # pose_id
     analysis_selected = QtCore.Signal(str)       # analysis_id
+    run_selected = QtCore.Signal(str)            # run_id
     selection_changed = QtCore.Signal(str, str)  # (kind, id)
 
     def __init__(self, app_service: ApplicationService) -> None:
@@ -365,12 +366,25 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         a_item.setForeground(0, QtGui.QBrush(QtGui.QColor(color)))
         a_item.setToolTip(0, f"Status: {status}")
 
+        runs = sorted(
+            (r for r in ws.runs if r.analysis_id == analysis.id),
+            key=lambda r: r.created_at,
+            reverse=True,
+        )
+        for run in runs:
+            label = f"Run {run.created_at[:16].replace('T', ' ')}  {run.status}"
+            if run.note:
+                label += f"  · {run.note}"
+            run_item = self._make_item(run.id, "run", label)
+            a_item.addChild(run_item)
+
     _ITEM_ICONS = {
         "baseline": "workspace-baseline",
         "case": "workspace-case",
         "subcase": "workspace-subcase",
         "pose": "workspace-pose",
         "analysis": "workspace-analysis",
+        "run": "workspace-analysis",
         "block": "block-instance",
     }
 
@@ -473,6 +487,8 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         if not data:
             return
         kind, obj_id = data
+        if kind == "run":
+            self.run_selected.emit(obj_id)
         self.selection_changed.emit(kind, obj_id)
 
     def _update_toolbar_state(self) -> None:

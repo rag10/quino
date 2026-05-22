@@ -167,6 +167,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.workflow_panel.run_analysis_requested.connect(self._on_run_analysis_requested)
         self.workflow_panel.pose_selected.connect(self._on_workflow_pose_selected)
         self.workflow_panel.analysis_selected.connect(self._on_analysis_selected)
+        self.workflow_panel.run_selected.connect(self._on_run_selected)
         self.workflow_panel.selection_changed.connect(self._on_workflow_selection_changed)
         self.left_column.addWidget(self.workflow_panel)
         self.left_column.addWidget(self.tree)

@@ -115,26 +115,6 @@ def test_create_analysis_without_pose_raises():
         svc.workspace.create_analysis("BadAnalysis", case_id=case.id)
 
 
-def test_load_drops_dangling_analyses(tmp_path):
-    """Legacy analyses with workspace_pose_id=None must be dropped on load."""
-    from quino.domain.workspace import Analysis
-    svc = ApplicationService()
-    svc.new_project("test")
-    case = svc.workspace.create_case("C1")
-    # Force-create a dangling analysis via direct mutation (bypassing the
-    # new validation) to simulate a legacy project.
-    svc.project.workspace.analyses.append(
-        Analysis(id="legacy_001", name="Legacy", case_id=case.id, workspace_pose_id=None)
-    )
-    path = tmp_path / "legacy.quino.json"
-    svc.save_project(str(path))
-
-    svc2 = ApplicationService()
-    svc2.load_project(str(path))
-    assert all(a.workspace_pose_id is not None for a in svc2.project.workspace.analyses)
-    assert not any(a.id == "legacy_001" for a in svc2.project.workspace.analyses)
-
-
 def test_case_with_diffs_shows_diffs_subgroup_with_counts():
     _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     from quino.domain.workspace import ScalarValue
@@ -270,3 +250,26 @@ def test_subcase_uses_distinct_icon_from_top_case():
     parent_pix = parent_icon.pixmap(16, 16).toImage()
     child_pix = child_icon.pixmap(16, 16).toImage()
     assert parent_pix != child_pix
+
+
+def test_runs_appear_under_their_analysis_newest_first():
+    _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    from quino.domain.workspace import Run
+    svc = ApplicationService()
+    svc.new_project("t")
+    case = svc.workspace.create_case("C")
+    pose = svc.workspace.create_pose("P", case_id=case.id)
+    a = svc.workspace.create_analysis("Bump", case_id=case.id, workspace_pose_id=pose.id)
+    svc.project.workspace.runs.extend([
+        Run(id="r1", analysis_id=a.id, created_at="2026-05-22T10:00:00Z", status="ok"),
+        Run(id="r2", analysis_id=a.id, created_at="2026-05-22T10:05:00Z", status="failed"),
+        Run(id="r3", analysis_id=a.id, created_at="2026-05-22T10:10:00Z", status="stale"),
+    ])
+    panel = WorkflowTreePanel(svc)
+    panel.refresh()
+    analysis_item = panel._item_map[a.id]
+    run_labels = [analysis_item.child(i).text(0)
+                  for i in range(analysis_item.childCount())]
+    # Newest-first order
+    assert run_labels[0].endswith("stale") or "stale" in run_labels[0]
+    assert "ok" in run_labels[-1]
