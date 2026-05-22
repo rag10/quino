@@ -42,7 +42,7 @@ class ServiceContext:
     confirm_run_invalidation: Callable[[], bool] = lambda: True
 
     def confirm_invalidation_if_runs_exist(self) -> bool:
-        """If a case is active AND has analyses with at least one ok run,
+        """If a case is active AND has analyses with at least one ok/partial run,
         delegate to *confirm_run_invalidation*. Otherwise return True
         (no confirmation needed)."""
         project = self.project_provider()
@@ -57,8 +57,7 @@ class ServiceContext:
         if not analysis_ids:
             return True
         has_ok_run = any(
-            r.analysis_id in analysis_ids
-            and any(e.status == "ok" for e in r.entries)
+            r.analysis_id in analysis_ids and r.status in {"ok", "partial"}
             for r in ws.runs
         )
         if not has_ok_run:
@@ -66,34 +65,17 @@ class ServiceContext:
         return bool(self.confirm_run_invalidation())
 
     def discard_runs_for_active_case(self) -> None:
-        """Hard-delete all runs of the active case's analyses + their
-        on-disk artifacts. Called after the user has confirmed an edit
-        that invalidates them."""
+        """A non-cosmetic edit on the active case marks every affected run
+        as stale. The data is kept (artifact files included). The user can
+        delete individual runs from the workflow tree."""
         project = self.project_provider()
         if project is None or project.workspace is None:
             return
         ws = project.workspace
         if ws.active_case_id is None:
             return
-        analysis_ids = {
-            a.id for a in ws.analyses if a.case_id == ws.active_case_id
-        }
-        kept: list = []
-        for run in ws.runs:
-            if run.analysis_id in analysis_ids:
-                for entry in run.entries:
-                    if entry.result_ref is not None:
-                        try:
-                            from pathlib import Path
-                            # We can't resolve project_dir from here; the
-                            # GUI takes care of physical cleanup. The model
-                            # update alone is enough to make runs vanish
-                            # from the UI.
-                        except Exception:
-                            pass
-                continue
-            kept.append(run)
-        ws.runs = kept
+        from quino.services.run_invalidation import mark_runs_stale
+        mark_runs_stale(ws, ws.active_case_id, reason="model edited")
 
     def get_active_case(self):
         """Return the active Case if one is set, otherwise None."""

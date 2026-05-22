@@ -102,3 +102,26 @@ def test_delete_run_unlinks_artifact_and_removes_record(tmp_path):
 
     assert not any(r.id == "r1" for r in svc.project.workspace.runs)
     assert not art.exists()
+
+
+def test_edit_in_active_case_flips_runs_to_stale_not_deleted():
+    from quino.application.service import ApplicationService
+    from quino.domain.inputs import PropertyValueInput
+
+    svc = ApplicationService()
+    svc.new_project("t")
+    case = svc.workspace.create_case("C")
+    pose = svc.workspace.create_pose("P", case_id=case.id)
+    a = svc.workspace.create_analysis("D", case_id=case.id, workspace_pose_id=pose.id)
+    run = Run(id="r1", analysis_id=a.id, created_at="...", status="ok")
+    svc.project.workspace.runs.append(run)
+    svc.set_working_context(case_id=case.id)
+
+    # Auto-confirm any GUI prompt and trigger a numeric edit on the case.
+    svc._service_context.confirm_run_invalidation = lambda: True
+    body_id = svc.create_punctual_mass("M", x="0 mm", y="0 mm")
+    svc.update_property(body_id, "mass", PropertyValueInput(kind="expression", value="3 kg"))
+
+    # The run is still present, just stale.
+    assert any(r.id == "r1" for r in svc.project.workspace.runs)
+    assert run.status == "stale"
