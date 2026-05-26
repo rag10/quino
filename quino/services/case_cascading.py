@@ -14,6 +14,17 @@ from quino.services.cascade_property_registry import cascadable_properties
 from quino.services.case_overlay_validator import _entity_lookup
 
 
+_DOMAIN_LIST_ACCESSORS = {
+    "bodies":   lambda m: m.bodies,
+    "joints":   lambda m: m.joints,
+    "sliders":  lambda m: m.sliders,
+    "drivers":  lambda m: m.drivers,
+    "loads":    lambda m: m.loads,
+    "sensors":  lambda m: m.sensors,
+    "springs":  lambda m: m.springs,
+}
+
+
 class CascadingEngine:
     """Façade for the five mutation operations.
 
@@ -109,6 +120,145 @@ class CascadingEngine:
                     "parent_value": _to_serializable(new_value),
                     "child_value": _to_serializable(child_value),
                 })
+
+    # ---- add_entity -------------------------------------------------
+    def add_entity(self, case_id: str, entity: object, domain: str) -> None:
+        case = self._ws.cases[case_id]
+        accessor = _DOMAIN_LIST_ACCESSORS.get(domain)
+        if accessor is None:
+            raise ValueError(f"Unknown domain {domain!r}")
+        target_list = accessor(case.model)
+        target_list.append(entity)
+
+        if case.overlay is not None:
+            ent_id = getattr(entity, "id", None)
+            if ent_id is None:
+                raise ValueError(f"Entity in domain {domain!r} has no .id")
+            case.overlay.entities[ent_id] = EntityOverlay(origin="local")
+            # Markers contained in a Body need their own entries
+            if domain == "bodies":
+                for marker in getattr(entity, "markers", []):
+                    case.overlay.entities[marker.id] = EntityOverlay(origin="local")
+
+    # ---- remove_entity ----------------------------------------------
+    def remove_entity(self, case_id: str, entity_id: str) -> None:
+        case = self._ws.cases[case_id]
+        target = self._find_entity(case, entity_id)
+        if target is None:
+            return  # idempotent
+
+        was_inherited = (
+            case.overlay is not None
+            and entity_id in case.overlay.entities
+            and case.overlay.entities[entity_id].origin == "inherited"
+        )
+
+        self._remove_entity_from_model(case, entity_id)
+
+        if case.overlay is not None:
+            case.overlay.entities.pop(entity_id, None)
+            if was_inherited:
+                case.overlay.deleted_inherited_entity_ids.add(entity_id)
+
+        # Cascade to direct children
+        for child_id in self._direct_children(case_id):
+            self._cascade_removal(child_id, entity_id)
+
+    def _cascade_removal(self, child_id: str, entity_id: str) -> None:
+        child = self._ws.cases[child_id]
+        assert child.overlay is not None
+        if entity_id in child.overlay.deleted_inherited_entity_ids:
+            return
+        entry = child.overlay.entities.get(entity_id)
+        if entry is None:
+            return
+
+        # "untouched" = inherited AND has linked properties (user hasn't customised)
+        # AND no existing divergence warning for this entity
+        has_divergence = any(
+            w.get("path", "").startswith(f"entities/{entity_id}/")
+            for w in child.metadata.get("divergence_warnings", [])
+        )
+        untouched = (
+            entry.origin == "inherited"
+            and bool(entry.linked_properties)
+            and not has_divergence
+        )
+
+        if untouched:
+            self._remove_entity_from_model(child, entity_id)
+            child.overlay.entities.pop(entity_id, None)
+            for gc_id in self._direct_children(child_id):
+                self._cascade_removal(gc_id, entity_id)
+        else:
+            # Keep the entity, flip to local, record warning
+            entry.origin = "local"
+            entry.linked_properties.clear()
+            child.metadata.setdefault("divergence_warnings", []).append({
+                "kind": "deleted_in_parent",
+                "path": f"entities/{entity_id}",
+            })
+
+    def _remove_entity_from_model(self, case: "Case", entity_id: str) -> None:
+        m = case.model
+        # Use in-place mutation in case slots=True prevents field reassignment
+        new_bodies = [b for b in m.bodies if b.id != entity_id]
+        m.bodies.clear(); m.bodies.extend(new_bodies)
+        for body in m.bodies:
+            new_markers = [mk for mk in body.markers if mk.id != entity_id]
+            body.markers.clear(); body.markers.extend(new_markers)
+            new_edge = [mid for mid in body.edge_order if mid != entity_id]
+            body.edge_order.clear(); body.edge_order.extend(new_edge)
+        new_joints = [j for j in m.joints if j.id != entity_id]
+        m.joints.clear(); m.joints.extend(new_joints)
+        new_sliders = [s for s in m.sliders if s.id != entity_id]
+        m.sliders.clear(); m.sliders.extend(new_sliders)
+        new_drivers = [d for d in m.drivers if d.id != entity_id]
+        m.drivers.clear(); m.drivers.extend(new_drivers)
+        new_loads = [l for l in m.loads if l.id != entity_id]
+        m.loads.clear(); m.loads.extend(new_loads)
+        new_sensors = [s for s in m.sensors if s.id != entity_id]
+        m.sensors.clear(); m.sensors.extend(new_sensors)
+        new_springs = [sp for sp in m.springs if sp.id != entity_id]
+        m.springs.clear(); m.springs.extend(new_springs)
+        if m.control_graph is not None:
+            m.control_graph.instances.pop(entity_id, None)
+            m.control_graph.connections = [
+                c for c in m.control_graph.connections
+                if c.src_instance != entity_id and c.dst_instance != entity_id
+            ]
+
+    # ---- reparent_case ----------------------------------------------
+    def reparent_case(self, case_id: str, new_parent_case_id: str | None) -> None:
+        case = self._ws.cases[case_id]
+        if new_parent_case_id is not None and self._would_form_cycle(case_id, new_parent_case_id):
+            raise ValueError(
+                f"Reparenting {case_id!r} under {new_parent_case_id!r} would form a cycle"
+            )
+
+        case.parent_case_id = new_parent_case_id
+
+        if new_parent_case_id is None:
+            case.overlay = None
+            if case_id not in self._ws.root_case_ids:
+                self._ws.root_case_ids.append(case_id)
+        else:
+            from quino.services.case_overlay_validator import rebuild_overlay
+            rebuild_overlay(case, self._ws.cases[new_parent_case_id])
+            if case_id in self._ws.root_case_ids:
+                self._ws.root_case_ids.remove(case_id)
+
+    def _would_form_cycle(self, case_id: str, candidate_parent_id: str) -> bool:
+        current: str | None = candidate_parent_id
+        seen: set[str] = set()
+        while current is not None:
+            if current == case_id:
+                return True
+            if current in seen:
+                return True
+            seen.add(current)
+            current = self._ws.cases[current].parent_case_id
+        return False
 
     # ---- helpers ----------------------------------------------------
     def _direct_children(self, case_id: str) -> list[str]:

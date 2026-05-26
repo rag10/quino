@@ -144,3 +144,143 @@ def test_edit_property_in_owner_unlinks_from_parent():
     engine.edit_property(child_id, "b1", "mass", ScalarProperty("9 kg", "kg", Dimension.MASS))
     assert "mass" not in child.overlay.entities["b1"].linked_properties
     assert child.model.bodies[0].mass.expression == "9 kg"
+
+
+# ---------------------------------------------------------------------------
+# Task 10: add_entity
+# ---------------------------------------------------------------------------
+
+def test_add_entity_in_case_marks_origin_local():
+    ws, parent = _ws_with_root_case()
+    engine = CascadingEngine(ws)
+    new_body = _make_body("b2")
+    new_body.markers[0].id = "n1"
+    new_body.markers[1].id = "n2"
+    new_body.edge_order = ["n1", "n2"]
+    engine.add_entity(parent.id, new_body, domain="bodies")
+
+    assert any(b.id == "b2" for b in parent.model.bodies)
+    # Root case has no overlay
+    assert parent.overlay is None
+
+
+def test_add_entity_in_child_marks_local_and_does_not_propagate_to_grandchild():
+    ws, parent = _ws_with_root_case()
+    engine = CascadingEngine(ws)
+    child_id = engine.fork_case(parent.id, "Child")
+    grand_id = engine.fork_case(child_id, "Grand")
+    child = ws.cases[child_id]
+    grand = ws.cases[grand_id]
+
+    new_body = _make_body("b9")
+    new_body.markers[0].id = "x1"
+    new_body.markers[1].id = "x2"
+    new_body.edge_order = ["x1", "x2"]
+    engine.add_entity(child_id, new_body, domain="bodies")
+
+    assert any(b.id == "b9" for b in child.model.bodies)
+    assert child.overlay.entities["b9"].origin == "local"
+    # Not retroactively added to grandchild
+    assert all(b.id != "b9" for b in grand.model.bodies)
+
+
+# ---------------------------------------------------------------------------
+# Task 11: remove_entity
+# ---------------------------------------------------------------------------
+
+def test_remove_local_entity_clears_overlay_entry():
+    ws, parent = _ws_with_root_case()
+    engine = CascadingEngine(ws)
+    child_id = engine.fork_case(parent.id, "Child")
+    child = ws.cases[child_id]
+    new_body = _make_body("b9")
+    new_body.markers[0].id = "x1"
+    new_body.markers[1].id = "x2"
+    new_body.edge_order = ["x1", "x2"]
+    engine.add_entity(child_id, new_body, domain="bodies")
+    assert "b9" in child.overlay.entities
+
+    engine.remove_entity(child_id, "b9")
+    assert all(b.id != "b9" for b in child.model.bodies)
+    assert "b9" not in child.overlay.entities
+
+
+def test_remove_inherited_entity_records_deletion():
+    ws, parent = _ws_with_root_case()
+    engine = CascadingEngine(ws)
+    child_id = engine.fork_case(parent.id, "Child")
+    child = ws.cases[child_id]
+
+    engine.remove_entity(child_id, "b1")
+    assert all(b.id != "b1" for b in child.model.bodies)
+    assert "b1" in child.overlay.deleted_inherited_entity_ids
+
+
+def test_remove_propagates_to_clean_descendant():
+    ws, parent = _ws_with_root_case()
+    engine = CascadingEngine(ws)
+    child_id = engine.fork_case(parent.id, "Child")
+    child = ws.cases[child_id]
+
+    engine.remove_entity(parent.id, "b1")
+    assert all(b.id != "b1" for b in child.model.bodies)
+
+
+def test_remove_in_parent_keeps_customised_descendant_with_warning():
+    ws, parent = _ws_with_root_case()
+    engine = CascadingEngine(ws)
+    child_id = engine.fork_case(parent.id, "Child")
+    child = ws.cases[child_id]
+
+    # Child customises mass first
+    engine.edit_property(child_id, "b1", "mass", ScalarProperty("3 kg", "kg", Dimension.MASS))
+
+    # Parent removes b1 → child must keep it, mark origin=local, record warning
+    engine.remove_entity(parent.id, "b1")
+    assert any(b.id == "b1" for b in child.model.bodies)
+    assert child.overlay.entities["b1"].origin == "local"
+    assert child.overlay.entities["b1"].linked_properties == set()
+    warnings = child.metadata.get("divergence_warnings", [])
+    assert any("deleted_in_parent" in w.get("kind", "") for w in warnings)
+
+
+# ---------------------------------------------------------------------------
+# Task 12: reparent_case
+# ---------------------------------------------------------------------------
+
+def test_reparent_case_to_none_drops_overlay():
+    ws, parent = _ws_with_root_case()
+    engine = CascadingEngine(ws)
+    child_id = engine.fork_case(parent.id, "Child")
+    engine.reparent_case(child_id, new_parent_case_id=None)
+    assert ws.cases[child_id].parent_case_id is None
+    assert ws.cases[child_id].overlay is None
+    assert child_id in ws.root_case_ids
+
+
+def test_reparent_case_rejects_cycle():
+    ws, parent = _ws_with_root_case()
+    engine = CascadingEngine(ws)
+    c1 = engine.fork_case(parent.id, "C1")
+    c2 = engine.fork_case(c1, "C2")
+    # Reparenting parent under c2 would create a cycle
+    with pytest.raises(ValueError):
+        engine.reparent_case(parent.id, new_parent_case_id=c2)
+
+
+# ---------------------------------------------------------------------------
+# Task 13: end-to-end engine validation
+# ---------------------------------------------------------------------------
+
+def test_engine_operations_keep_overlay_valid():
+    ws, parent = _ws_with_root_case()
+    engine = CascadingEngine(ws)
+    c1 = engine.fork_case(parent.id, "C1")
+    c2 = engine.fork_case(c1, "C2")
+
+    engine.edit_property(parent.id, "b1", "mass", ScalarProperty("4 kg", "kg", Dimension.MASS))
+    engine.edit_property(c1, "b1", "name", "renamed bar")
+    engine.remove_entity(c2, "m1")
+
+    validate_overlay(ws.cases[c1], parent=ws.cases[parent.id])
+    validate_overlay(ws.cases[c2], parent=ws.cases[c1])
