@@ -91,3 +91,56 @@ def test_fork_case_rejects_unknown_parent():
     engine = CascadingEngine(ws)
     with pytest.raises(KeyError):
         engine.fork_case("nope", "Child")
+
+
+def test_edit_property_updates_local_and_unlinks_in_owner():
+    ws, parent = _ws_with_root_case()
+    engine = CascadingEngine(ws)
+    new_mass = ScalarProperty("5 kg", "kg", Dimension.MASS)
+    engine.edit_property(parent.id, "b1", "mass", new_mass)
+    assert parent.model.bodies[0].mass.expression == "5 kg"
+    # Parent is a root case → overlay is None, no unlinking needed
+    assert parent.overlay is None
+
+
+def test_edit_property_propagates_to_linked_descendant():
+    ws, parent = _ws_with_root_case()
+    engine = CascadingEngine(ws)
+    child_id = engine.fork_case(parent.id, "Child")
+    child = ws.cases[child_id]
+
+    new_mass = ScalarProperty("5 kg", "kg", Dimension.MASS)
+    engine.edit_property(parent.id, "b1", "mass", new_mass)
+
+    assert child.model.bodies[0].mass.expression == "5 kg"
+    # Still linked
+    assert "mass" in child.overlay.entities["b1"].linked_properties
+
+
+def test_edit_property_records_warning_when_descendant_has_override():
+    ws, parent = _ws_with_root_case()
+    engine = CascadingEngine(ws)
+    child_id = engine.fork_case(parent.id, "Child")
+    child = ws.cases[child_id]
+
+    # Step 1: child overrides mass to 3 kg (this unlinks)
+    engine.edit_property(child_id, "b1", "mass", ScalarProperty("3 kg", "kg", Dimension.MASS))
+    assert "mass" not in child.overlay.entities["b1"].linked_properties
+
+    # Step 2: parent changes mass to 5 kg → child must NOT change, must record warning
+    engine.edit_property(parent.id, "b1", "mass", ScalarProperty("5 kg", "kg", Dimension.MASS))
+
+    assert child.model.bodies[0].mass.expression == "3 kg"
+    warnings = child.metadata.get("divergence_warnings", [])
+    assert any(w["path"].endswith("/mass") for w in warnings)
+
+
+def test_edit_property_in_owner_unlinks_from_parent():
+    ws, parent = _ws_with_root_case()
+    engine = CascadingEngine(ws)
+    child_id = engine.fork_case(parent.id, "Child")
+    child = ws.cases[child_id]
+
+    engine.edit_property(child_id, "b1", "mass", ScalarProperty("9 kg", "kg", Dimension.MASS))
+    assert "mass" not in child.overlay.entities["b1"].linked_properties
+    assert child.model.bodies[0].mass.expression == "9 kg"
