@@ -1,10 +1,12 @@
 # quino/services/case_overlay_validator.py
 from __future__ import annotations
 
+from dataclasses import fields as _fields
 from typing import Iterable
 
 from quino.domain.model import Body, Driver, Joint, Load, Model, Sensor, Slider, Spring
 from quino.domain.workspace import Case, CaseOverlay, EntityOverlay
+from quino.services.cascade_property_registry import cascadable_properties
 
 
 class OverlayInvariantError(ValueError):
@@ -105,3 +107,90 @@ def validate_overlay(case: Case, parent: Case | None) -> None:
                 f"Case {case.id!r}: pose {pid!r} is origin='inherited' "
                 f"but does not exist in parent {parent.id!r}"
             )
+
+
+def _entity_lookup(case: Case) -> dict[str, tuple[object, type]]:
+    """Map id -> (entity, cls) for everything in the case's model."""
+    out: dict[str, tuple[object, type]] = {}
+    m = case.model
+    for body in m.bodies:
+        out[body.id] = (body, type(body))
+        for marker in body.markers:
+            out[marker.id] = (marker, type(marker))
+    for joint in m.joints:
+        out[joint.id] = (joint, type(joint))
+    for slider in m.sliders:
+        out[slider.id] = (slider, type(slider))
+    for driver in m.drivers:
+        out[driver.id] = (driver, type(driver))
+    for load in m.loads:
+        out[load.id] = (load, type(load))
+    for sensor in m.sensors:
+        out[sensor.id] = (sensor, type(sensor))
+    for spring in m.springs:
+        out[spring.id] = (spring, type(spring))
+    if hasattr(m, 'control_graph') and m.control_graph is not None:
+        for inst in m.control_graph.instances.values():
+            out[inst.instance_id] = (inst, type(inst))
+    return out
+
+
+def _linked_properties_for_match(parent_ent: object, child_ent: object, cls: type) -> set[str]:
+    """Return the subset of cascadable properties whose value matches between parent and child."""
+    out: set[str] = set()
+    try:
+        cascadable = cascadable_properties(cls)
+    except ValueError:
+        return out
+    for f in _fields(cls):
+        if f.name not in cascadable:
+            continue
+        try:
+            if getattr(parent_ent, f.name) == getattr(child_ent, f.name):
+                out.add(f.name)
+        except Exception:
+            pass
+    return out
+
+
+def rebuild_overlay(case: Case, parent: Case | None) -> None:
+    """Recompute case.overlay by comparing case.model against parent.model.
+
+    Lossy: cannot distinguish 'intentional override at same value' from
+    'linked, value coincidentally matches'. Used only for migration and recovery.
+    """
+    if parent is None:
+        case.overlay = None
+        return
+
+    parent_index = _entity_lookup(parent)
+    child_index = _entity_lookup(case)
+
+    overlay = CaseOverlay()
+    for ent_id, (child_ent, cls) in child_index.items():
+        if ent_id in parent_index:
+            parent_ent, parent_cls = parent_index[ent_id]
+            if parent_cls is cls:
+                linked = _linked_properties_for_match(parent_ent, child_ent, cls)
+                overlay.entities[ent_id] = EntityOverlay(origin="inherited", linked_properties=linked)
+            else:
+                overlay.entities[ent_id] = EntityOverlay(origin="local")
+        else:
+            overlay.entities[ent_id] = EntityOverlay(origin="local")
+
+    for parent_id in parent_index.keys():
+        if parent_id not in child_index:
+            overlay.deleted_inherited_entity_ids.add(parent_id)
+
+    # Poses
+    parent_pose_ids = {p.id for p in parent.poses}
+    for pose in case.poses:
+        if pose.id in parent_pose_ids:
+            overlay.poses[pose.id] = EntityOverlay(origin="inherited")
+        else:
+            overlay.poses[pose.id] = EntityOverlay(origin="local")
+    for ppose in parent.poses:
+        if ppose.id not in {p.id for p in case.poses}:
+            overlay.deleted_inherited_pose_ids.add(ppose.id)
+
+    case.overlay = overlay

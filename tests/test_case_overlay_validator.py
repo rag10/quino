@@ -77,3 +77,43 @@ def test_local_origin_with_linked_properties_is_invalid():
     )
     with pytest.raises(OverlayInvariantError):
         validate_overlay(child, parent=parent)
+
+
+from quino.services.case_overlay_validator import rebuild_overlay
+from quino.services.cascade_property_registry import cascadable_properties
+
+
+def test_rebuild_overlay_marks_value_equal_entities_as_fully_linked():
+    body = _make_body()
+    parent = Case(id="P", name="P", model=Model(bodies=[body]))
+    from copy import deepcopy
+    child = Case(id="C", name="C", parent_case_id="P", model=Model(bodies=[deepcopy(body)]))
+    rebuild_overlay(child, parent)
+    assert child.overlay is not None
+    overlay = child.overlay.entities["b1"]
+    assert overlay.origin == "inherited"
+    # At minimum, shared cascadable properties should be linked
+    assert len(overlay.linked_properties) > 0
+
+
+def test_rebuild_overlay_marks_local_only_entities_as_local():
+    parent = Case(id="P", name="P", model=Model(bodies=[]))
+    child = Case(id="C", name="C", parent_case_id="P", model=Model(bodies=[_make_body()]))
+    rebuild_overlay(child, parent)
+    overlay = child.overlay.entities["b1"]
+    assert overlay.origin == "local"
+    assert overlay.linked_properties == set()
+
+
+def test_rebuild_overlay_records_deletions():
+    parent_body = _make_body("orphan")
+    parent = Case(id="P", name="P", model=Model(bodies=[parent_body]))
+    child = Case(id="C", name="C", parent_case_id="P", model=Model(bodies=[]))
+    rebuild_overlay(child, parent)
+    assert "orphan" in child.overlay.deleted_inherited_entity_ids
+
+
+def test_rebuild_overlay_root_case_sets_overlay_to_none():
+    root = Case(id="root", name="Root", model=Model(bodies=[_make_body()]))
+    rebuild_overlay(root, None)
+    assert root.overlay is None
