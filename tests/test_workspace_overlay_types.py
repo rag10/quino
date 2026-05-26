@@ -32,3 +32,30 @@ def test_workspace_pose_defaults():
     assert pose.solve_failed is False
     assert pose.body_poses == {}
     assert pose.parent_pose_id is None
+
+
+from quino.domain.workspace import Analysis, Case, Run, Workspace
+
+
+def test_case_defaults():
+    case = Case(id="c1", name="Root")
+    assert case.parent_case_id is None
+    assert case.overlay is None
+    assert case.runs == []
+    assert case.analyses == []
+    assert case.poses == []
+
+
+def test_workspace_defaults():
+    ws = Workspace(id="w1", name="Test", schema_version="0.3.0")
+    assert ws.root_case_ids == []
+    assert ws.cases == {}
+    assert ws.selected_case_id is None
+
+
+def test_analysis_no_baseline_id_or_case_id():
+    a = Analysis(id="a1", name="A", analysis_type="static")
+    assert not hasattr(a, "baseline_id")
+    assert not hasattr(a, "case_id")
+    assert not hasattr(a, "workspace_pose_id")
+    assert a.pose_id is None

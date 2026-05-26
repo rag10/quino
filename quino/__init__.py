@@ -1,6 +1,17 @@
-from quino.application.service import ApplicationService
-from quino.application.example_registry import ExampleEntry, ExampleRegistry
-from quino.application.examples import ExampleBuildResult, build_double_pendulum_example, build_four_bar_example, build_slider_crank_example
+try:
+    from quino.application.service import ApplicationService
+    from quino.application.example_registry import ExampleEntry, ExampleRegistry
+    from quino.application.examples import ExampleBuildResult, build_double_pendulum_example, build_four_bar_example, build_slider_crank_example
+except ImportError:
+    # Application layer broken during case-as-model redesign — call sites will
+    # be fixed in subsequent commits on the redesign/case-as-model branch.
+    ApplicationService = None  # type: ignore[assignment,misc]
+    ExampleEntry = None  # type: ignore[assignment]
+    ExampleRegistry = None  # type: ignore[assignment]
+    ExampleBuildResult = None  # type: ignore[assignment]
+    build_double_pendulum_example = None  # type: ignore[assignment]
+    build_four_bar_example = None  # type: ignore[assignment]
+    build_slider_crank_example = None  # type: ignore[assignment]
 from quino.domain.inputs import (
     JointEndpointInput,
     MarkerInput,

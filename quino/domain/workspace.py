@@ -3,9 +3,23 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from quino.domain.model import BodyPose, Metadata
+from quino.domain.model import (
+    BodyPose,
+    GravityLoad,
+    Metadata,
+    Model,
+    Parameter,
+    ReactionOutput,
+    SensorOutput,
+    Sketch,
+    ViewState,
+)
 from quino.domain.plotting import MetricDef, PlotDef
 
+
+# ---------------------------------------------------------------------------
+# Scalar / tolerance helpers
+# ---------------------------------------------------------------------------
 
 @dataclass(slots=True)
 class ScalarValue:
@@ -39,6 +53,10 @@ class ParameterDescriptor:
     entity_id: str | None = None
     property_name: str | None = None
 
+
+# ---------------------------------------------------------------------------
+# Sweep / analysis config types
+# ---------------------------------------------------------------------------
 
 @dataclass(slots=True)
 class SweepDef:
@@ -100,56 +118,6 @@ class EquilibriumConfig:
     metrics: list[MetricDef] = field(default_factory=list)
 
 
-@dataclass(slots=True)
-class Baseline:
-    id: str
-    name: str
-    description: str = ""
-    source_run_id: str | None = None
-    model_snapshot_id: str | None = None
-    model_hash: str | None = None
-    invariant_parameter_keys: list[str] = field(default_factory=list)
-    approval_status: str | None = None
-    approved_run_id: str | None = None
-    tolerances: dict[str, Tolerance] = field(default_factory=dict)
-    metrics: dict[str, MetricDefinition] = field(default_factory=dict)
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class Case:
-    id: str
-    name: str
-    baseline_id: str | None = None
-    parent_case_id: str | None = None
-    model_snapshot_id: str | None = None
-    invariant_values: dict[str, ScalarValue] = field(default_factory=dict)
-    # Structural diffs vs parent baseline/case
-    added_entities: dict[str, list[dict]] = field(default_factory=dict)
-    #   key: domain ("bodies", "joints", "sliders", "drivers", "loads", "sensors", "springs")
-    removed_entity_ids: list[str] = field(default_factory=list)
-    reference_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
-    #   key: entity_id, value: {property_name: new_value}
-    # Connections have no id, so removals are recorded as 4-tuples of
-    # (src_instance, src_port, dst_instance, dst_port).
-    removed_connections: list[tuple[str, str, str, str]] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class WorkspacePose:
-    id: str
-    name: str
-    baseline_id: str | None = None
-    case_id: str | None = None
-    project_pose_id: str | None = None
-    is_default: bool = False
-    parent_pose_id: str | None = None
-    requires_recompute: bool = True
-    solve_failed: bool = False
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
 AnalysisConfig = DynamicConfig | KinematicConfig | StaticConfig | EquilibriumConfig
 
 _DEFAULT_ANALYSIS_CONFIG = {
@@ -160,14 +128,64 @@ _DEFAULT_ANALYSIS_CONFIG = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Pose (consolidated workspace-level pose)
+# ---------------------------------------------------------------------------
+
+@dataclass(slots=True)
+class Pose:
+    """Consolidated Pose dataclass for workspace-level poses.
+
+    This temporarily shadows `quino.domain.model.Pose` and will eventually
+    replace it after Task 4 removes the model-level Pose class.
+    """
+    id: str
+    name: str
+    body_poses: dict[str, BodyPose] = field(default_factory=dict)
+    initial_velocities: dict[str, float] = field(default_factory=dict)
+    parent_pose_id: str | None = None
+    is_default: bool = False
+    requires_recompute: bool = True
+    solve_failed: bool = False
+    metadata: Metadata = field(default_factory=Metadata)
+
+
+# ---------------------------------------------------------------------------
+# Entity / Case overlay helpers
+# ---------------------------------------------------------------------------
+
+@dataclass(slots=True)
+class EntityOverlay:
+    origin: str = "local"  # "inherited" | "local"
+    linked_properties: set[str] = field(default_factory=set)
+
+    def __post_init__(self) -> None:
+        if self.origin not in {"inherited", "local"}:
+            raise ValueError(f"EntityOverlay.origin must be 'inherited' or 'local', got {self.origin!r}")
+        if self.origin == "local" and self.linked_properties:
+            raise ValueError("EntityOverlay with origin='local' must have empty linked_properties")
+
+
+@dataclass(slots=True)
+class CaseOverlay:
+    entities: dict[str, EntityOverlay] = field(default_factory=dict)
+    deleted_inherited_entity_ids: set[str] = field(default_factory=set)
+    inherited_connections: set[tuple[str, str, str, str]] = field(default_factory=set)
+    deleted_inherited_connections: set[tuple[str, str, str, str]] = field(default_factory=set)
+    poses: dict[str, EntityOverlay] = field(default_factory=dict)
+    deleted_inherited_pose_ids: set[str] = field(default_factory=set)
+
+
+# ---------------------------------------------------------------------------
+# Analysis
+# ---------------------------------------------------------------------------
+
 @dataclass(slots=True)
 class Analysis:
     id: str
     name: str
     analysis_type: str = "dynamic"
-    baseline_id: str | None = None
-    case_id: str | None = None
-    workspace_pose_id: str | None = None
+    pose_id: str | None = None
     config: AnalysisConfig = field(default=None)  # type: ignore[assignment]
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -178,6 +196,10 @@ class Analysis:
                 raise ValueError(f"Unknown analysis_type {self.analysis_type!r}")
             self.config = ctor()
 
+
+# ---------------------------------------------------------------------------
+# Run artifacts
+# ---------------------------------------------------------------------------
 
 @dataclass(slots=True)
 class ResultRef:
@@ -217,75 +239,45 @@ class Run:
             raise ValueError(f"Run status {self.status!r} is not allowed")
 
 
-@dataclass(slots=True)
-class Workspace:
-    baselines: list[Baseline] = field(default_factory=list)
-    active_baseline_id: str | None = None
-    active_case_id: str | None = None
-    selected_pose_id: str | None = None
-    selected_analysis_id: str | None = None
-    cases: list[Case] = field(default_factory=list)
-    poses: list[WorkspacePose] = field(default_factory=list)
-    analyses: list[Analysis] = field(default_factory=list)
-    runs: list[Run] = field(default_factory=list)
-    parameter_catalog: dict[str, ParameterDescriptor] = field(default_factory=dict)
-    model_snapshots: dict[str, str] = field(default_factory=dict)
-    promotion_history: list[dict[str, Any]] = field(default_factory=list)
-    next_sequence: int = 1
-
-    def is_empty(self) -> bool:
-        return (
-            not self.baselines
-            and self.active_baseline_id is None
-            and self.active_case_id is None
-            and self.selected_pose_id is None
-            and self.selected_analysis_id is None
-            and not self.cases
-            and not self.poses
-            and not self.analyses
-            and not self.runs
-            and not self.parameter_catalog
-            and not self.model_snapshots
-            and not self.promotion_history
-            and self.next_sequence == 1
-        )
-
+# ---------------------------------------------------------------------------
+# Case (case-as-model: each case owns a full Model)
+# ---------------------------------------------------------------------------
 
 @dataclass(slots=True)
-class Pose:
-    """Consolidated Pose dataclass for workspace-level poses.
-
-    This temporarily shadows `quino.domain.model.Pose` and will eventually
-    replace it after Task 4 removes the model-level Pose class.
-    """
+class Case:
     id: str
     name: str
-    body_poses: dict[str, BodyPose] = field(default_factory=dict)
-    initial_velocities: dict[str, float] = field(default_factory=dict)
-    parent_pose_id: str | None = None
-    is_default: bool = False
-    requires_recompute: bool = True
-    solve_failed: bool = False
-    metadata: Metadata = field(default_factory=Metadata)
+    description: str = ""
+    parent_case_id: str | None = None
+    model: Model = field(default_factory=Model)
+    poses: list[Pose] = field(default_factory=list)
+    analyses: list[Analysis] = field(default_factory=list)
+    runs: list[Run] = field(default_factory=list)
+    sensor_outputs: dict[str, SensorOutput] = field(default_factory=dict)
+    reaction_outputs: dict[str, ReactionOutput] = field(default_factory=dict)
+    overlay: CaseOverlay | None = None
+    tolerances: dict[str, Tolerance] = field(default_factory=dict)
+    metrics: dict[str, MetricDefinition] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(slots=True)
-class EntityOverlay:
-    origin: str = "local"  # "inherited" | "local"
-    linked_properties: set[str] = field(default_factory=set)
-
-    def __post_init__(self) -> None:
-        if self.origin not in {"inherited", "local"}:
-            raise ValueError(f"EntityOverlay.origin must be 'inherited' or 'local', got {self.origin!r}")
-        if self.origin == "local" and self.linked_properties:
-            raise ValueError("EntityOverlay with origin='local' must have empty linked_properties")
-
+# ---------------------------------------------------------------------------
+# Workspace (top-level container)
+# ---------------------------------------------------------------------------
 
 @dataclass(slots=True)
-class CaseOverlay:
-    entities: dict[str, EntityOverlay] = field(default_factory=dict)
-    deleted_inherited_entity_ids: set[str] = field(default_factory=set)
-    inherited_connections: set[tuple[str, str, str, str]] = field(default_factory=set)
-    deleted_inherited_connections: set[tuple[str, str, str, str]] = field(default_factory=set)
-    poses: dict[str, EntityOverlay] = field(default_factory=dict)
-    deleted_inherited_pose_ids: set[str] = field(default_factory=set)
+class Workspace:
+    id: str
+    name: str
+    schema_version: str
+    sketch: Sketch | None = None
+    parameters: list[Parameter] = field(default_factory=list)
+    parameter_catalog: dict[str, ParameterDescriptor] = field(default_factory=dict)
+    view_state: ViewState = field(default_factory=ViewState)
+    gravity_default: GravityLoad | None = None
+    root_case_ids: list[str] = field(default_factory=list)
+    cases: dict[str, Case] = field(default_factory=dict)
+    selected_case_id: str | None = None
+    selected_pose_id: str | None = None
+    selected_analysis_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
