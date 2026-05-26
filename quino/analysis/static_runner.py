@@ -9,7 +9,6 @@ from quino.domain.workspace import ResultRef, Run
 from quino.services.metric_evaluator import evaluate_metrics
 from quino.services.mechanism_dof import compute_mechanism_dof
 from quino.services.static_solver import solve_static
-from quino.services.workspace_composition import compose_project
 
 
 def _effective_dof(project) -> int:
@@ -19,8 +18,7 @@ def _effective_dof(project) -> int:
 
 class StaticAnalysisRunner(AnalysisRunner):
     def validate(self, project, analysis) -> list[str]:
-        composed = self._compose(project, analysis)
-        dof = _effective_dof(composed)
+        dof = _effective_dof(project)
         errors: list[str] = []
         if dof != 0:
             errors.append(
@@ -28,7 +26,7 @@ class StaticAnalysisRunner(AnalysisRunner):
                 "Lock drivers or add model constraints before running."
             )
             return errors
-        if not composed.model.loads and composed.model.gravity is None and not composed.model.springs:
+        if not project.model.loads and project.model.gravity is None and not project.model.springs:
             errors.append("WARNING: No external loads; equilibrium is trivial.")
         return errors
 
@@ -50,7 +48,7 @@ class StaticAnalysisRunner(AnalysisRunner):
                 error_message="Cancelled by user",
             )
         try:
-            report = solve_static(self._compose(project, analysis), analysis.config)
+            report = solve_static(project, analysis.config)
         except Exception as exc:
             return AnalysisResult(
                 analysis_id=analysis.id,
@@ -67,13 +65,6 @@ class StaticAnalysisRunner(AnalysisRunner):
             analysis_type="static",
             status="ok",
         )
-
-    def _compose(self, project, analysis):
-        case = next(
-            (case for case in (project.workspace.cases if project.workspace else []) if case.id == analysis.case_id),
-            None,
-        )
-        return compose_project(project, case=case)
 
     def _persist_artifact(self, project_dir: Path, run: Run, report: dict) -> Path:
         artifact_dir = project_dir / "artifacts" / f"run_{run.id}"

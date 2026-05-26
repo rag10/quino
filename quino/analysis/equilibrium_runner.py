@@ -9,18 +9,16 @@ from quino.analysis.static_runner import _effective_dof
 from quino.domain.workspace import ResultRef, Run
 from quino.services.metric_evaluator import evaluate_metrics
 from quino.services.equilibrium_finder import find_stable_equilibria
-from quino.services.workspace_composition import compose_project
 
 
 class EquilibriumAnalysisRunner(AnalysisRunner):
     def validate(self, project, analysis) -> list[str]:
-        composed = self._compose(project, analysis)
-        dof = _effective_dof(composed)
+        dof = _effective_dof(project)
         errors: list[str] = []
         if dof <= 0:
             errors.append(f"DoF={dof}. Equilibrium analysis is meaningful only for DoF > 0.")
             return errors
-        if composed.model.gravity is None and not composed.model.springs and not composed.model.loads:
+        if project.model.gravity is None and not project.model.springs and not project.model.loads:
             errors.append("No force source (gravity, springs or loads): no equilibrium to find.")
         return errors
 
@@ -36,7 +34,7 @@ class EquilibriumAnalysisRunner(AnalysisRunner):
     ) -> AnalysisResult:
         try:
             equilibria = find_stable_equilibria(
-                self._compose(project, analysis),
+                project,
                 analysis.config,
                 initial_pose=initial_pose,
                 cancel_event=cancel_event,
@@ -57,13 +55,6 @@ class EquilibriumAnalysisRunner(AnalysisRunner):
             analysis_type="equilibrium",
             status="ok" if equilibria else "partial",
         )
-
-    def _compose(self, project, analysis):
-        case = next(
-            (case for case in (project.workspace.cases if project.workspace else []) if case.id == analysis.case_id),
-            None,
-        )
-        return compose_project(project, case=case)
 
     def _persist_artifact(self, project_dir: Path, run: Run, equilibria: list[dict]) -> Path:
         artifact_dir = project_dir / "artifacts" / f"run_{run.id}"
