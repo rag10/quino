@@ -173,15 +173,29 @@ class CascadingEngine:
         if entry is None:
             return
 
-        # "untouched" = inherited AND has linked properties (user hasn't customised)
+        # "untouched" = inherited AND the child has not customised any property
+        # (all cascadable props are still linked, none have been unlinked)
         # AND no existing divergence warning for this entity
         has_divergence = any(
             w.get("path", "").startswith(f"entities/{entity_id}/")
             for w in child.metadata.get("divergence_warnings", [])
         )
+        # Determine if ALL cascadable properties are still linked (nothing overridden)
+        from quino.services.case_overlay_validator import _entity_lookup as _lu
+        child_ent_entry = _lu(child).get(entity_id)
+        if child_ent_entry is not None:
+            _, cls = child_ent_entry
+            try:
+                from quino.services.cascade_property_registry import cascadable_properties as _cp
+                all_props = set(_cp(cls))
+            except ValueError:
+                all_props = set()
+        else:
+            all_props = set()
+        fully_linked = entry.linked_properties == all_props if all_props else not entry.linked_properties
         untouched = (
             entry.origin == "inherited"
-            and bool(entry.linked_properties)
+            and fully_linked
             and not has_divergence
         )
 
