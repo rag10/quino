@@ -7,7 +7,6 @@ from quino.domain.model import (
     Driver,
     Joint,
     JointEndpoint,
-    Project,
     ValidationMessage,
     ValidationReport,
 )
@@ -31,7 +30,7 @@ class KinematicValidator:
         self._expression_service = expression_service
         self._unit_service = unit_service
 
-    def validate_joint_geometry(self, project: Project, report: ValidationReport) -> None:
+    def validate_joint_geometry(self, project, report: ValidationReport) -> None:
         try:
             assembled = self._assembler.assemble(project)
         except Exception as exc:
@@ -130,7 +129,7 @@ class KinematicValidator:
             return None
         return assembled.bodies[endpoint.body_id].markers.get(endpoint.marker_id)
 
-    def _validate_joint_angle_limit(self, project: Project, assembled, joint: Joint, report: ValidationReport) -> None:
+    def _validate_joint_angle_limit(self, project, assembled, joint: Joint, report: ValidationReport) -> None:
         if joint.type.value != "revolute":
             return
         if joint.metadata.values.get("internal_ground_anchor"):
@@ -170,7 +169,7 @@ class KinematicValidator:
 
         return _coerce(self._ANGLE_LIMIT_POSITIVE_KEY), _coerce(self._ANGLE_LIMIT_NEGATIVE_KEY)
 
-    def _assembled_joint_relative_angle_deg(self, project: Project, assembled, joint: Joint) -> float | None:
+    def _assembled_joint_relative_angle_deg(self, project, assembled, joint: Joint) -> float | None:
         if joint.endpoint_a.kind is JointEndpointKind.GROUND and joint.endpoint_b.kind is JointEndpointKind.MARKER:
             body = assembled.bodies.get(joint.endpoint_b.body_id or "")
             if body is None:
@@ -200,7 +199,7 @@ class KinematicValidator:
         )
         return math.degrees(current_rel - model_rel)
 
-    def _model_body_reference_angle(self, project: Project, body_id: str) -> float:
+    def _model_body_reference_angle(self, project, body_id: str) -> float:
         for body in project.model.bodies:
             if body.id == body_id:
                 markers = body.structural_markers()
@@ -218,7 +217,7 @@ class KinematicValidator:
 
     def validate_kinematic_reach(
         self,
-        project: Project,
+        project,
         report: ValidationReport,
         duration: float,
         steps: int,
@@ -323,7 +322,7 @@ class KinematicValidator:
 
     def validate_translation_driver_travel(
         self,
-        project: Project,
+        project,
         report: ValidationReport,
         assembled,
         sample_times: list[float],
@@ -401,7 +400,7 @@ class KinematicValidator:
 
     def validate_rotation_driver_limits(
         self,
-        project: Project,
+        project,
         report: ValidationReport,
         assembled,
         sample_times: list[float],
@@ -459,7 +458,7 @@ class KinematicValidator:
 
     def validate_rotational_loop_reach(
         self,
-        project: Project,
+        project,
         report: ValidationReport,
         assembled,
         sample_times: list[float],
@@ -606,7 +605,7 @@ class KinematicValidator:
 
     def _first_four_bar_reach_failure(
         self,
-        project: Project,
+        project,
         driver: Driver,
         driven_body,
         ground_marker,
@@ -645,7 +644,7 @@ class KinematicValidator:
 
     def _first_slider_reach_failure(
         self,
-        project: Project,
+        project,
         driver: Driver,
         driven_body,
         ground_marker,
@@ -725,7 +724,7 @@ class KinematicValidator:
 
     def _ground_endpoint_for_body(
         self,
-        project: Project,
+        project,
         body_id: str,
         exclude_marker_id: str,
     ) -> JointEndpoint | None:
@@ -744,7 +743,7 @@ class KinematicValidator:
 
     def _slider_links_for_body(
         self,
-        project: Project,
+        project,
         body_id: str,
         exclude_marker_id: str,
     ) -> list[tuple[Joint, JointEndpoint, JointEndpoint]]:
@@ -768,7 +767,7 @@ class KinematicValidator:
     def _driver_value_at(
         self,
         driver: Driver,
-        project: Project,
+        project,
         time_value: float,
         unit: str,
     ) -> float:
@@ -781,7 +780,7 @@ class KinematicValidator:
 
     def load_expression_variables(
         self,
-        project: Project,
+        project,
         *,
         time_value: float = 0.0,
     ) -> dict[str, object]:
@@ -811,13 +810,13 @@ class KinematicValidator:
         )
 
     @staticmethod
-    def _find_joint(project: Project, joint_id: str) -> Joint:
+    def _find_joint(project, joint_id: str) -> Joint:
         for joint in project.model.joints:
             if joint.id == joint_id:
                 return joint
         raise ValueError(f"Unknown joint: {joint_id}")
 
-    def _joint_angular_limits_rad(self, project: Project, joint: Joint) -> tuple[float | None, float | None] | None:
+    def _joint_angular_limits_rad(self, project, joint: Joint) -> tuple[float | None, float | None] | None:
         if joint.type.value != "revolute":
             return None
         if joint.endpoint_a.kind is JointEndpointKind.SLIDER or joint.endpoint_b.kind is JointEndpointKind.SLIDER:
@@ -832,7 +831,7 @@ class KinematicValidator:
             return None
         return negative, positive
 
-    def _joint_metadata_angle(self, project: Project, joint: Joint, path: str) -> float | None:
+    def _joint_metadata_angle(self, project, joint: Joint, path: str) -> float | None:
         value = joint.metadata.values.get(path)
         if isinstance(value, str):
             text = value.strip()

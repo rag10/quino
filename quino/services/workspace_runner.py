@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from quino.domain.model import Project, SimulationResult
+from quino.domain.model import SimulationResult
 from quino.domain.workspace import (
     Analysis,
     ArtifactRef,
@@ -25,8 +25,7 @@ from .workspace_composition import compose_project, compose_project_hash
 
 
 def run_analysis(
-    project: Project,
-    analysis_id: str,
+    project, analysis_id: str,
     simulation_runner: SimulationRunner,
     *,
     cancel_event=None,
@@ -238,14 +237,14 @@ def _file_checksum(path: Path) -> str:
     return f"sha256:{h.hexdigest()}"
 
 
-def _apply_workspace_pose(project: Project, workspace_pose: WorkspacePose | None) -> None:
+def _apply_workspace_pose(project, workspace_pose: WorkspacePose | None) -> None:
     if workspace_pose is None or workspace_pose.is_default:
         project.simulation_initial_pose_id = None
         return
     project.simulation_initial_pose_id = workspace_pose.project_pose_id
 
 
-def _resolve_entry_baseline_id(project: Project, case: Case | None) -> str | None:
+def _resolve_entry_baseline_id(project, case: Case | None) -> str | None:
     workspace = project.workspace
     if case is not None and case.baseline_id is not None:
         return case.baseline_id

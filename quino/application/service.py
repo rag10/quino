@@ -15,8 +15,6 @@ from quino.domain.model import (
     Metadata,
     Model,
     Parameter,
-    Project,
-    Pose,
     ScalarProperty,
     SimulationResult,
     Sketch,
@@ -29,6 +27,7 @@ from quino.domain.model import (
     ValidationReport,
     ViewState,
 )
+from quino.domain.workspace import Workspace, Case, Pose
 from quino.application._context import ServiceContext
 from quino.application.commands.parameter_commands import ParameterCommands
 from quino.application.commands.force_commands import ForceCommands
@@ -51,7 +50,7 @@ from quino.services.sketch_solver import SketchSolver
 from quino.simulation.runner import SimulationRunner
 from quino.solver_adapters.exudyn_adapter import ExudynAdapter
 from quino.solver_adapters.exudyn_pose_adapter import ExudynPoseAdapter
-from quino.services.workspace_composition import compose_project as _compose_project
+from quino.services.case_cascading import CascadingEngine
 
 
 class ApplicationService:
@@ -63,8 +62,11 @@ class ApplicationService:
         self.expression_service = ExpressionService(self.unit_service)
         self.validation_service = ValidationService()
         self.json_mapper = JsonMapper()
-        self.project: Project | None = None
-        self.current_project_path: Path | None = None
+        # New domain state: Workspace replaces Project
+        self._workspace: Workspace | None = None
+        # Back-compat alias so old code that reads self.project still works.
+        # Reads from self._workspace via the property below.
+        self.current_workspace_path: Path | None = None
         self.executor = None
         self.pending_run_handles: dict[str, object] = {}
         self.workspace_lock = threading.Lock()
@@ -73,8 +75,8 @@ class ApplicationService:
         # computed simulation. Lazily created on first use and cleaned up
         # when the process exits.
         self._scratch_dir: Path | None = None
-        self._undo_stack: list[Project] = []
-        self._redo_stack: list[Project] = []
+        self._undo_stack: list[Workspace] = []
+        self._redo_stack: list[Workspace] = []
         self._in_operation = False
         self._structural_case_warning_acknowledged: bool = False
         self.sketch_solver = SketchSolver(
@@ -92,7 +94,9 @@ class ApplicationService:
         # are wired after construction (see "Rewire" block below).
         _unset: object = None  # type: ignore[assignment]
         self._service_context = ServiceContext(
-            project_provider=lambda: self.project,
+            workspace_provider=lambda: self._workspace,
+            current_case_provider=self.current_case,
+            cascade_provider=lambda: CascadingEngine(self._workspace) if self._workspace else None,
             operation=self._operation,
             snapshot=self._snapshot,
             invalidate_pose_state=self._invalidate_pose_state,
@@ -125,7 +129,10 @@ class ApplicationService:
             parameters=self.parameters,
             poses=self.poses,
         )
-        self.workspace = WorkspaceCommands(self._service_context)
+        # WorkspaceCommands is stored under _workspace_cmds; the `workspace`
+        # property below forwards to it for backward compatibility with GUI
+        # and test code that calls app_service.workspace.create_case(...).
+        self._workspace_cmds = WorkspaceCommands(self._service_context)
         self.blocks = BlockCommands(self._service_context)
         # Rewire context callables to their canonical implementations
         self._service_context.find_entity = self.entities._find_entity
@@ -138,56 +145,128 @@ class ApplicationService:
         self._service_context.assign_scalar_property = self.entities._assign_scalar_property
         self._service_context.apply_style_update = self.entities._apply_style_update
 
-    def new_project(self, name: str) -> Project:
+    # ------------------------------------------------------------------ workspace property (back-compat)
+
+    @property
+    def workspace(self):
+        """Backward-compat property: returns WorkspaceCommands so GUI code like
+        ``app_service.workspace.create_case(...)`` continues to work.
+        New code should use ``app_service._workspace`` for the domain object
+        or ``app_service.current_case()`` for the active case.
+        """
+        return self._workspace_cmds
+
+    @workspace.setter
+    def workspace(self, value):
+        # Tolerate direct assignment from old init-style code (e.g. tests that do
+        # ``svc.workspace = WorkspaceCommands(...)``).
+        if isinstance(value, WorkspaceCommands):
+            self._workspace_cmds = value
+        else:
+            # Treat as domain Workspace assignment (migration path)
+            self._workspace = value
+
+    # ------------------------------------------------------------------ project property (back-compat)
+
+    @property
+    def project(self):
+        """Backward-compat: returns a _WorkspaceProjectProxy so old command-service
+        code that reads ``self.project.model``, ``self.project.parameters``, etc.
+        continues to work.  Mutations go through the underlying Case/Workspace.
+        """
+        from quino.application._context import _WorkspaceProjectProxy
+        if self._workspace is None:
+            return None
+        return _WorkspaceProjectProxy(self._workspace, case=self.current_case())
+
+    @project.setter
+    def project(self, value):
+        # Some old code does ``self.project = ...``. If it's a Project-like
+        # object we silently ignore (migration), if it's None we clear workspace.
+        if value is None:
+            self._workspace = None
+
+    # ------------------------------------------------------------------ current_project_path (back-compat)
+
+    @property
+    def current_project_path(self) -> Path | None:
+        return self.current_workspace_path
+
+    @current_project_path.setter
+    def current_project_path(self, value) -> None:
+        self.current_workspace_path = value
+
+    # ------------------------------------------------------------------ new API
+
+    def current_case(self) -> Case | None:
+        """Return the currently selected Case, or None if no workspace is loaded."""
+        if self._workspace is None or self._workspace.selected_case_id is None:
+            return None
+        return self._workspace.cases.get(self._workspace.selected_case_id)
+
+    def new_workspace(self, name: str = "Untitled") -> Workspace:
         self.id_service = IdService()
-        self.project = Project(
-            id=self.id_service.new("proj"),
+        root_id = self.id_service.new("case")
+        ws_id = self.id_service.new("ws")
+        root = Case(id=root_id, name="Root", model=Model())
+        self._workspace = Workspace(
+            id=ws_id,
             name=name,
             schema_version=self.schema_version,
-            model=Model(),
-            parameters=[],
-            view_state=ViewState(),
-            metadata=Metadata(),
+            root_case_ids=[root_id],
+            cases={root_id: root},
+            selected_case_id=root_id,
         )
-        self.workspace.create_baseline(name)
+        self.current_workspace_path = None
         self._undo_stack.clear()
         self._redo_stack.clear()
         self.poses.clear_current()
         self._structural_case_warning_acknowledged = False
-        return self.project
+        return self._workspace
 
-    def load_project(self, path: str) -> Project:
-        from pathlib import Path
-        self.current_project_path = Path(path)
-        self.project = self.json_mapper.load_file(path)
-        if self.project is not None:
-            version = getattr(self.project, "schema_version", "0.0.0")
+    def load_workspace(self, path) -> Workspace:
+        from pathlib import Path as _Path
+        self._workspace = self.json_mapper.load_file(path)
+        if self._workspace is not None:
+            version = getattr(self._workspace, "schema_version", "0.0.0")
             if version != self.schema_version:
                 raise ValueError(
-                    f"This project uses schema {version!r}; QUINO expects {self.schema_version!r}. "
-                    f"Rebuild the project file (no auto-migration is provided)."
+                    f"This workspace uses schema {version!r}; QUINO expects {self.schema_version!r}. "
+                    f"Rebuild the file (no auto-migration is provided)."
                 )
-        self._sync_id_service()
+        self.current_workspace_path = _Path(path)
         self._undo_stack.clear()
         self._redo_stack.clear()
         self.poses.clear_current()
         self._structural_case_warning_acknowledged = False
         self._sync_all_special_com_markers()
-        if self.project is not None and self.project.sketch is not None:
-            self.project.sketch.solve_error = None
+        case = self.current_case()
+        if case is not None and self._workspace is not None and self._workspace.sketch is not None:
+            self._workspace.sketch.solve_error = None
             self.sketch._apply_sketch_constraints(set())
-        self._ensure_baseline()
-        return self.project
+        return self._workspace
+
+    def save_workspace(self, path=None) -> None:
+        if self._workspace is None:
+            raise RuntimeError("No workspace loaded")
+        target = path or self.current_workspace_path
+        if target is None:
+            raise RuntimeError("No save path specified")
+        self.json_mapper.save_file(self._workspace, target)
+        self.current_workspace_path = Path(target)
+
+    # ------------------------------------------------------------------ back-compat aliases
+    # These delegate to the new workspace-oriented methods. They will be removed in Task 25.
+
+    def new_project(self, name: str = "Untitled"):
+        return self.new_workspace(name)
+
+    def load_project(self, path: str):
+        return self.load_workspace(path)
 
     def _ensure_baseline(self) -> None:
-        """Guarantee the workspace always has at least one baseline."""
-        if self.project is None:
-            return
-        ws = self.project.workspace
-        if ws is None or not ws.baselines:
-            self.workspace.create_baseline(self.project.name)
-        elif ws.active_baseline_id is None:
-            ws.active_baseline_id = ws.baselines[0].id
+        """No-op: baseline concept removed in case-as-model redesign."""
+        pass
 
     @property
     def structural_case_warning_acknowledged(self) -> bool:
@@ -197,9 +276,7 @@ class ApplicationService:
         self._structural_case_warning_acknowledged = True
 
     def save_project(self, path: str) -> None:
-        project = self._require_project()
-        self.json_mapper.save_file(project, path)
-        self.current_project_path = Path(path)
+        self.save_workspace(path)
 
     @property
     def current_project_dir(self) -> Path | None:
@@ -233,19 +310,8 @@ class ApplicationService:
 
     @property
     def display_project(self):
-        """The effective project for UI display: composed if a case is active, else base."""
-        if self.project is None:
-            return None
-        ws = self.project.workspace
-        if ws is None or ws.active_case_id is None:
-            return self.project
-        case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
-        if case is None:
-            return self.project
-        try:
-            return _compose_project(self.project, case=case)
-        except Exception:
-            return self.project
+        """The effective project for UI display: returns a proxy over the active case."""
+        return self.project  # project property already returns a _WorkspaceProjectProxy
 
     def create_reference_pose(self, name: str = "Reference") -> Pose:
         return self.poses.create_reference_pose(name)
@@ -615,9 +681,8 @@ class ApplicationService:
         """Dispatch an Analysis to the appropriate runner and return an AnalysisResult."""
         from quino.analysis.registry import get_runner_for_type
         from quino.analysis.runner import AnalysisResult
-        from quino.services.workspace_composition import compose_project as _compose_project
 
-        ws = self.project.workspace if self.project else None
+        ws = self._workspace
         if ws is None:
             return AnalysisResult(
                 analysis_id=analysis_id,
@@ -625,7 +690,15 @@ class ApplicationService:
                 status="failed",
                 error_message="No workspace",
             )
-        analysis = next((a for a in ws.analyses if a.id == analysis_id), None)
+        # Find the analysis across all cases in the workspace
+        analysis = None
+        target_case = None
+        for case in ws.cases.values():
+            found = next((a for a in case.analyses if a.id == analysis_id), None)
+            if found is not None:
+                analysis = found
+                target_case = case
+                break
         if analysis is None:
             return AnalysisResult(
                 analysis_id=analysis_id,
@@ -633,10 +706,11 @@ class ApplicationService:
                 status="failed",
                 error_message=f"Analysis {analysis_id!r} not found",
             )
-        case = next((c for c in ws.cases if c.id == analysis.case_id), None) if analysis.case_id else None
-        composed = _compose_project(self.project, case=case)
+        # Use the case model directly — no compose_project needed in new domain
         try:
             runner = get_runner_for_type(analysis.analysis_type)
+            from quino.application._context import _WorkspaceProjectProxy
+            composed = _WorkspaceProjectProxy(ws, case=target_case)
             errors = runner.validate(composed, analysis)
             if errors:
                 return AnalysisResult(
@@ -664,9 +738,9 @@ class ApplicationService:
     def undo(self) -> bool:
         if not self._undo_stack:
             return False
-        if self.project is not None:
-            self._redo_stack.append(copy.deepcopy(self.project))
-        self.project = self._undo_stack.pop()
+        if self._workspace is not None:
+            self._redo_stack.append(copy.deepcopy(self._workspace))
+        self._workspace = self._undo_stack.pop()
         self.entities.invalidate_index()
         self.poses.clear_current()
         return True
@@ -674,21 +748,27 @@ class ApplicationService:
     def redo(self) -> bool:
         if not self._redo_stack:
             return False
-        if self.project is not None:
-            self._undo_stack.append(copy.deepcopy(self.project))
-        self.project = self._redo_stack.pop()
+        if self._workspace is not None:
+            self._undo_stack.append(copy.deepcopy(self._workspace))
+        self._workspace = self._redo_stack.pop()
         self.entities.invalidate_index()
         self.poses.clear_current()
         return True
 
-    def _require_project(self) -> Project:
-        if self.project is None:
-            raise ValueError("No active project")
+    def _require_project(self):
+        """Backward-compat: returns the project proxy (raises if no workspace)."""
+        if self._workspace is None:
+            raise ValueError("No active workspace")
         return self.project
 
+    def _require_workspace(self) -> Workspace:
+        if self._workspace is None:
+            raise ValueError("No active workspace")
+        return self._workspace
+
     def _snapshot(self) -> None:
-        if self.project is not None and not self._in_operation:
-            self._undo_stack.append(copy.deepcopy(self.project))
+        if self._workspace is not None and not self._in_operation:
+            self._undo_stack.append(copy.deepcopy(self._workspace))
             self._redo_stack.clear()
             self.entities.invalidate_index()
             self.sketch.invalidate_cache()
@@ -701,9 +781,9 @@ class ApplicationService:
         so we drop them and the user can re-solve from the reference pose.
         """
         self.poses.clear_current()
-        if self.project is not None:
-            self.project.poses = []
-            self.project.simulation_initial_pose_id = None
+        case = self.current_case()
+        if case is not None:
+            case.poses = []
 
     def _operation(self):
         """Context manager that takes a single snapshot for the whole operation."""
@@ -724,15 +804,19 @@ class ApplicationService:
         return self.bodies.sync_all_special_com_markers()
 
     def _find_body(self, body_id: str) -> Body:
-        project = self._require_project()
-        for body in project.model.bodies:
+        case = self.current_case()
+        if case is None:
+            raise ValueError(f"Unknown body: {body_id}")
+        for body in case.model.bodies:
             if body.id == body_id:
                 return body
         raise ValueError(f"Unknown body: {body_id}")
 
     def _find_body_by_marker(self, marker_id: str) -> Body:
-        project = self._require_project()
-        for body in project.model.bodies:
+        case = self.current_case()
+        if case is None:
+            raise ValueError(f"Unknown marker: {marker_id}")
+        for body in case.model.bodies:
             if any(marker.id == marker_id for marker in body.markers):
                 return body
         raise ValueError(f"Unknown marker: {marker_id}")
@@ -827,28 +911,33 @@ class ApplicationService:
         return self.sketch._current_sketch_constraint_label_position(constraint)
 
     def _sync_id_service(self) -> None:
-        project = self._require_project()
-        self.id_service.observe(project.id)
-        for parameter in project.parameters:
+        ws = self._workspace
+        if ws is None:
+            return
+        self.id_service.observe(ws.id)
+        for parameter in ws.parameters:
             self.id_service.observe(parameter.id)
-        if project.sketch is not None:
-            self.id_service.observe(project.sketch.id)
-            for entity in project.sketch.entities.values():
+        if ws.sketch is not None:
+            self.id_service.observe(ws.sketch.id)
+            for entity in ws.sketch.entities.values():
                 self.id_service.observe(entity.id)
-            for constraint in project.sketch.constraints.values():
+            for constraint in ws.sketch.constraints.values():
                 self.id_service.observe(constraint.id)
-        for body in project.model.bodies:
-            self.id_service.observe(body.id)
-            for marker in body.markers:
-                self.id_service.observe(marker.id)
-        for slider in project.model.sliders:
-            self.id_service.observe(slider.id)
-        for joint in project.model.joints:
-            self.id_service.observe(joint.id)
-        for driver in project.model.drivers:
-            self.id_service.observe(driver.id)
-        for sensor in project.model.sensors:
-            self.id_service.observe(sensor.id)
+        for case in ws.cases.values():
+            self.id_service.observe(case.id)
+            model = case.model
+            for body in model.bodies:
+                self.id_service.observe(body.id)
+                for marker in body.markers:
+                    self.id_service.observe(marker.id)
+            for slider in model.sliders:
+                self.id_service.observe(slider.id)
+            for joint in model.joints:
+                self.id_service.observe(joint.id)
+            for driver in model.drivers:
+                self.id_service.observe(driver.id)
+            for sensor in model.sensors:
+                self.id_service.observe(sensor.id)
 
     def update_slider_geometry(
         self,
@@ -861,7 +950,7 @@ class ApplicationService:
     ) -> None:
         return self.joints.update_slider_geometry(slider_id, origin_x, origin_y, angle, travel_min, travel_max)
 
-    def _evaluate_all(self, project: Project, report: ValidationReport) -> None:
+    def _evaluate_all(self, project, report: ValidationReport) -> None:
         for parameter in project.parameters:
             try:
                 self.expression_service.evaluate_expression(parameter.expression, project.parameters)
@@ -966,7 +1055,7 @@ class ApplicationService:
                         )
                     )
 
-    def _validate_sketch_solve(self, project: Project, report: ValidationReport) -> None:
+    def _validate_sketch_solve(self, project, report: ValidationReport) -> None:
         if project.sketch is None or not project.sketch.constraints:
             return
         result = self.sketch_solver.solve(copy.deepcopy(project), locked_point_ids=set())
@@ -1112,28 +1201,25 @@ class ApplicationService:
         does not contain that override locally. Overrides set on an ancestor
         case cannot be cleared from this call: ascend to that case first.
         """
-        if self.project is None or self.project.workspace is None:
-            return False
-        case = next(
-            (c for c in self.project.workspace.cases if c.id == self.project.workspace.active_case_id),
-            None,
-        )
+        case = self.current_case()
         if case is None:
             return False
         with self._operation():
             if path is not None:
-                if path in case.invariant_values:
-                    case.invariant_values.pop(path)
+                inv = getattr(case, "invariant_values", {})
+                if path in inv:
+                    inv.pop(path)
                     self.entities.invalidate_index()
                     return True
                 return False
             if entity_id is not None and prop is not None:
-                overrides = case.reference_overrides.get(entity_id)
+                ref_overrides = getattr(case, "reference_overrides", {})
+                overrides = ref_overrides.get(entity_id)
                 if overrides is None or prop not in overrides:
                     return False
                 overrides.pop(prop)
                 if not overrides:
-                    case.reference_overrides.pop(entity_id, None)
+                    ref_overrides.pop(entity_id, None)
                 self.entities.invalidate_index()
                 return True
         return False

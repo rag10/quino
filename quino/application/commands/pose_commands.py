@@ -3,7 +3,8 @@ from __future__ import annotations
 import copy
 
 from quino.application._context import ServiceContext
-from quino.domain.model import Driver, Pose
+from quino.domain.model import Driver
+from quino.domain.workspace import Pose
 from quino.pose.geometry import create_reference_pose as build_reference_pose
 from quino.pose.model import PoseConstraint, PoseSolveResult, PoseSolveSettings
 from quino.pose.runner import PoseRunner

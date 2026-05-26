@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import math
 
-from quino.domain.model import Pose, Project
+from quino.domain.model import Pose
 from quino.pose.geometry import marker_world_position
 
 
-def extract_sensors_from_pose(project: Project, pose: Pose | None) -> dict[str, dict]:
+def extract_sensors_from_pose(project, pose: Pose | None) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for sensor in project.model.sensors:
         kind = sensor.type.value

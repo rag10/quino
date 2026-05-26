@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from quino.domain.model import Pose
+from quino.domain.workspace import Pose
 
 
 @dataclass(slots=True)

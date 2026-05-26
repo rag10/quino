@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 
 from quino.blocks.engine import BlockEngine
-from quino.domain.model import Project, Sensor
+from quino.domain.model import Sensor
 from quino.domain.blocks import BlockDiagram
 from quino.domain.types import SensorType
 from quino.simulation.sensor_expressions import marker_world_position, marker_world_velocity
@@ -29,7 +29,7 @@ class ExudynBlockBridge:
         exu: Any,
         node_numbers: dict[str, int],
         body_objects: dict[str, int],
-        project: Project | None = None,
+        project=None,
         assembled: Any | None = None,
     ) -> None:
         self._mbs = mbs

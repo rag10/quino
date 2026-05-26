@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
-from quino.domain.model import Project, Sensor
+from quino.domain.model import Sensor
 from quino.domain.types import Dimension, SensorType
 from quino.services.units import Quantity, UnitService
 
@@ -83,7 +83,7 @@ def marker_world_velocity(
 
 
 def sensor_expression_variables(
-    project: Project,
+    project,
     assembled: AssembledMechanism,
     frame: dict[str, float],
     unit_service: UnitService,

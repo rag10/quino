@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from quino.domain.model import Project, SimulationResult
+from quino.domain.model import SimulationResult
 
 
 class SolverAdapter(ABC):
@@ -12,5 +12,5 @@ class SolverAdapter(ABC):
         return True
 
     @abstractmethod
-    def run(self, project: Project, duration: float = 1.0, steps: int = 100, cancel_event=None, log_path=None) -> SimulationResult:
+    def run(self, project, duration: float = 1.0, steps: int = 100, cancel_event=None, log_path=None) -> SimulationResult:
         raise NotImplementedError

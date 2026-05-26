@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import math
 
-from quino.domain.model import Body, Pose, Project
+from quino.domain.model import Body, Pose
 from quino.services.expressions import ExpressionService
 from quino.services.units import UnitService
 
 _expr = ExpressionService(UnitService())
 
 
-def _eval_mm(project: Project, scalar) -> float:
+def _eval_mm(project, scalar) -> float:
     """Evaluate a ScalarProperty and convert its value to mm."""
     evaluated = _expr.evaluate_property(scalar, project.parameters)
     return _expr.unit_service.convert(
@@ -23,7 +23,7 @@ def _eval_mm(project: Project, scalar) -> float:
     )
 
 
-def _structural_xy(project: Project, body: Body) -> list[tuple[str, float, float]]:
+def _structural_xy(project, body: Body) -> list[tuple[str, float, float]]:
     """Return [(marker_id, x_mm, y_mm), ...] for the body's structural markers."""
     out: list[tuple[str, float, float]] = []
     for marker in body.structural_markers():
@@ -37,7 +37,7 @@ def _structural_xy(project: Project, body: Body) -> list[tuple[str, float, float
     return out
 
 
-def com_local_position(project: Project, body: Body) -> tuple[float, float]:
+def com_local_position(project, body: Body) -> tuple[float, float]:
     """Return (lx, ly) in mm in the body's local frame."""
     anchor = body.com
     kind = anchor.kind
@@ -81,7 +81,7 @@ def com_local_position(project: Project, body: Body) -> tuple[float, float]:
 
 
 def com_global_position(
-    project: Project, body: Body, pose: Pose | None = None,
+    project, body: Body, pose: Pose | None = None,
 ) -> tuple[float, float]:
     """Return (gx, gy) in mm in the world frame for the given pose (or
     the reference configuration when ``pose is None``)."""

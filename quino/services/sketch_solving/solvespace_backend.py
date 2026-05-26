@@ -18,7 +18,6 @@ import python_solvespace as ps
 
 from quino.domain.model import (
     Expression,
-    Project,
     Sketch,
     SketchArc,
     SketchCircle,
@@ -41,7 +40,7 @@ class SolvespaceBackend:
 
     def solve(
         self,
-        project: Project,
+        project,
         *,
         locked_point_ids: set[str] | None = None,
         max_iterations: int = 200,
@@ -74,7 +73,7 @@ class SolvespaceBackend:
 
     def _solve_with_system(
         self,
-        project: Project,
+        project,
         sketch: Sketch,
         locked: set[str],
     ) -> SketchSolveResult:
@@ -183,7 +182,7 @@ class SolvespaceBackend:
             bad_constraint_details=bad_constraint_details,
         )
 
-    def _evaluate_point(self, project: Project, point: SketchPoint) -> tuple[float, float]:
+    def _evaluate_point(self, project, point: SketchPoint) -> tuple[float, float]:
         x = self._evaluate_expression(point.x, project.parameters)
         y = self._evaluate_expression(point.y, project.parameters)
         return (x, y)
@@ -201,7 +200,7 @@ class SolvespaceBackend:
         points: dict[str, object],
         entities: dict[str, object],
         radius_entities: dict[str, object],
-        project: Project,
+        project,
     ) -> None:
         if isinstance(entity, SketchLineSegment):
             handle = sys.add_line_2d(
@@ -230,7 +229,7 @@ class SolvespaceBackend:
             entities[entity.id] = handle
         # otherwise: unsupported entity type (e.g. SketchSpline), ignored for now.
 
-    def _evaluate_radius(self, entity, project: Project) -> float | None:
+    def _evaluate_radius(self, entity, project) -> float | None:
         """Evaluate the declared radius (mm) of a SketchCircle or SketchArc."""
         if isinstance(entity, SketchCircle):
             return self._evaluate_expression(entity.radius, project.parameters)

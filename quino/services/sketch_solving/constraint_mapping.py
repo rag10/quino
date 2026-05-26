@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from quino.domain.model import Project, SketchConstraint
+from quino.domain.model import SketchConstraint
 from quino.domain.types import SketchConstraintType
 from quino.services.expressions import ExpressionService
 from quino.services.sketch_solving._auxiliary_geometry import (
@@ -35,8 +35,7 @@ def emit_constraint(
     *,
     points: dict[str, object],
     entities: dict[str, object],
-    project: Project,
-    expressions: ExpressionService,
+    project, expressions: ExpressionService,
     units: UnitService,
 ) -> None:
     """Emit a native Solvespace constraint for the given QUINO constraint.
@@ -53,8 +52,7 @@ def emit_constraint(
 
 def _evaluate_value_mm(
     c: SketchConstraint,
-    project: Project,
-    expressions: ExpressionService,
+    project, expressions: ExpressionService,
 ) -> float:
     """Evaluate the constraint's ScalarProperty value and return the numeric result.
 

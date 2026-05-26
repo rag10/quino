@@ -1,7 +1,6 @@
 # quino/services/sketch_solving/facade.py
 from __future__ import annotations
 
-from quino.domain.model import Project
 from quino.services.expressions import ExpressionService
 from quino.services.sketch_solving.base import SketchSolveResult
 from quino.services.sketch_solving.solvespace_backend import SolvespaceBackend
@@ -26,8 +25,8 @@ class SketchSolver:
     def backend_name(self) -> str:
         return self._backend.name
 
-    def solve(self, project: Project, **kwargs) -> SketchSolveResult:
+    def solve(self, project, **kwargs) -> SketchSolveResult:
         return self._backend.solve(project, **kwargs)
 
-    def analyze_dof(self, project: Project):
+    def analyze_dof(self, project):
         return self._backend.analyze_dof(project)

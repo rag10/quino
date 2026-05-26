@@ -8,7 +8,6 @@ from quino.domain.inputs import PropertyValueInput
 from quino.domain.model import (
     Expression,
     Parameter,
-    Project,
     ScalarProperty,
     Sketch,
     SketchArc,
@@ -42,7 +41,7 @@ class SketchCommands:
         self._ctx = ctx
         self._solver = solver
     @property
-    def _project(self) -> Project:
+    def _project(self):
         project = self._ctx.project_provider()
         if project is None:
             raise ValueError("No active project")

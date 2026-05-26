@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 
-from quino.domain.model import Body, Driver, GravityLoad, Joint, Load, Marker, Project, Slider, Spring
+from quino.domain.model import Body, Driver, GravityLoad, Joint, Load, Marker, Slider, Spring
 from quino.domain.types import Dimension, MarkerType, SpringEndpointKind, SpringType
 from quino.services.expressions import ExpressionService
 from quino.simulation.sensor_expressions import sensor_expression_variables
@@ -117,7 +117,7 @@ class MechanismAssembler:
     def __init__(self, expression_service: ExpressionService) -> None:
         self.expression_service = expression_service
 
-    def assemble(self, project: Project) -> AssembledMechanism:
+    def assemble(self, project, Project) -> AssembledMechanism:
         bodies = {body.id: self._assemble_body(project, body) for body in project.model.bodies}
         sliders = {slider.id: self._assemble_slider(project, slider) for slider in project.model.sliders}
         drivers = [self._assemble_driver(driver) for driver in project.model.drivers]
@@ -134,7 +134,7 @@ class MechanismAssembler:
             warnings=[],
         )
 
-    def _assemble_spring(self, project: Project, spring: Spring, bodies: dict) -> AssembledSpring:
+    def _assemble_spring(self, project, Project, spring: Spring, bodies: dict) -> AssembledSpring:
         def _ep(ep) -> AssembledSpringEndpoint:
             if ep.kind is SpringEndpointKind.GROUND:
                 gx = self.expression_service.evaluate_property(ep.ground_x, project.parameters).value if ep.ground_x else 0.0
@@ -172,7 +172,7 @@ class MechanismAssembler:
             law_dimension=law_dimension,
         )
 
-    def _assemble_body(self, project: Project, body: Body) -> AssembledBody:
+    def _assemble_body(self, project, Project, body: Body) -> AssembledBody:
         structural_markers = body.structural_markers()
         global_markers = [self._eval_marker(project, marker) for marker in body.markers]
         marker_map = {marker.marker_id: marker for marker in global_markers}
@@ -226,7 +226,7 @@ class MechanismAssembler:
             warnings=warnings,
         )
 
-    def _assemble_slider(self, project: Project, slider: Slider) -> AssembledSlider:
+    def _assemble_slider(self, project, Project, slider: Slider) -> AssembledSlider:
         origin_x = self.expression_service.evaluate_property(slider.origin_x, project.parameters).value
         origin_y = self.expression_service.evaluate_property(slider.origin_y, project.parameters).value
         angle = self.expression_service.unit_service.convert(
@@ -247,7 +247,7 @@ class MechanismAssembler:
             travel_max=self._eval_optional(project, slider.travel_max, default=None),
         )
 
-    def _eval_marker(self, project: Project, marker: Marker) -> AssembledMarker:
+    def _eval_marker(self, project, Project, marker: Marker) -> AssembledMarker:
         x = self.expression_service.evaluate_property(marker.x, project.parameters).value
         y = self.expression_service.evaluate_property(marker.y, project.parameters).value
         return AssembledMarker(
@@ -261,7 +261,7 @@ class MechanismAssembler:
             visible=marker.visible,
         )
 
-    def _eval_optional(self, project: Project, prop, default: float | None) -> float | None:
+    def _eval_optional(self, project, Project, prop, default: float | None) -> float | None:
         if prop is None:
             return default
         return self.expression_service.evaluate_property(prop, project.parameters).value
@@ -279,7 +279,7 @@ class MechanismAssembler:
 
     def _assemble_load(
         self,
-        project: Project,
+        project, Project,
         load: Load,
         bodies: dict[str, AssembledBody],
         sliders: dict[str, AssembledSlider],

@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import importlib
 
-from quino.domain.model import Pose, Project
+from quino.domain.workspace import Pose
 from quino.pose.geometry import marker_world_position, state_overlay_to_pose
 from quino.pose.model import PoseConstraint, PoseSolveResult, PoseSolveSettings
 from quino.services.expressions import ExpressionService
@@ -18,7 +18,7 @@ class ExudynPoseAdapter(ExudynAdapter):
 
     def solve_pose(
         self,
-        project: Project,
+        project, Project,
         initial_pose: Pose | None,
         temporary_constraints: list[PoseConstraint],
         settings: PoseSolveSettings,
@@ -68,7 +68,7 @@ class ExudynPoseAdapter(ExudynAdapter):
 
     def _solve_pose_once(
         self,
-        project: Project,
+        project, Project,
         assembled,
         initial_pose: Pose | None,
         temporary_constraints: list[PoseConstraint],
@@ -183,7 +183,7 @@ class ExudynPoseAdapter(ExudynAdapter):
         self,
         mbs,
         item_interface,
-        project: Project,
+        project, Project,
         assembled,
         body_objects: dict[str, int],
         node_numbers: dict[str, int],
@@ -397,7 +397,7 @@ class ExudynPoseAdapter(ExudynAdapter):
 
     def _constraint_validation_error(
         self,
-        project: Project,
+        project, Project,
         pose: Pose,
         constraint: PoseConstraint,
     ) -> str | None:

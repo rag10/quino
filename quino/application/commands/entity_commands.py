@@ -23,7 +23,6 @@ from quino.domain.model import (
     Load,
     Marker,
     Parameter,
-    Project,
     ScalarProperty,
     Sensor,
     Sketch,
@@ -71,7 +70,7 @@ class EntityCommands:
         self._entity_index: dict[str, object] | None = None
 
     @property
-    def _project(self) -> Project:
+    def _project(self):
         project = self._ctx.project_provider()
         if project is None:
             raise ValueError("No project loaded")

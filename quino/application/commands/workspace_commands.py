@@ -1,87 +1,60 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from quino.application._context import ServiceContext
 from quino.domain.workspace import (
     Analysis,
-    Baseline,
     Case,
     Run,
     Workspace,
-    WorkspacePose,
 )
-from quino.services.workspace_invalidation import (
-    invalidate_on_analysis_change,
-    invalidate_on_baseline_change,
-    invalidate_on_case_change,
-    invalidate_on_pose_change,
-)
-from quino.services.workspace_catalog import build_parameter_catalog
-from quino.services.workspace_runner import run_analysis as _run_analysis
 
 
 class WorkspaceCommands:
-    """Command-service for workspace operations (cases, studies, runs)."""
+    """Command-service for workspace-level operations (cases, analyses, runs).
+
+    NOTE: This class is in transition.  The previous implementation used the
+    old domain model (Baseline, WorkspacePose, ws.cases as list).  In the
+    case-as-model redesign (Task 16+) the Workspace holds cases as a dict and
+    no longer has Baseline or WorkspacePose objects.
+
+    Task 17 will rewrite the methods here to use CascadingEngine.  For now
+    the class is kept importable and the methods that the GUI or tests still
+    call are forwarded to the workspace state via context.
+    """
 
     def __init__(self, ctx: ServiceContext) -> None:
         self._ctx = ctx
 
+    # ------------------------------------------------------------------ helpers
+
     @property
-    def _project(self):
-        project = self._ctx.project_provider()
-        if project is None:
-            raise ValueError("No active project")
-        return project
+    def _workspace(self) -> Workspace | None:
+        return self._ctx.workspace_provider()
 
     def _ensure_workspace(self) -> Workspace:
-        project = self._project
-        if project.workspace is None:
-            project.workspace = Workspace()
-        if not project.workspace.parameter_catalog:
-            project.workspace.parameter_catalog = build_parameter_catalog(project)
-        return project.workspace
+        ws = self._workspace
+        if ws is None:
+            raise ValueError("No active workspace")
+        return ws
 
-    def refresh_parameter_catalog(self) -> None:
-        ws = self._ensure_workspace()
-        ws.parameter_catalog = build_parameter_catalog(self._project)
+    # ------------------------------------------------------------------ baseline (no-op shims)
+    # The Baseline concept was removed in the case-as-model redesign.
+    # These stubs keep call sites in GUI/tests alive until Task 25 cleans them.
 
-    def _next_id(self, prefix: str) -> str:
-        ws = self._ensure_workspace()
-        seq = ws.next_sequence
-        ws.next_sequence = seq + 1
-        return f"{prefix}_{seq:03d}"
-
-    # --- baseline ----------------------------------------------------------
-
-    def create_baseline(self, name: str) -> Baseline:
-        self._ctx.snapshot()
-        ws = self._ensure_workspace()
-        baseline = Baseline(id=self._next_id("baseline"), name=name)
-        ws.baselines.append(baseline)
-        if ws.active_baseline_id is None:
-            ws.active_baseline_id = baseline.id
-        self._ensure_default_pose(baseline_id=baseline.id)
-        return baseline
+    def create_baseline(self, name: str) -> None:
+        """No-op: Baseline was removed in case-as-model redesign."""
+        pass
 
     def rename_baseline(self, baseline_id: str, name: str) -> None:
-        self._ctx.snapshot()
-        baseline = self._find_baseline(baseline_id)
-        baseline.name = name
-        invalidate_on_baseline_change(self._project, baseline_id)
+        pass
 
     def delete_baseline(self, baseline_id: str) -> None:
-        self._ctx.snapshot()
-        ws = self._ensure_workspace()
-        ws.baselines = [b for b in ws.baselines if b.id != baseline_id]
-        ws.poses = [p for p in ws.poses if p.baseline_id != baseline_id]
-        ws.analyses = [a for a in ws.analyses if a.baseline_id != baseline_id]
-        if ws.active_baseline_id == baseline_id:
-            ws.active_baseline_id = ws.baselines[0].id if ws.baselines else None
-        invalidate_on_baseline_change(self._project, baseline_id)
+        pass
 
-    # --- case --------------------------------------------------------------
+    # ------------------------------------------------------------------ case operations
 
     def create_case(
         self,
@@ -91,143 +64,77 @@ class WorkspaceCommands:
     ) -> Case:
         self._ctx.snapshot()
         ws = self._ensure_workspace()
-        parent_case = self._find_case(parent_case_id) if parent_case_id is not None else None
-        resolved_baseline_id = baseline_id or (
-            parent_case.baseline_id if parent_case is not None else ws.active_baseline_id
-        )
+        new_id = self._ctx.ids.new("case")
+        parent = ws.cases.get(parent_case_id) if parent_case_id else None
+        from quino.domain.model import Model
         case = Case(
-            id=self._next_id("case"),
+            id=new_id,
             name=name,
-            baseline_id=resolved_baseline_id,
             parent_case_id=parent_case_id,
+            model=Model(),
         )
-        ws.cases.append(case)
-        self._ensure_default_pose(case_id=case.id)
-        self._resolve_default_pose_for_case(ws, case.id)
+        ws.cases[new_id] = case
+        if new_id not in ws.root_case_ids and parent_case_id is None:
+            ws.root_case_ids.append(new_id)
         return case
 
-    def duplicate_case(self, case_id: str, *, new_name: str | None = None) -> Case:
-        """Create a sibling case that copies all diffs from the source.
+    def fork_case(self, parent_case_id: str, name: str) -> Case:
+        """Fork a case using CascadingEngine."""
+        from quino.services.case_cascading import CascadingEngine
+        ws = self._ensure_workspace()
+        engine = CascadingEngine(ws)
+        new_id = engine.fork_case(parent_case_id, name)
+        self._ctx.snapshot()
+        return ws.cases[new_id]
 
-        The duplicate sits next to ``case_id`` (same parent_case_id and
-        baseline_id) and inherits a deep copy of invariant_values,
-        added_entities, removed_entity_ids, reference_overrides and
-        removed_connections. A default pose is created automatically.
-        """
+    def duplicate_case(self, case_id: str, *, new_name: str | None = None) -> Case:
         import copy as _copy
         self._ctx.snapshot()
         ws = self._ensure_workspace()
-        source = self._find_case(case_id)
+        source = ws.cases.get(case_id)
+        if source is None:
+            raise ValueError(f"Case {case_id!r} not found")
         target_name = new_name or f"{source.name} copy"
+        new_id = self._ctx.ids.new("case")
         new_case = Case(
-            id=self._next_id("case"),
+            id=new_id,
             name=target_name,
-            baseline_id=source.baseline_id,
             parent_case_id=source.parent_case_id,
-            invariant_values=_copy.deepcopy(source.invariant_values),
-            added_entities=_copy.deepcopy(source.added_entities),
-            removed_entity_ids=list(source.removed_entity_ids),
-            reference_overrides=_copy.deepcopy(source.reference_overrides),
-            removed_connections=list(source.removed_connections),
+            model=_copy.deepcopy(source.model),
         )
-        ws.cases.append(new_case)
-        self._ensure_default_pose(case_id=new_case.id)
-        self._resolve_default_pose_for_case(ws, new_case.id)
+        ws.cases[new_id] = new_case
         return new_case
 
     def rename_case(self, case_id: str, name: str) -> None:
         self._ctx.snapshot()
         case = self._find_case(case_id)
         case.name = name
-        invalidate_on_case_change(self._project, case_id)
 
     def delete_case(self, case_id: str) -> None:
         self._ctx.snapshot()
         ws = self._ensure_workspace()
-        descendant_case_ids = self._collect_descendant_case_ids(ws, case_id)
-        remove_case_ids = {case_id, *descendant_case_ids}
-        ws.cases = [c for c in ws.cases if c.id not in remove_case_ids]
-        ws.poses = [
-            p for p in ws.poses
-            if p.case_id not in remove_case_ids
-        ]
-        ws.analyses = [
-            a for a in ws.analyses
-            if a.case_id not in remove_case_ids
-        ]
-        invalidate_on_case_change(self._project, case_id)
+        descendant_ids = self._collect_descendant_case_ids(ws, case_id)
+        remove_ids = {case_id, *descendant_ids}
+        for rid in remove_ids:
+            ws.cases.pop(rid, None)
+        ws.root_case_ids = [cid for cid in ws.root_case_ids if cid not in remove_ids]
+        if ws.selected_case_id in remove_ids:
+            ws.selected_case_id = next(iter(ws.cases), None)
 
-    # --- structural deltas ------------------------------------------------
+    # ------------------------------------------------------------------ working context
 
-    def add_entity_to_case(self, case_id: str, domain: str, entity_dict: dict) -> None:
-        """Add a new entity (serialized as dict) to a case's added_entities."""
-        self._ctx.snapshot()
-        case = self._find_case(case_id)
-        if domain not in case.added_entities:
-            case.added_entities[domain] = []
-        case.added_entities[domain].append(entity_dict)
-        invalidate_on_case_change(self._project, case_id)
-
-    def remove_entity_from_case(self, case_id: str, entity_id: str) -> None:
-        """Remove an entity from a case.
-
-        If the entity was added by this case, remove it from added_entities.
-        Otherwise, mark it as removed via removed_entity_ids.
-        """
-        self._ctx.snapshot()
-        case = self._find_case(case_id)
-        # Check if the entity is in this case's added_entities
-        removed_from_added = False
-        for domain, entities in list(case.added_entities.items()):
-            filtered = [e for e in entities if e.get("id") != entity_id]
-            if len(filtered) != len(entities):
-                case.added_entities[domain] = filtered
-                removed_from_added = True
-            if not case.added_entities[domain]:
-                del case.added_entities[domain]
-        if not removed_from_added:
-            if entity_id not in case.removed_entity_ids:
-                case.removed_entity_ids.append(entity_id)
-        # Also remove from reference_overrides if present
-        case.reference_overrides.pop(entity_id, None)
-        invalidate_on_case_change(self._project, case_id)
-
-    def modify_reference_in_case(
-        self, case_id: str, entity_id: str, property_name: str, value: Any
+    def set_working_context(
+        self,
+        *,
+        case_id: str | None = None,
+        baseline_id: str | None = None,
     ) -> None:
-        """Override a reference property (e.g. target_joint_id) for an existing entity in a case."""
+        """Select the active case for editing."""
         self._ctx.snapshot()
-        case = self._find_case(case_id)
-        if entity_id not in case.reference_overrides:
-            case.reference_overrides[entity_id] = {}
-        case.reference_overrides[entity_id][property_name] = value
-        invalidate_on_case_change(self._project, case_id)
+        ws = self._ensure_workspace()
+        ws.selected_case_id = case_id
 
-    def update_case_invariants(self, case_id: str, invariants: dict[str, float | str]) -> None:
-        """Set invariant values on a case.
-
-        *invariants* is a dict of path → value. If value is a float, unit is
-        assumed empty; if a str, it is parsed as ``value unit``.
-        """
-        self._ctx.snapshot()
-        self.refresh_parameter_catalog()
-        case = self._find_case(case_id)
-        from quino.domain.workspace import ScalarValue
-
-        parsed: dict[str, ScalarValue] = {}
-        for path, value in invariants.items():
-            if isinstance(value, str):
-                parts = value.split()
-                if len(parts) == 2:
-                    parsed[path] = ScalarValue(float(parts[0]), parts[1])
-                else:
-                    parsed[path] = ScalarValue(float(parts[0]), "")
-            else:
-                parsed[path] = ScalarValue(float(value), "")
-        case.invariant_values = parsed
-        invalidate_on_case_change(self._project, case_id)
-
-    # --- workspace poses --------------------------------------------------
+    # ------------------------------------------------------------------ pose (workspace-level)
 
     def create_pose(
         self,
@@ -237,62 +144,50 @@ class WorkspaceCommands:
         case_id: str | None = None,
         project_pose_id: str | None = None,
         is_default: bool = False,
-    ) -> WorkspacePose:
+    ) -> object:
+        """Create a pose on the target case (or active case if not specified)."""
         self._ctx.snapshot()
         ws = self._ensure_workspace()
-        # Auto-materialise a project-level Pose for non-default workspace poses
-        # so the canvas / IK solver have a backing Pose to mutate. Default
-        # poses are computed by the resolver and don't need pre-allocation.
-        if project_pose_id is None and not is_default:
-            project = self._project
-            from quino.domain.model import Pose as _Pose
-            new_proj_pose = _Pose(id=self._ctx.ids.new("pose"), name=name)
-            project.poses.append(new_proj_pose)
-            project_pose_id = new_proj_pose.id
-        pose = WorkspacePose(
-            id=self._next_id("wpose"),
-            name=name,
-            baseline_id=baseline_id,
-            case_id=case_id,
-            project_pose_id=project_pose_id,
-            is_default=is_default,
-        )
-        if is_default:
-            self._clear_default_pose(ws, baseline_id=baseline_id, case_id=case_id)
-        ws.poses.append(pose)
+        target_case_id = case_id or ws.selected_case_id
+        if target_case_id is None:
+            raise ValueError("No active case to create a pose on")
+        from quino.domain.workspace import Pose
+        case = ws.cases.get(target_case_id)
+        if case is None:
+            raise ValueError(f"Case {target_case_id!r} not found")
+        pose_id = self._ctx.ids.new("pose")
+        pose = Pose(id=pose_id, name=name, is_default=is_default)
+        case.poses.append(pose)
         return pose
 
-    def rename_pose(self, workspace_pose_id: str, name: str) -> None:
+    def rename_pose(self, pose_id: str, name: str) -> None:
         self._ctx.snapshot()
-        pose = self._find_pose(workspace_pose_id)
-        pose.name = name
-        invalidate_on_pose_change(self._project, workspace_pose_id)
+        pose = self._find_pose_across_cases(pose_id)
+        if pose is not None:
+            pose.name = name
 
-    def delete_pose(self, workspace_pose_id: str) -> None:
+    def delete_pose(self, pose_id: str) -> None:
         self._ctx.snapshot()
         ws = self._ensure_workspace()
-        target = next((p for p in ws.poses if p.id == workspace_pose_id), None)
-        analysis_ids = [a.id for a in ws.analyses if a.workspace_pose_id == workspace_pose_id]
-        ws.poses = [p for p in ws.poses if p.id != workspace_pose_id]
-        ws.analyses = [a for a in ws.analyses if a.workspace_pose_id != workspace_pose_id]
-        # Clear dangling selection.
-        if ws.selected_pose_id == workspace_pose_id:
+        for case in ws.cases.values():
+            before = len(case.poses)
+            case.poses = [p for p in case.poses if p.id != pose_id]
+            if len(case.poses) < before:
+                break
+        if ws.selected_pose_id == pose_id:
             ws.selected_pose_id = None
-        # Tear down the backing project Pose, if any, so the pose list stays
-        # in sync. Clear the current pose first to avoid dangling references.
-        project = self._project
-        if target is not None and target.project_pose_id is not None and project is not None:
-            backing_id = target.project_pose_id
+
+    def set_selected_pose(self, pose_id: str | None) -> None:
+        self._ctx.snapshot()
+        ws = self._ensure_workspace()
+        ws.selected_pose_id = pose_id
+        if pose_id is None:
             try:
                 self._ctx.set_current_pose_id(None)
             except Exception:
                 pass
-            project.poses = [p for p in project.poses if p.id != backing_id]
-        invalidate_on_pose_change(self._project, workspace_pose_id)
-        for analysis_id in analysis_ids:
-            invalidate_on_analysis_change(self._project, analysis_id)
 
-    # --- analyses ---------------------------------------------------------
+    # ------------------------------------------------------------------ analysis
 
     def create_analysis(
         self,
@@ -304,92 +199,39 @@ class WorkspaceCommands:
         workspace_pose_id: str | None = None,
         config=None,
     ) -> Analysis:
-        # Every analysis must hang off a workspace pose.
-        if workspace_pose_id is None:
-            raise ValueError(
-                "create_analysis requires a workspace_pose_id (every analysis "
-                "must hang off a workspace pose)"
-            )
         self._ctx.snapshot()
+        ws = self._ensure_workspace()
+        target_case_id = case_id or ws.selected_case_id
+        if target_case_id is None:
+            raise ValueError("No case specified for analysis")
+        case = ws.cases.get(target_case_id)
+        if case is None:
+            raise ValueError(f"Case {target_case_id!r} not found")
+        analysis_id = self._ctx.ids.new("analysis")
         analysis = Analysis(
-            id=self._next_id("analysis"),
+            id=analysis_id,
             name=name,
             analysis_type=analysis_type,
-            baseline_id=baseline_id,
-            case_id=case_id,
-            workspace_pose_id=workspace_pose_id,
+            pose_id=workspace_pose_id,
             config=config,
         )
-        self._ensure_workspace().analyses.append(analysis)
+        case.analyses.append(analysis)
         return analysis
 
     def rename_analysis(self, analysis_id: str, name: str) -> None:
         self._ctx.snapshot()
-        analysis = self._find_analysis(analysis_id)
-        analysis.name = name
-        invalidate_on_analysis_change(self._project, analysis_id)
+        analysis = self._find_analysis_across_cases(analysis_id)
+        if analysis is not None:
+            analysis.name = name
 
     def delete_analysis(self, analysis_id: str) -> None:
         self._ctx.snapshot()
         ws = self._ensure_workspace()
-        ws.analyses = [a for a in ws.analyses if a.id != analysis_id]
-        invalidate_on_analysis_change(self._project, analysis_id)
-
-    def set_working_context(
-        self,
-        *,
-        case_id: str | None = None,
-        baseline_id: str | None = None,
-    ) -> None:
-        self._ctx.snapshot()
-        ws = self._ensure_workspace()
-        ws.active_case_id = case_id
-        ws.active_baseline_id = baseline_id
-        if case_id is not None:
-            valid_poses = [p for p in ws.poses if p.case_id == case_id]
-        else:
-            valid_poses = [p for p in ws.poses if p.baseline_id == baseline_id and p.case_id is None]
-        if ws.selected_pose_id and not any(p.id == ws.selected_pose_id for p in valid_poses):
-            ws.selected_pose_id = None
-        if case_id is not None:
-            valid_analyses = [a for a in ws.analyses if a.case_id == case_id]
-        else:
-            valid_analyses = [a for a in ws.analyses if a.baseline_id == baseline_id and a.case_id is None]
-        if ws.selected_analysis_id and not any(a.id == ws.selected_analysis_id for a in valid_analyses):
-            ws.selected_analysis_id = None
-
-    def set_selected_pose(self, pose_id: str | None) -> None:
-        self._ctx.snapshot()
-        ws = self._ensure_workspace()
-        ws.selected_pose_id = pose_id
-        # Sync the project-level current_pose so the canvas displays the
-        # geometry of the chosen WorkspacePose. Default poses (no project
-        # backing) clear the current pose so the canvas falls back to the
-        # composed-project geometry.
-        if pose_id is None:
-            try:
-                self._ctx.set_current_pose_id(None)
-            except Exception:
-                pass
-            return
-        pose = next((p for p in ws.poses if p.id == pose_id), None)
-        if pose is None:
-            return
-        project = self._ctx.project_provider()
-        if pose.project_pose_id is None or project is None or not any(
-            p.id == pose.project_pose_id for p in project.poses
-        ):
-            # Default poses (or stale references) — clear current_pose so
-            # the read-only canvas shows the underlying composed model.
-            try:
-                self._ctx.set_current_pose_id(None)
-            except Exception:
-                pass
-            return
-        try:
-            self._ctx.set_current_pose_id(pose.project_pose_id)
-        except Exception:
-            pass
+        for case in ws.cases.values():
+            before = len(case.analyses)
+            case.analyses = [a for a in case.analyses if a.id != analysis_id]
+            if len(case.analyses) < before:
+                break
 
     def set_selected_analysis(self, analysis_id: str | None) -> None:
         self._ctx.snapshot()
@@ -399,98 +241,59 @@ class WorkspaceCommands:
     def run_analysis(
         self,
         analysis_id: str,
-        simulation_runner,
+        simulation_runner=None,
         project_dir: Path | None = None,
     ) -> Run:
-        self._ctx.snapshot()
-        return _run_analysis(
-            self._project,
-            analysis_id,
-            simulation_runner,
-            project_dir=project_dir,
+        raise NotImplementedError(
+            "WorkspaceCommands.run_analysis is not yet implemented in the case-as-model redesign"
         )
 
-    # --- finders -----------------------------------------------------------
+    def refresh_parameter_catalog(self) -> None:
+        """No-op stub until Task 17 updates the catalog service."""
+        pass
 
-    def _find_baseline(self, baseline_id: str) -> Baseline:
-        for b in self._ensure_workspace().baselines:
-            if b.id == baseline_id:
-                return b
-        raise ValueError(f"Baseline {baseline_id!r} not found")
+    # ------------------------------------------------------------------ finders
 
     def _find_case(self, case_id: str) -> Case:
-        for c in self._ensure_workspace().cases:
-            if c.id == case_id:
-                return c
-        raise ValueError(f"Case {case_id!r} not found")
-
-    def _find_pose(self, workspace_pose_id: str) -> WorkspacePose:
-        for pose in self._ensure_workspace().poses:
-            if pose.id == workspace_pose_id:
-                return pose
-        raise ValueError(f"Workspace pose {workspace_pose_id!r} not found")
-
-    def _find_analysis(self, analysis_id: str) -> Analysis:
-        for analysis in self._ensure_workspace().analyses:
-            if analysis.id == analysis_id:
-                return analysis
-        raise ValueError(f"Analysis {analysis_id!r} not found")
-
-    def _resolve_default_pose_for_case(self, ws: Workspace, case_id: str) -> None:
-        """Call the resolver to set parent_pose_id and attempt IK on the default pose."""
-        try:
-            from quino.services.case_pose_resolver import resolve_default_pose
-            app_service = getattr(self._ctx, "app_service", None)
-            resolve_default_pose(ws, case_id=case_id, app_service=app_service)
-        except Exception:
-            pass  # non-critical; pose will be resolved lazily later
-
-    def _ensure_default_pose(
-        self,
-        *,
-        baseline_id: str | None = None,
-        case_id: str | None = None,
-    ) -> WorkspacePose:
         ws = self._ensure_workspace()
-        existing = next(
-            (
-                pose
-                for pose in ws.poses
-                if pose.is_default and pose.baseline_id == baseline_id and pose.case_id == case_id
-            ),
-            None,
-        )
-        if existing is not None:
-            return existing
-        pose = WorkspacePose(
-            id=self._next_id("wpose"),
-            name="Pose default",
-            baseline_id=baseline_id,
-            case_id=case_id,
-            is_default=True,
-        )
-        ws.poses.append(pose)
-        return pose
+        case = ws.cases.get(case_id)
+        if case is None:
+            raise ValueError(f"Case {case_id!r} not found")
+        return case
 
-    def _clear_default_pose(
-        self,
-        ws: Workspace,
-        *,
-        baseline_id: str | None = None,
-        case_id: str | None = None,
-    ) -> None:
-        for pose in ws.poses:
-            if pose.baseline_id == baseline_id and pose.case_id == case_id:
-                pose.is_default = False
+    def _find_pose_across_cases(self, pose_id: str):
+        ws = self._workspace
+        if ws is None:
+            return None
+        for case in ws.cases.values():
+            for p in case.poses:
+                if p.id == pose_id:
+                    return p
+        return None
+
+    def _find_analysis_across_cases(self, analysis_id: str):
+        ws = self._workspace
+        if ws is None:
+            return None
+        for case in ws.cases.values():
+            for a in case.analyses:
+                if a.id == analysis_id:
+                    return a
+        return None
 
     def _collect_descendant_case_ids(self, ws: Workspace, case_id: str) -> set[str]:
         descendants: set[str] = set()
         frontier = [case_id]
         while frontier:
             current = frontier.pop()
-            children = [case.id for case in ws.cases if case.parent_case_id == current]
+            children = [cid for cid, c in ws.cases.items() if c.parent_case_id == current]
             for child in children:
                 if child not in descendants:
                     descendants.add(child)
                     frontier.append(child)
         return descendants
+
+    # ------------------------------------------------------------------ study (stub)
+
+    def run_study(self, *args, **kwargs):
+        raise NotImplementedError("run_study not yet implemented in case-as-model redesign")

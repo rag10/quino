@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from quino.domain.model import Project, ScalarProperty, Spring
+from quino.domain.model import ScalarProperty, Spring
 from quino.domain.types import SpringType
 from quino.domain.workspace import ParameterDescriptor
 
 
-def build_parameter_catalog(project: Project) -> dict[str, ParameterDescriptor]:
+def build_parameter_catalog(project) -> dict[str, ParameterDescriptor]:
     """Derive a workspace parameter catalog from the current project model.
 
     The default tagging is intentionally conservative:

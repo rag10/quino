@@ -13,7 +13,6 @@ from quino.domain.model import (
     Load,
     Marker,
     Parameter,
-    Project,
     ScalarProperty,
     Sensor,
     Slider,
@@ -43,19 +42,19 @@ class _DictAsListView:
         return item in self._d.values()
 
 
-def _block_instances_view(project: Project) -> _DictAsListView:
+def _block_instances_view(project) -> _DictAsListView:
     if project.model.control_graph is None:
         return _DictAsListView({})
     return _DictAsListView(project.model.control_graph.instances)
 
 
-def _block_connections_view(project: Project) -> list:
+def _block_connections_view(project) -> list:
     if project.model.control_graph is None:
         return []
     return project.model.control_graph.connections
 
 
-def compose_project(base: Project, case: Case | None = None) -> Project:
+def compose_project(base, case: Case | None = None):
     """Return a deep-copied Project with structural deltas and parameter overrides applied.
 
     Override priority (lowest to highest):
@@ -75,7 +74,7 @@ def compose_project(base: Project, case: Case | None = None) -> Project:
     return composed
 
 
-def _validate_workspace_override_scope(base: Project, case: Case | None) -> None:
+def _validate_workspace_override_scope(base, case: Case | None) -> None:
     workspace = base.workspace
     if workspace is None:
         return
@@ -134,7 +133,7 @@ _ENTITY_DOMAIN_LISTS = {
 }
 
 
-def _apply_structural_deltas(project: Project, case: Case) -> None:
+def _apply_structural_deltas(project, case: Case) -> None:
     """Apply structural deltas (added/removed entities and reference overrides) from *case* to *project*."""
     # 1. Remove entities (and their dependents)
     for entity_id in case.removed_entity_ids:
@@ -221,7 +220,7 @@ def _apply_structural_deltas(project: Project, case: Case) -> None:
                     pass
 
 
-def _find_entity_in_project(project: Project, entity_id: str) -> Any | None:
+def _find_entity_in_project(project, entity_id: str) -> Any | None:
     """Find any model entity by id across all domains."""
     for domain, getter in _ENTITY_DOMAIN_LISTS.items():
         for item in getter(project):
@@ -240,7 +239,7 @@ def _find_entity_in_project(project: Project, entity_id: str) -> Any | None:
     return None
 
 
-def _remove_entity_from_project(project: Project, entity_id: str) -> None:
+def _remove_entity_from_project(project, entity_id: str) -> None:
     """Remove an entity and all its dependents from the project."""
     # Find what kind of entity this is
     entity = _find_entity_in_project(project, entity_id)
@@ -354,7 +353,7 @@ def _remove_entity_from_project(project: Project, entity_id: str) -> None:
 # Parameter path resolvers
 # ------------------------------------------------------------------
 
-def _apply_parameter_override(project: Project, path: str, scalar: ScalarValue) -> None:
+def _apply_parameter_override(project, path: str, scalar: ScalarValue) -> None:
     """Apply a scalar override to a project property identified by *path*.
 
     Path format: ``<domain>/<id>/<property>`` or
@@ -372,7 +371,7 @@ def _apply_parameter_override(project: Project, path: str, scalar: ScalarValue) 
     resolver(project, parts, scalar)
 
 
-def _resolve_project_parameter(project: Project, parts: list[str], scalar: ScalarValue) -> None:
+def _resolve_project_parameter(project, parts: list[str], scalar: ScalarValue) -> None:
     if len(parts) != 2:
         raise ValueError(f"Invalid parameter path: {'/'.join(parts)!r}")
     param_id = parts[1]
@@ -384,7 +383,7 @@ def _resolve_project_parameter(project: Project, parts: list[str], scalar: Scala
         param.unit = scalar.unit
 
 
-def _resolve_body_property(project: Project, parts: list[str], scalar: ScalarValue) -> None:
+def _resolve_body_property(project, parts: list[str], scalar: ScalarValue) -> None:
     if len(parts) != 3:
         raise ValueError(f"Invalid body path: {'/'.join(parts)!r}")
     body_id, prop = parts[1], parts[2]
@@ -394,7 +393,7 @@ def _resolve_body_property(project: Project, parts: list[str], scalar: ScalarVal
     _set_scalar_property(body, prop, scalar)
 
 
-def _resolve_load_property(project: Project, parts: list[str], scalar: ScalarValue) -> None:
+def _resolve_load_property(project, parts: list[str], scalar: ScalarValue) -> None:
     if len(parts) != 3:
         raise ValueError(f"Invalid load path: {'/'.join(parts)!r}")
     load_id, prop = parts[1], parts[2]
@@ -404,7 +403,7 @@ def _resolve_load_property(project: Project, parts: list[str], scalar: ScalarVal
     _set_scalar_property(load, prop, scalar)
 
 
-def _resolve_spring_property(project: Project, parts: list[str], scalar: ScalarValue) -> None:
+def _resolve_spring_property(project, parts: list[str], scalar: ScalarValue) -> None:
     if len(parts) != 3:
         raise ValueError(f"Invalid spring path: {'/'.join(parts)!r}")
     spring_id, prop = parts[1], parts[2]
@@ -414,7 +413,7 @@ def _resolve_spring_property(project: Project, parts: list[str], scalar: ScalarV
     _set_scalar_property(spring, prop, scalar)
 
 
-def _resolve_driver_property(project: Project, parts: list[str], scalar: ScalarValue) -> None:
+def _resolve_driver_property(project, parts: list[str], scalar: ScalarValue) -> None:
     if len(parts) != 3:
         raise ValueError(f"Invalid driver path: {'/'.join(parts)!r}")
     driver_id, prop = parts[1], parts[2]
@@ -424,7 +423,7 @@ def _resolve_driver_property(project: Project, parts: list[str], scalar: ScalarV
     _set_scalar_property(driver, prop, scalar)
 
 
-def _resolve_gravity_property(project: Project, parts: list[str], scalar: ScalarValue) -> None:
+def _resolve_gravity_property(project, parts: list[str], scalar: ScalarValue) -> None:
     if len(parts) != 2:
         raise ValueError(f"Invalid gravity path: {'/'.join(parts)!r}")
     if project.model.gravity is None:
@@ -435,7 +434,7 @@ def _resolve_gravity_property(project: Project, parts: list[str], scalar: Scalar
     setattr(project.model.gravity, prop, float(scalar.value))
 
 
-def _resolve_block_parameter(project: Project, parts: list[str], scalar: ScalarValue) -> None:
+def _resolve_block_parameter(project, parts: list[str], scalar: ScalarValue) -> None:
     if len(parts) != 5 or parts[1] != "instances" or parts[3] != "parameters":
         raise ValueError(f"Invalid block diagram path: {'/'.join(parts)!r}")
     instance_id, key = parts[2], parts[4]
@@ -447,7 +446,7 @@ def _resolve_block_parameter(project: Project, parts: list[str], scalar: ScalarV
     instance.parameters[key] = scalar.value
 
 
-def _resolve_model_control_graph_parameter(project: Project, parts: list[str], scalar: ScalarValue) -> None:
+def _resolve_model_control_graph_parameter(project, parts: list[str], scalar: ScalarValue) -> None:
     if len(parts) < 2:
         raise ValueError(f"Invalid model path: {'/'.join(parts)!r}")
     if parts[1] != "control_graph":
@@ -455,7 +454,7 @@ def _resolve_model_control_graph_parameter(project: Project, parts: list[str], s
     _resolve_block_parameter(project, parts[1:], scalar)
 
 
-def _resolve_marker_property(project: Project, parts: list[str], scalar: ScalarValue) -> None:
+def _resolve_marker_property(project, parts: list[str], scalar: ScalarValue) -> None:
     if len(parts) != 3:
         raise ValueError(f"Invalid marker path: {'/'.join(parts)!r}")
     marker_id, prop = parts[1], parts[2]
@@ -467,7 +466,7 @@ def _resolve_marker_property(project: Project, parts: list[str], scalar: ScalarV
     raise ValueError(f"Marker {marker_id!r} not found")
 
 
-def _resolve_slider_property(project: Project, parts: list[str], scalar: ScalarValue) -> None:
+def _resolve_slider_property(project, parts: list[str], scalar: ScalarValue) -> None:
     if len(parts) != 3:
         raise ValueError(f"Invalid slider path: {'/'.join(parts)!r}")
     slider_id, prop = parts[1], parts[2]
@@ -477,7 +476,7 @@ def _resolve_slider_property(project: Project, parts: list[str], scalar: ScalarV
     _set_scalar_property(slider, prop, scalar)
 
 
-def _resolve_joint_property(project: Project, parts: list[str], scalar: ScalarValue) -> None:
+def _resolve_joint_property(project, parts: list[str], scalar: ScalarValue) -> None:
     if len(parts) != 3:
         raise ValueError(f"Invalid joint path: {'/'.join(parts)!r}")
     joint_id, prop = parts[1], parts[2]
@@ -499,7 +498,7 @@ def _resolve_joint_property(project: Project, parts: list[str], scalar: ScalarVa
     _set_scalar_property(joint, prop, scalar)
 
 
-def _resolve_spring_metadata_property(project: Project, parts: list[str], scalar: ScalarValue) -> None:
+def _resolve_spring_metadata_property(project, parts: list[str], scalar: ScalarValue) -> None:
     # springs_meta/<id>/<key>  → spring.metadata.values[key]
     if len(parts) != 3:
         raise ValueError(f"Invalid springs_meta path: {'/'.join(parts)!r}")
@@ -510,7 +509,7 @@ def _resolve_spring_metadata_property(project: Project, parts: list[str], scalar
     spring.metadata.values[key] = scalar.value
 
 
-_PARAMETER_RESOLVERS: dict[str, Callable[[Project, list[str], ScalarValue], None]] = {
+_PARAMETER_RESOLVERS: dict[str, Callable[[list[str], ScalarValue], None]] = {
     "parameters": _resolve_project_parameter,
     "bodies": _resolve_body_property,
     "markers": _resolve_marker_property,
@@ -537,7 +536,7 @@ def _find_by_id(items: list, item_id: str):
     return None
 
 
-def _resolve_case_chain(project: Project, case: Case) -> list[Case]:
+def _resolve_case_chain(project, case: Case) -> list[Case]:
     workspace = project.workspace
     if workspace is None or case.parent_case_id is None:
         return [case]
@@ -646,7 +645,7 @@ def _default_unit_for_dimension(dimension) -> str:
     }.get(dimension, "")
 
 
-def compose_project_hash(project: Project) -> str:
+def compose_project_hash(project) -> str:
     """Return a stable hash of the composed project payload.
 
     Workspace runtime state and result caches are intentionally excluded because

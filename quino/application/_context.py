@@ -1,9 +1,15 @@
 # quino/application/_context.py
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import Callable, ContextManager
 
-from quino.domain.model import Project
+import copy
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Any, Callable, ContextManager, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from quino.domain.workspace import Case, Workspace
+    from quino.services.case_cascading import CascadingEngine
+
 from quino.services.expressions import ExpressionService
 from quino.services.ids import IdService
 from quino.services.units import UnitService
@@ -14,12 +20,14 @@ from quino.services.validation import ValidationService
 class ServiceContext:
     """Dependencias compartidas que los command-services reciben.
 
-    No contiene el Project directamente: se accede vía `project_provider()` para
-    que la fachada pueda reasignarlo (load_project, new_project).
+    No contiene la Workspace directamente: se accede vía `workspace_provider()`
+    para que la fachada pueda reasignarla (load_workspace, new_workspace).
     """
-    project_provider: Callable[[], Project]      # devuelve self._project
-    operation: Callable[[], ContextManager]      # devuelve self._operation()
-    snapshot: Callable[[], None]                 # self._snapshot
+    workspace_provider: Callable[[], "Workspace | None"]
+    current_case_provider: Callable[[], "Case | None"]
+    cascade_provider: Callable[[], "CascadingEngine | None"]
+    operation: Callable[[], ContextManager]       # devuelve self._operation()
+    snapshot: Callable[[], None]                  # self._snapshot
     invalidate_pose_state: Callable[[], None]
     ids: IdService
     expressions: ExpressionService
@@ -34,155 +42,215 @@ class ServiceContext:
     connect_marker_to_ground: Callable[..., str]
     joints_for_marker: Callable[[str], list]
     translate_direct_joint_counterparts: Callable[..., set]
-    set_current_pose_id: Callable[[str | None], None] = lambda _pid: None
+    set_current_pose_id: Callable[[str | None], None] = field(
+        default_factory=lambda: (lambda _pid: None)
+    )
     # Optional hook the GUI installs to ask the user before a numerically-
-    # relevant edit (i.e. not a cosmetic style change) invalidates persisted
-    # runs of the active case. Should return True if the edit may proceed,
-    # False if it must be aborted.
-    confirm_run_invalidation: Callable[[], bool] = lambda: True
+    # relevant edit invalidates persisted runs of the active case. Should
+    # return True if the edit may proceed, False if it must be aborted.
+    confirm_run_invalidation: Callable[[], bool] = field(
+        default_factory=lambda: (lambda: True)
+    )
 
-    def _affected_analysis_ids_for_active_scope(self) -> set[str]:
-        """Analyses whose runs an edit on the active scope can invalidate.
+    # ------------------------------------------------------------------
+    # Back-compat: some command-services still call project_provider().
+    # This shim returns the model from the active case.
+    # TODO: remove in Task 17 when command-services use cascade_provider().
+    # ------------------------------------------------------------------
+    def project_provider(self):
+        """Shim: returns the active Case's model wrapper for backward compat.
 
-        Active scope = active case, if any; otherwise the active baseline
-        (so editing the shared model on the baseline still invalidates the
-        baseline's analyses *and* every case hanging off it)."""
-        project = self.project_provider()
-        if project is None or project.workspace is None:
+        Returns a minimal proxy that exposes .model, .parameters, .sketch,
+        .poses, etc from the current Case so old command-service code keeps
+        working until Task 17.
+        """
+        ws = self.workspace_provider()
+        if ws is None:
+            return None
+        case = self.current_case_provider()
+        if case is None:
+            # Return a _WorkspaceProjectProxy with no model
+            return _WorkspaceProjectProxy(ws, case=None)
+        return _WorkspaceProjectProxy(ws, case=case)
+
+    def current_case(self) -> "Case | None":
+        return self.current_case_provider()
+
+    def affected_analysis_ids(self) -> set[str]:
+        case = self.current_case_provider()
+        if case is None:
             return set()
-        ws = project.workspace
-        if ws.active_case_id is not None:
-            return {a.id for a in ws.analyses if a.case_id == ws.active_case_id}
-        if ws.active_baseline_id is not None:
-            case_ids = {c.id for c in ws.cases if c.baseline_id == ws.active_baseline_id}
-            return {
-                a.id for a in ws.analyses
-                if (a.case_id is None and a.baseline_id == ws.active_baseline_id)
-                or (a.case_id in case_ids)
-            }
-        # No explicit working context: every analysis is fair game.
-        return {a.id for a in ws.analyses}
+        return {a.id for a in case.analyses}
+
+    def discard_runs_for_active_case(self) -> None:
+        case = self.current_case_provider()
+        if case is None:
+            return
+        analysis_ids = self.affected_analysis_ids()
+        if not analysis_ids:
+            return
+        # Mark stale — import locally to avoid circular
+        try:
+            from quino.services.run_invalidation import _mark_set_stale
+            ws = self.workspace_provider()
+            if ws is not None:
+                _mark_set_stale(ws, analysis_ids, reason="model edited")
+        except (ImportError, TypeError):
+            pass
 
     def confirm_invalidation_if_runs_exist(self) -> bool:
-        """Ask `confirm_run_invalidation` only when the edit will actually
-        flip an ok / partial run to stale; otherwise return True."""
-        project = self.project_provider()
-        if project is None or project.workspace is None:
+        case = self.current_case_provider()
+        if case is None:
             return True
-        ws = project.workspace
-        analysis_ids = self._affected_analysis_ids_for_active_scope()
+        analysis_ids = self.affected_analysis_ids()
         if not analysis_ids:
             return True
         has_ok_run = any(
             r.analysis_id in analysis_ids and r.status in {"ok", "partial"}
-            for r in ws.runs
+            for r in case.runs
         )
         if not has_ok_run:
             return True
         return bool(self.confirm_run_invalidation())
 
-    def discard_runs_for_active_case(self) -> None:
-        """A non-cosmetic edit marks every affected ok/partial run as stale
-        (data is preserved on disk, the canvas just locks playback). The
-        name is historical — the scope is `active case OR active baseline
-        OR whole workspace` (see `_affected_analysis_ids_for_active_scope`).
-
-        Kept under the old name so existing call sites don't need to change."""
-        project = self.project_provider()
-        if project is None or project.workspace is None:
-            return
-        ws = project.workspace
-        analysis_ids = self._affected_analysis_ids_for_active_scope()
-        if not analysis_ids:
-            return
-        from quino.services.run_invalidation import _mark_set_stale
-        _mark_set_stale(ws, analysis_ids, reason="model edited")
+    # ------------------------------------------------------------------
+    # Back-compat helpers (used by old command-service code via context)
+    # ------------------------------------------------------------------
 
     def get_active_case(self):
         """Return the active Case if one is set, otherwise None."""
-        project = self.project_provider()
-        ws = project.workspace if project is not None else None
-        if ws is None or ws.active_case_id is None:
-            return None
-        return next((c for c in ws.cases if c.id == ws.active_case_id), None)
+        return self.current_case_provider()
 
     def effective_project(self):
-        """Return a read-only composed project view (baseline + case chain).
+        """Return a read-only composed-project-style view for backward compat."""
+        return self.project_provider()
 
-        In case mode, returns the project with structural deltas applied so
-        commands can validate inputs against entities added by the case.
-        Outside case mode, returns the raw project.
 
-        IMPORTANT: do NOT mutate the returned project — it may be a
-        deep-copy clone. Mutations must go via case routing helpers.
-        """
-        project = self.project_provider()
-        case = self.get_active_case()
-        if case is None:
-            return project
-        from quino.services.workspace_composition import compose_project
-        try:
-            return compose_project(project, case=case)
-        except Exception:
-            return project
+# ---------------------------------------------------------------------------
+# _WorkspaceProjectProxy — bridges old command-service expectations to the
+# new Workspace/Case domain model.  Command-services that call
+# ctx.project_provider() get one of these instead of a real Project.
+# ---------------------------------------------------------------------------
 
-    def add_entity_to_case(self, entity, domain: str) -> bool:
-        """If a case is active, serialize *entity* and append it to
-        case.added_entities[*domain*].  Return True when redirected
-        (caller must NOT add the entity to project.model)."""
-        case = self.get_active_case()
-        if case is None:
-            return False
-        from quino.serialization.json_io import JsonMapper
-        mapper = JsonMapper()
-        serializer = {
-            "bodies": mapper._body_to_dict,
-            "joints": mapper._joint_to_dict,
-            "sliders": mapper._slider_to_dict,
-            "drivers": mapper._driver_to_dict,
-            "loads": mapper._load_to_dict,
-            "sensors": mapper._sensor_to_dict,
-            "springs": mapper._spring_to_dict,
-            "blocks": mapper._block_instance_to_dict,
-            "connections": mapper._block_connection_to_dict,
-        }.get(domain)
-        if serializer is None:
-            return False
-        case.added_entities.setdefault(domain, []).append(serializer(entity))
-        return True
+class _WorkspaceProjectProxy:
+    """Thin proxy that makes a (Workspace, Case) pair look like the old Project.
 
-    def remove_entity_from_case(self, entity_id: str) -> bool:
-        """If a case is active, record *entity_id* as removed.
-        If the entity was previously added by this case, it is removed
-        from added_entities instead.  Return True when handled
-        (caller should still remove from project.model so the baseline
-        stays consistent)."""
-        case = self.get_active_case()
-        if case is None:
-            return False
-        # If the entity was added by this same case, remove from added_entities
-        for domain, entities in case.added_entities.items():
-            for i, ent in enumerate(entities):
-                if ent.get("id") == entity_id:
-                    entities.pop(i)
-                    if not entities:
-                        case.added_entities.pop(domain, None)
-                    return True
-        # Otherwise record as removed from baseline
-        if entity_id not in case.removed_entity_ids:
-            case.removed_entity_ids.append(entity_id)
-        return True
+    Only the attributes that existing command-services access are provided.
+    Mutation goes directly through the underlying Case / Workspace objects, so
+    deepcopy-based undo still works correctly.
+    """
 
-    def add_marker_removal_to_case(self, marker_id: str, body_id: str) -> bool:
-        """Record a marker removal in the active case.
-        Markers don't have their own domain in added_entities, so we
-        store reference overrides on the body to indicate the marker
-        is removed.  Return True when handled."""
-        case = self.get_active_case()
-        if case is None:
-            return False
-        overrides = case.reference_overrides.setdefault(body_id, {})
-        removed = overrides.setdefault("removed_markers", [])
-        if marker_id not in removed:
-            removed.append(marker_id)
-        return True
+    __slots__ = ("_ws", "_case")
+
+    def __init__(self, ws: "Workspace", case: "Case | None") -> None:
+        self._ws = ws
+        self._case = case
+
+    # --- model-level lists (route to Case.model) ---
+
+    @property
+    def model(self):
+        return self._case.model if self._case is not None else None
+
+    @property
+    def parameters(self):
+        return self._ws.parameters
+
+    @parameters.setter
+    def parameters(self, value):
+        self._ws.parameters = value
+
+    @property
+    def sketch(self):
+        return self._ws.sketch
+
+    @sketch.setter
+    def sketch(self, value):
+        self._ws.sketch = value
+
+    @property
+    def poses(self):
+        if self._case is None:
+            return []
+        return self._case.poses
+
+    @poses.setter
+    def poses(self, value):
+        if self._case is not None:
+            self._case.poses = value
+
+    @property
+    def runs(self):
+        if self._case is None:
+            return []
+        return self._case.runs
+
+    @property
+    def analyses(self):
+        if self._case is None:
+            return []
+        return self._case.analyses
+
+    @property
+    def sensor_outputs(self):
+        if self._case is None:
+            return {}
+        return self._case.sensor_outputs
+
+    @property
+    def reaction_outputs(self):
+        if self._case is None:
+            return {}
+        return self._case.reaction_outputs
+
+    @property
+    def simulation_initial_pose_id(self) -> "str | None":
+        # Old model had this on Project; derive from Case.poses
+        if self._case is None:
+            return None
+        for p in self._case.poses:
+            if getattr(p, "is_default", False):
+                return p.id
+        return None
+
+    @simulation_initial_pose_id.setter
+    def simulation_initial_pose_id(self, value):
+        # No direct equivalent in new model; silently ignore for compat
+        pass
+
+    @property
+    def id(self) -> str:
+        return self._ws.id
+
+    @property
+    def name(self) -> str:
+        return self._ws.name
+
+    @name.setter
+    def name(self, value: str) -> None:
+        self._ws.name = value
+
+    @property
+    def schema_version(self) -> str:
+        return self._ws.schema_version
+
+    @property
+    def view_state(self):
+        return self._ws.view_state
+
+    @view_state.setter
+    def view_state(self, value) -> None:
+        self._ws.view_state = value
+
+    @property
+    def metadata(self):
+        return getattr(self._ws, "metadata", None)
+
+    @property
+    def workspace(self):
+        """Old Project.workspace accessor — returns None (no nested workspace)."""
+        return None
+
+    def __repr__(self) -> str:
+        case_id = self._case.id if self._case is not None else None
+        return f"<_WorkspaceProjectProxy ws={self._ws.id!r} case={case_id!r}>"

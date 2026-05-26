@@ -3,13 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from quino.domain.model import Project, ReactionOutput, SensorOutput
+from quino.domain.model import ReactionOutput, SensorOutput
 
 
 class SensorDataset:
     """Converts SensorOutput and ReactionOutput objects into plottable matrices."""
 
-    def __init__(self, project: Project):
+    def __init__(self, project):
         self.project = project
         self._matrices: dict[str, dict] = {}
         self._load_sensor_outputs()

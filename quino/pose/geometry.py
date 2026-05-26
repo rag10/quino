@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import math
 
-from quino.domain.model import BodyPose, Pose, Project
+from quino.domain.model import BodyPose
+from quino.domain.workspace import Pose
 from quino.services.expressions import ExpressionService
 from quino.services.units import UnitService
 from quino.simulation.assembler import MechanismAssembler
@@ -12,12 +13,12 @@ _EXPRESSION_SERVICE = ExpressionService(_UNIT_SERVICE)
 _ASSEMBLER = MechanismAssembler(_EXPRESSION_SERVICE)
 
 
-def assembled_reference_mechanism(project: Project):
+def assembled_reference_mechanism(project):
     return _ASSEMBLER.assemble(project)
 
 
 def create_reference_pose(
-    project: Project,
+    project,
     *,
     pose_id: str,
     name: str = "Reference",
@@ -50,7 +51,7 @@ def pose_to_state_overlay(pose: Pose | None) -> dict[str, float] | None:
 
 
 def state_overlay_to_pose(
-    project: Project,
+    project,
     state: dict[str, float],
     *,
     pose_id: str,
@@ -68,20 +69,20 @@ def state_overlay_to_pose(
     return Pose(id=pose_id, name=name, body_poses=body_poses)
 
 
-def body_pose_for_reference(project: Project, body_id: str) -> BodyPose:
+def body_pose_for_reference(project, body_id: str) -> BodyPose:
     assembled = assembled_reference_mechanism(project)
     body = assembled.bodies[body_id]
     return BodyPose(body_id=body_id, x=body.origin_x, y=body.origin_y, angle=body.angle)
 
 
-def body_pose_for_project(project: Project, body_id: str, pose: Pose | None = None) -> BodyPose:
+def body_pose_for_project(project, body_id: str, pose: Pose | None = None) -> BodyPose:
     if pose is not None and body_id in pose.body_poses:
         return pose.body_poses[body_id]
     return body_pose_for_reference(project, body_id)
 
 
 def marker_world_position(
-    project: Project,
+    project,
     marker_id: str,
     pose: Pose | None = None,
 ) -> tuple[float, float]:

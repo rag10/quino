@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from quino.domain.model import Project
 from quino.domain.types import JointType
 
 
@@ -17,7 +16,7 @@ class MechanismDofResult:
 
 
 def compute_mechanism_dof(
-    project: Project | None,
+    project | None,
     pose_constraint_count: int = 0,
 ) -> MechanismDofResult:
     """Compute a planar Gruebler-like DOF count for the mechanism.

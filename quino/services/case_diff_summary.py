@@ -15,7 +15,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from quino.domain.model import Project
 from quino.domain.workspace import Case
 from quino.services.workspace_composition import _resolve_case_chain
 
@@ -81,7 +80,7 @@ class CaseDiffSummary:
         )
 
 
-def build_case_diff_summary(project: Project, case: Case) -> CaseDiffSummary:
+def build_case_diff_summary(project, case: Case) -> CaseDiffSummary:
     """Return a structured diff that separates local from inherited entries.
 
     The case chain is walked from the root ancestor down to ``case``. For each

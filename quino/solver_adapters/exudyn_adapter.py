@@ -7,7 +7,7 @@ import tempfile
 import threading
 import traceback
 
-from quino.domain.model import Joint, Project, ReactionOutput, SensorOutput, SimulationResult
+from quino.domain.model import Joint, ReactionOutput, SensorOutput, SimulationResult
 from quino.domain.types import Dimension, DriverType, JointEndpointKind, JointType
 from quino.services.expressions import ExpressionService
 from quino.simulation.assembler import (
@@ -141,13 +141,13 @@ class ExudynAdapter(SolverAdapter):
     def is_available(self) -> bool:
         return importlib.util.find_spec("exudyn") is not None
 
-    def export_script(self, project: Project, duration: float = 1.0, steps: int = 100) -> str:
+    def export_script(self, project, Project, duration: float = 1.0, steps: int = 100) -> str:
         assembled = self.assembler.assemble(project)
         return generate_exudyn_script(project, assembled, duration, steps, self.expression_service)
 
     def run(
         self,
-        project: Project,
+        project, Project,
         duration: float = 1.0,
         steps: int = 100,
         cancel_event: threading.Event | None = None,
@@ -248,7 +248,7 @@ class ExudynAdapter(SolverAdapter):
 
     def _run_with_exudyn(
         self,
-        project: Project,
+        project, Project,
         assembled: AssembledMechanism,
         exu,
         solve_mode: str,
@@ -679,7 +679,7 @@ class ExudynAdapter(SolverAdapter):
             return
         mbs.AddLoad(item_interface.LoadForceVector(markerNumber=load_marker, loadVector=[load.fx, load.fy, 0.0]))
 
-    def _load_is_dynamic(self, project: Project, load: AssembledLoad) -> bool:
+    def _load_is_dynamic(self, project, Project, load: AssembledLoad) -> bool:
         tokens = ["t"]
         for sensor in project.model.sensors:
             safe = safe_sensor_var(sensor.name)
@@ -692,7 +692,7 @@ class ExudynAdapter(SolverAdapter):
                     return True
         return False
 
-    def _make_load_vector_function(self, project: Project, assembled: AssembledMechanism, node_numbers: dict[str, int], load: AssembledLoad, exu):
+    def _make_load_vector_function(self, project, Project, assembled: AssembledMechanism, node_numbers: dict[str, int], load: AssembledLoad, exu):
         def force_fn(mbs, t, loadVector):
             frame = self._current_frame(mbs, exu, assembled, node_numbers)
             variables = {"t": self.expression_service.unit_service.quantity(float(t), "s")}
@@ -741,7 +741,7 @@ class ExudynAdapter(SolverAdapter):
         self,
         mbs,
         item_interface,
-        project: Project,
+        project, Project,
         body_objects: dict[str, int],
         node_numbers: dict[str, int],
         ground_object: int,
@@ -828,7 +828,7 @@ class ExudynAdapter(SolverAdapter):
                 stiffness=k, damping=c, offset=theta0,
             ))
 
-    def _make_spring_law_fn(self, project: Project, spring: AssembledSpring, si_unit: str, bridge=None):
+    def _make_spring_law_fn(self, project, Project, spring: AssembledSpring, si_unit: str, bridge=None):
         """Returns a springForceUserFunction. si_unit: 'N' (linear) or 'N*m' (rotational, SI)."""
         def fn(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):
             if bridge is not None:
@@ -1051,7 +1051,7 @@ class ExudynAdapter(SolverAdapter):
         self,
         mbs,
         item_interface,
-        project: Project,
+        project, Project,
         assembled: AssembledMechanism,
         node_numbers: dict[str, int],
         ground_object: int,
@@ -1090,7 +1090,7 @@ class ExudynAdapter(SolverAdapter):
         self,
         mbs,
         item_interface,
-        project: Project,
+        project, Project,
         assembled: AssembledMechanism,
         body_objects: dict[str, int],
         node_numbers: dict[str, int],
@@ -1122,7 +1122,7 @@ class ExudynAdapter(SolverAdapter):
             return
         raise ValueError(f"Unsupported driver type: {driver.driver_type}")
 
-    def _create_rotation_driver(self, mbs, item_interface, project: Project, node_numbers: dict[str, int], ground_object: int, driver: AssembledDriver, joint, bridge=None) -> None:
+    def _create_rotation_driver(self, mbs, item_interface, project, Project, node_numbers: dict[str, int], ground_object: int, driver: AssembledDriver, joint, bridge=None) -> None:
         marker_numbers = self._rotation_coordinate_markers(mbs, item_interface, node_numbers, ground_object, joint)
         mbs.AddObject(
             item_interface.CoordinateConstraint(
@@ -1138,7 +1138,7 @@ class ExudynAdapter(SolverAdapter):
         self,
         mbs,
         item_interface,
-        project: Project,
+        project, Project,
         assembled: AssembledMechanism,
         body_objects: dict[str, int],
         ground_object: int,
@@ -1213,7 +1213,7 @@ class ExudynAdapter(SolverAdapter):
     def _has_translation_drivers(self, assembled: AssembledMechanism) -> bool:
         return any(driver.driver_type == DriverType.TRANSLATION.value for driver in assembled.drivers)
 
-    def _joint_angular_limits_rad(self, project: Project, joint: Joint) -> tuple[float | None, float | None] | None:
+    def _joint_angular_limits_rad(self, project, Project, joint: Joint) -> tuple[float | None, float | None] | None:
         if joint.type is not JointType.REVOLUTE:
             return None
         if joint.endpoint_a.kind is JointEndpointKind.SLIDER or joint.endpoint_b.kind is JointEndpointKind.SLIDER:
@@ -1228,7 +1228,7 @@ class ExudynAdapter(SolverAdapter):
             return None
         return negative, positive
 
-    def _joint_metadata_angle(self, project: Project, joint: Joint, path: str) -> float | None:
+    def _joint_metadata_angle(self, project, Project, joint: Joint, path: str) -> float | None:
         expression = joint.metadata.values.get(path)
         if not isinstance(expression, str) or not expression.strip():
             return None
@@ -1306,7 +1306,7 @@ class ExudynAdapter(SolverAdapter):
 
     def _make_servo_force_function(
         self,
-        project: Project,
+        project, Project,
         driver: AssembledDriver,
         expected_dimension: Dimension,
         bridge=None,
@@ -1324,7 +1324,7 @@ class ExudynAdapter(SolverAdapter):
 
         return spring_force_fn
 
-    def _evaluate_driver_value(self, project: Project, driver: AssembledDriver, expected_dimension: Dimension, time_value: float, bridge=None) -> float:
+    def _evaluate_driver_value(self, project, Project, driver: AssembledDriver, expected_dimension: Dimension, time_value: float, bridge=None) -> float:
         if bridge is not None:
             command = bridge.command_value(driver.driver_id)
             if command is not None:
@@ -1355,7 +1355,7 @@ class ExudynAdapter(SolverAdapter):
             output_unit = driver.unit
         return self.expression_service.unit_service.convert(quantity, output_unit)
 
-    def _evaluate_driver_rate(self, project: Project, driver: AssembledDriver, expected_dimension: Dimension, time_value: float, bridge=None) -> float:
+    def _evaluate_driver_rate(self, project, Project, driver: AssembledDriver, expected_dimension: Dimension, time_value: float, bridge=None) -> float:
         if bridge is not None and bridge.command_value(driver.driver_id) is not None:
             return 0.0
         dt = 1e-6
@@ -1366,7 +1366,7 @@ class ExudynAdapter(SolverAdapter):
 
     def _make_offset_function(
         self,
-        project: Project,
+        project, Project,
         driver: AssembledDriver,
         expected_dimension: Dimension,
         bridge=None,
@@ -1385,7 +1385,7 @@ class ExudynAdapter(SolverAdapter):
 
     def _make_offset_function_t(
         self,
-        project: Project,
+        project, Project,
         driver: AssembledDriver,
         expected_dimension: Dimension,
         bridge=None,
@@ -1487,7 +1487,7 @@ class ExudynAdapter(SolverAdapter):
 
     def _record_sensor_data(
         self,
-        project: Project,
+        project, Project,
         assembled: AssembledMechanism,
         body_order: list[str],
         time: list[float],
@@ -1815,7 +1815,7 @@ class ExudynAdapter(SolverAdapter):
 
     def _record_reaction_data_dynamic(
         self,
-        project: Project,
+        project, Project,
         assembled: AssembledMechanism,
         time: list[float],
         frames: list[dict[str, float]],
@@ -1852,7 +1852,7 @@ class ExudynAdapter(SolverAdapter):
 
     def _record_reaction_data_static(
         self,
-        project: Project,
+        project, Project,
         assembled: AssembledMechanism,
         mbs,
         exu,
@@ -1900,7 +1900,7 @@ class ExudynAdapter(SolverAdapter):
                 positions=positions,
             )
 
-    def _project_diagnostics(self, project: Project) -> list[str]:
+    def _project_diagnostics(self, project, Project) -> list[str]:
         lines = [
             (
                 "Model summary: "

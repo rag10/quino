@@ -4,7 +4,6 @@ from quino.domain.model import (
     Body,
     Joint,
     Model,
-    Project,
     SketchConstraint,
     SketchArc,
     SketchCircle,
@@ -21,7 +20,7 @@ from quino.simulation.sensor_expressions import sensor_channel_keys
 
 
 class ValidationService:
-    def validate_project(self, project: Project) -> ValidationReport:
+    def validate_project(self, project) -> ValidationReport:
         report = ValidationReport()
         self._validate_unique_names(project, report)
         self._validate_bodies(project.model, report)
@@ -34,7 +33,7 @@ class ValidationService:
         self._validate_sketch(project, report)
         return report
 
-    def _validate_unique_names(self, project: Project, report: ValidationReport) -> None:
+    def _validate_unique_names(self, project, report: ValidationReport) -> None:
         for entity_name, entities in {
             "body": project.model.bodies,
             "joint": project.model.joints,
@@ -158,7 +157,7 @@ class ValidationService:
             if not is_actuator and spring.metadata.values.get("stiffness", 0.0) == 0.0 and spring.metadata.values.get("damping", 0.0) == 0.0:
                 report.messages.append(ValidationMessage("warning", "spring_zero_properties", f"Spring '{spring.name}' has zero stiffness and damping", spring.id))
 
-    def _validate_control_graph(self, project: Project, report: ValidationReport) -> None:
+    def _validate_control_graph(self, project, report: ValidationReport) -> None:
         diagram = project.model.control_graph
         if diagram is None:
             return
@@ -402,7 +401,7 @@ class ValidationService:
                 return "velocity"
         return None
 
-    def _validate_sketch(self, project: Project, report: ValidationReport) -> None:
+    def _validate_sketch(self, project, report: ValidationReport) -> None:
         sketch = project.sketch
         if sketch is None:
             return

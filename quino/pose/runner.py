@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from quino.domain.model import Pose, Project
+from quino.domain.workspace import Pose
 from quino.pose.model import PoseConstraint, PoseSolveResult, PoseSolveSettings
 
 
@@ -16,7 +16,7 @@ class PoseRunner:
 
     def solve(
         self,
-        project: Project,
+        project,
         initial_pose: Pose | None,
         temporary_constraints: list[PoseConstraint] | None = None,
         settings: PoseSolveSettings | None = None,

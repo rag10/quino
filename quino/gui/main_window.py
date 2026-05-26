@@ -2432,7 +2432,7 @@ class MainWindow(QtWidgets.QMainWindow):
         "Springs": "#2a9d8f",
     }
 
-    def _populate_tree(self, project: Project) -> None:
+    def _populate_tree(self, project, Project) -> None:
         self.tree.blockSignals(True)
         self._expanded_tree_keys = self._collect_expanded_tree_keys()
         self.tree.clear()
@@ -2994,7 +2994,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tree_items[entity_id] = item
         return item
 
-    def _populate_parameters(self, project: Project) -> None:
+    def _populate_parameters(self, project, Project) -> None:
         self._suspend_parameter_updates = True
         try:
             self.parameters_table.setRowCount(len(project.parameters))
@@ -3008,7 +3008,7 @@ class MainWindow(QtWidgets.QMainWindow):
         finally:
             self._suspend_parameter_updates = False
 
-    def _populate_canvas_summary(self, project: Project) -> None:
+    def _populate_canvas_summary(self, project, Project) -> None:
         lines = [
             f"Project: {project.name}",
             f"Backend: {self.app_service.simulation_runner.describe_backend()}",

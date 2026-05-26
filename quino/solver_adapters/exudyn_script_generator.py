@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from quino.domain.model import Project
 from quino.domain.types import Dimension, JointEndpointKind, JointType
 from quino.services.expressions import ExpressionService
 from quino.simulation.assembler import AssembledBody, AssembledLoad, AssembledMechanism, AssembledSlider, AssembledSpring
@@ -62,8 +61,7 @@ def _generate_interp_helper() -> list[str]:
 
 
 def _generate_driver_data(
-    project: Project,
-    assembled: AssembledMechanism,
+    project, assembled: AssembledMechanism,
     duration: float,
     steps: int,
     expression_service: ExpressionService,
@@ -115,7 +113,7 @@ def _generate_driver_data(
     return lines
 
 
-def _generate_bodies(project: Project, assembled: AssembledMechanism) -> list[str]:
+def _generate_bodies(project, assembled: AssembledMechanism) -> list[str]:
     lines: list[str] = ["# --- Bodies ---", ""]
     domain_body_map = {body.id: body for body in project.model.bodies}
     for body in assembled.bodies.values():
@@ -604,8 +602,7 @@ def _generate_springs(assembled: AssembledMechanism) -> list[str]:
 
 
 def generate_exudyn_script(
-    project: Project,
-    assembled: AssembledMechanism,
+    project, assembled: AssembledMechanism,
     duration: float,
     steps: int,
     expression_service: ExpressionService | None = None,

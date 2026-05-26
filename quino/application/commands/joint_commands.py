@@ -16,7 +16,6 @@ from quino.domain.model import (
     Joint,
     JointEndpoint,
     Marker,
-    Project,
     ScalarProperty,
     Slider,
 )
@@ -38,7 +37,7 @@ class JointCommands:
         self._ctx = ctx
 
     @property
-    def _project(self) -> Project:
+    def _project(self):
         project = self._ctx.project_provider()
         if project is None:
             raise ValueError("No project loaded")
@@ -66,7 +65,7 @@ class JointCommands:
             slider_id=endpoint.slider_id,
         )
 
-    def _validate_endpoint_input(self, endpoint: JointEndpointInput, project: Project) -> None:
+    def _validate_endpoint_input(self, endpoint: JointEndpointInput, project) -> None:
         if endpoint.kind is JointEndpointKind.MARKER:
             if endpoint.body_id is None or endpoint.marker_id is None:
                 raise ValueError("Marker endpoints require body_id and marker_id")
