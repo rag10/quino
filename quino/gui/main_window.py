@@ -1307,24 +1307,20 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _validate_analysis_pre_run(self, analysis_id: str) -> list[str]:
         project = self.app_service.project
-        if project is None or project.workspace is None:
-            return ["No active project."]
-        analysis = next(
-            (a for a in project.workspace.analyses if a.id == analysis_id), None
-        )
+        ws = self.app_service._workspace
+        case = self.app_service.current_case()
+        if ws is None or case is None:
+            return ["No active workspace/case."]
+        analysis = next((a for a in case.analyses if a.id == analysis_id), None)
         if analysis is None:
             return [f"Analysis {analysis_id!r} not found."]
         try:
             from quino.analysis.registry import get_runner_for_type
-            from quino.services.workspace_composition import compose_project
-            case = (
-                next((c for c in project.workspace.cases if c.id == analysis.case_id), None)
-                if analysis.case_id else None
-            )
-            composed = compose_project(project, case=case)
+            from quino.services.workspace_runner import _CaseAsProject
+            project_view = _CaseAsProject.from_case(case, ws)
             runner = get_runner_for_type(analysis.analysis_type)
             return [
-                msg for msg in runner.validate(composed, analysis)
+                msg for msg in runner.validate(project_view, analysis)
                 if not msg.startswith("WARNING")
             ]
         except Exception as exc:
