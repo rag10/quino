@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from quino.domain.model import ScalarProperty, Spring
 from quino.domain.types import SpringType
-from quino.domain.workspace import ParameterDescriptor
+from quino.domain.workspace import ParameterDescriptor, Workspace
 
 
-def build_parameter_catalog(project) -> dict[str, ParameterDescriptor]:
-    """Derive a workspace parameter catalog from the current project model.
+def build_parameter_catalog(workspace: Workspace) -> dict[str, ParameterDescriptor]:
+    """Derive a workspace parameter catalog from the current workspace model.
+
+    Uses workspace-level parameters and the first root case's model for
+    body/load/spring/driver/control_graph entries.
 
     The default tagging is intentionally conservative:
     - design-defining values are `invariant`
@@ -14,7 +17,8 @@ def build_parameter_catalog(project) -> dict[str, ParameterDescriptor]:
     """
     catalog: dict[str, ParameterDescriptor] = {}
 
-    for parameter in project.parameters:
+    # Workspace-level parameters
+    for parameter in workspace.parameters:
         path = f"parameters/{parameter.id}"
         catalog[path] = ParameterDescriptor(
             path=path,
@@ -25,7 +29,14 @@ def build_parameter_catalog(project) -> dict[str, ParameterDescriptor]:
             property_name="expression",
         )
 
-    for body in project.model.bodies:
+    # Derive model from first root case
+    root = workspace.cases.get(workspace.root_case_ids[0]) if workspace.root_case_ids else None
+    model = root.model if root is not None else None
+
+    if model is None:
+        return catalog
+
+    for body in model.bodies:
         if body.mass is not None:
             _add_scalar_descriptor(
                 catalog,
@@ -37,7 +48,7 @@ def build_parameter_catalog(project) -> dict[str, ParameterDescriptor]:
                 property_name="mass",
             )
 
-    for load in project.model.loads:
+    for load in model.loads:
         _add_scalar_descriptor(
             catalog,
             path=f"loads/{load.id}/fx",
@@ -57,7 +68,7 @@ def build_parameter_catalog(project) -> dict[str, ParameterDescriptor]:
             property_name="fy",
         )
 
-    for spring in project.model.springs:
+    for spring in model.springs:
         if spring.rest_value is not None:
             _add_scalar_descriptor(
                 catalog,
@@ -96,7 +107,7 @@ def build_parameter_catalog(project) -> dict[str, ParameterDescriptor]:
             _retag(catalog, f"springs/{spring.id}/stiffness", "variable")
             _retag(catalog, f"springs/{spring.id}/damping", "variable")
 
-    for driver in project.model.drivers:
+    for driver in model.drivers:
         _add_scalar_descriptor(
             catalog,
             path=f"drivers/{driver.id}/law",
@@ -107,7 +118,7 @@ def build_parameter_catalog(project) -> dict[str, ParameterDescriptor]:
             property_name="law",
         )
 
-    control_graph = project.model.control_graph
+    control_graph = model.control_graph
     if control_graph is not None:
         for instance_id, instance in control_graph.instances.items():
             for key, value in instance.parameters.items():

@@ -93,9 +93,7 @@ class ServiceContext:
         # Mark stale — import locally to avoid circular
         try:
             from quino.services.run_invalidation import _mark_set_stale
-            ws = self.workspace_provider()
-            if ws is not None:
-                _mark_set_stale(ws, analysis_ids, reason="model edited")
+            _mark_set_stale(case, analysis_ids, "model edited")
         except (ImportError, TypeError):
             pass
 

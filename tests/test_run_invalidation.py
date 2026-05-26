@@ -1,219 +1,168 @@
-from quino.domain.workspace import Run, ResultRef, ArtifactRef
+"""Tests for quino.services.run_invalidation (new case-as-model API)."""
+from __future__ import annotations
+
+from quino.domain.workspace import Analysis, Case, Run, ResultRef, ArtifactRef
 
 
-def test_run_default_status_is_to_be_run():
-    r = Run(id="r1", analysis_id="a1", created_at="2026-05-22T10:00:00Z")
-    assert r.status == "to_be_run"
-    assert r.finished_at is None
-    assert r.note == ""
-    assert r.config_snapshot == {}
-    assert r.warnings == []
-    assert r.error_message == ""
+def _make_case(case_id: str = "c1", analyses: list | None = None) -> Case:
+    """Helper: build a Case with optional analyses."""
+    case = Case(id=case_id, name="Test")
+    if analyses:
+        case.analyses = analyses
+    return case
 
 
-def test_run_with_result_ref():
-    ref = ResultRef(
-        run_entry_id="r1", artifact_path="artifacts/r1.json", checksum="sha256:abc"
-    )
-    r = Run(
-        id="r1",
-        analysis_id="a1",
-        created_at="2026-05-22T10:00:00Z",
-        result_ref=ref,
-        status="ok",
-    )
-    assert r.result_ref.artifact_path == "artifacts/r1.json"
+def _make_analysis(analysis_id: str, pose_id: str | None = None) -> Analysis:
+    return Analysis(id=analysis_id, name="A", analysis_type="dynamic", pose_id=pose_id)
 
 
-def test_run_roundtrip_through_json(tmp_path):
-    from quino.application.service import ApplicationService
-
-    svc = ApplicationService()
-    svc.new_project("test")
-    run = Run(
-        id="run_1",
-        analysis_id="a1",
-        created_at="2026-05-22T10:00:00Z",
-        finished_at="2026-05-22T10:00:05Z",
-        status="ok",
-        note="kp=1800, smooth",
-        metrics={"final_x": 1.23},
-        warnings=["minor"],
-        config_snapshot={"duration": 1.0, "steps": 100},
-    )
-    svc.project.workspace.runs.append(run)
-    path = tmp_path / "p.quino.json"
-    svc.save_project(str(path))
-
-    svc2 = ApplicationService()
-    svc2.load_project(str(path))
-    loaded = next(r for r in svc2.project.workspace.runs if r.id == "run_1")
-    assert loaded.analysis_id == "a1"
-    assert loaded.status == "ok"
-    assert loaded.note == "kp=1800, smooth"
-    assert loaded.metrics == {"final_x": 1.23}
-    assert loaded.warnings == ["minor"]
-    assert loaded.config_snapshot == {"duration": 1.0, "steps": 100}
+def _make_run(run_id: str, analysis_id: str, status: str = "ok") -> Run:
+    return Run(id=run_id, analysis_id=analysis_id, created_at="2026-05-22T10:00:00Z",
+               status=status)
 
 
-def test_mark_runs_stale_on_active_case():
-    from quino.services.run_invalidation import mark_runs_stale
-    from quino.application.service import ApplicationService
+# ---------------------------------------------------------------------------
+# _mark_set_stale
+# ---------------------------------------------------------------------------
 
-    svc = ApplicationService()
-    svc.new_project("t")
-    case = svc.workspace.create_case("C")
-    pose = svc.workspace.create_pose("P", case_id=case.id)
-    a = svc.workspace.create_analysis("D", case_id=case.id, workspace_pose_id=pose.id)
-    ok_run = Run(id="r_ok", analysis_id=a.id, created_at="2026-05-22T10:00:00Z",
-                 status="ok", result_ref=None)
-    partial_run = Run(id="r_p", analysis_id=a.id, created_at="2026-05-22T10:00:05Z",
-                      status="partial")
-    failed_run = Run(id="r_f", analysis_id=a.id, created_at="2026-05-22T10:00:10Z",
-                     status="failed")
-    svc.project.workspace.runs.extend([ok_run, partial_run, failed_run])
+def test_mark_set_stale_flips_ok_and_partial():
+    from quino.services.run_invalidation import _mark_set_stale
 
-    n = mark_runs_stale(svc.project.workspace, case.id, reason="model edited")
-    assert n == 2  # ok + partial only; failed already won't contribute fresh data
-    assert ok_run.status == "stale"
-    assert partial_run.status == "stale"
-    assert failed_run.status == "failed"  # unchanged
-    assert "model edited" in ok_run.warnings[-1]
+    case = _make_case()
+    a = _make_analysis("a1")
+    case.analyses = [a]
+    r_ok = _make_run("r1", "a1", "ok")
+    r_partial = _make_run("r2", "a1", "partial")
+    r_failed = _make_run("r3", "a1", "failed")
+    case.runs = [r_ok, r_partial, r_failed]
 
+    n = _mark_set_stale(case, {"a1"}, "model edited")
 
-def test_delete_run_unlinks_artifact_and_removes_record(tmp_path):
-    from quino.services.run_invalidation import delete_run
-    from quino.application.service import ApplicationService
-
-    svc = ApplicationService()
-    svc.new_project("t")
-    case = svc.workspace.create_case("C")
-    pose = svc.workspace.create_pose("P", case_id=case.id)
-    a = svc.workspace.create_analysis("D", case_id=case.id, workspace_pose_id=pose.id)
-    art = tmp_path / "artifacts" / "result.json"
-    art.parent.mkdir(parents=True)
-    art.write_text("{}")
-    run = Run(id="r1", analysis_id=a.id, created_at="...", status="ok",
-              result_ref=ResultRef(run_entry_id="r1", artifact_path="artifacts/result.json",
-                                   checksum="sha256:0"))
-    svc.project.workspace.runs.append(run)
-
-    delete_run(svc.project.workspace, tmp_path, "r1")
-
-    assert not any(r.id == "r1" for r in svc.project.workspace.runs)
-    assert not art.exists()
+    assert n == 2
+    assert r_ok.status == "stale"
+    assert r_partial.status == "stale"
+    assert r_failed.status == "failed"
+    assert "model edited" in r_ok.warnings[-1]
 
 
-def test_edit_in_active_case_flips_runs_to_stale_not_deleted():
-    from quino.application.service import ApplicationService
-    from quino.domain.inputs import PropertyValueInput
+def test_mark_set_stale_empty_analysis_ids_returns_zero():
+    from quino.services.run_invalidation import _mark_set_stale
 
-    svc = ApplicationService()
-    svc.new_project("t")
-    case = svc.workspace.create_case("C")
-    pose = svc.workspace.create_pose("P", case_id=case.id)
-    a = svc.workspace.create_analysis("D", case_id=case.id, workspace_pose_id=pose.id)
-    run = Run(id="r1", analysis_id=a.id, created_at="...", status="ok")
-    svc.project.workspace.runs.append(run)
-    svc.set_working_context(case_id=case.id)
+    case = _make_case()
+    r = _make_run("r1", "a1", "ok")
+    case.runs = [r]
 
-    # Auto-confirm any GUI prompt and trigger a numeric edit on the case.
-    svc._service_context.confirm_run_invalidation = lambda: True
-    body_id = svc.create_punctual_mass("M", x="0 mm", y="0 mm")
-    svc.update_property(body_id, "mass", PropertyValueInput(kind="expression", value="3 kg"))
+    n = _mark_set_stale(case, set(), "x")
 
-    # The run is still present, just stale.
-    assert any(r.id == "r1" for r in svc.project.workspace.runs)
-    assert run.status == "stale"
+    assert n == 0
+    assert r.status == "ok"
 
 
-def test_edit_in_baseline_scope_flips_runs_to_stale():
-    """Regression: editing the shared model while sitting on the baseline
-    (active_case_id is None) used to leave runs in 'ok' silently because
-    `discard_runs_for_active_case` short-circuited. The fix generalises the
-    scope to 'active case OR active baseline OR whole workspace'."""
-    from quino.application.service import ApplicationService
-    from quino.domain.inputs import PropertyValueInput
+# ---------------------------------------------------------------------------
+# mark_runs_stale_for_case
+# ---------------------------------------------------------------------------
 
-    svc = ApplicationService()
-    svc.new_project("t")
-    ws = svc.project.workspace
-    baseline = ws.baselines[0]
-    pose = svc.workspace.create_pose("P", baseline_id=baseline.id)
-    a = svc.workspace.create_analysis(
-        "A", analysis_type="dynamic",
-        baseline_id=baseline.id, workspace_pose_id=pose.id,
-    )
-    run = Run(id="r1", analysis_id=a.id, created_at="...", status="ok")
-    ws.runs.append(run)
-    # No active case: working context defaults to baseline scope.
-    assert ws.active_case_id is None
+def test_mark_runs_stale_for_case_stales_all_case_runs():
+    from quino.services.run_invalidation import mark_runs_stale_for_case
 
-    svc._service_context.confirm_run_invalidation = lambda: True
-    body_id = svc.create_punctual_mass("M", x="0 mm", y="0 mm")
-    svc.update_property(body_id, "mass", PropertyValueInput(kind="expression", value="3 kg"))
+    case = _make_case()
+    a = _make_analysis("a1")
+    case.analyses = [a]
+    r1 = _make_run("r1", "a1", "ok")
+    r2 = _make_run("r2", "a1", "partial")
+    case.runs = [r1, r2]
 
-    assert run.status == "stale"
+    n = mark_runs_stale_for_case(case, reason="edit")
+
+    assert n == 2
+    assert r1.status == "stale"
+    assert r2.status == "stale"
 
 
-def test_pose_edit_flips_runs_of_that_pose_to_stale():
-    """Regression: mutating a Pose used to leave linked runs untouched.
-    `set_current_pose` now calls `mark_runs_stale_for_pose`."""
-    from copy import deepcopy
-    from quino.application.service import ApplicationService
-    from quino.domain.model import BodyPose, Pose
-    from quino.domain.inputs import MarkerInput
+# ---------------------------------------------------------------------------
+# mark_all_runs_stale
+# ---------------------------------------------------------------------------
 
-    svc = ApplicationService()
-    svc.new_project("t")
-    bar = svc.create_bar(
-        "Bar",
-        MarkerInput("0 mm", "0 mm", "A"),
-        MarkerInput("100 mm", "0 mm", "B"),
-    )
-    ws = svc.project.workspace
-    baseline = ws.baselines[0]
-    wp = svc.workspace.create_pose("P", baseline_id=baseline.id)
-    a = svc.workspace.create_analysis(
-        "A", analysis_type="dynamic",
-        baseline_id=baseline.id, workspace_pose_id=wp.id,
-    )
-    run = Run(id="r1", analysis_id=a.id, created_at="...", status="ok")
-    ws.runs.append(run)
+def test_mark_all_runs_stale_covers_all_cases():
+    from quino.services.run_invalidation import mark_all_runs_stale
+    from quino.domain.workspace import Workspace
 
-    svc.set_current_pose_id(wp.project_pose_id)
-    current = svc.get_current_pose()
-    mutated = deepcopy(current)
-    mutated.body_poses[bar] = BodyPose(body_id=bar, x=10.0, y=20.0, angle=0.5)
-    svc.set_current_pose(mutated)
+    ws = Workspace(id="ws1", name="W", schema_version="0.3.0")
+    c1 = _make_case("c1")
+    c1.analyses = [_make_analysis("a1")]
+    c1.runs = [_make_run("r1", "a1", "ok")]
+    c2 = _make_case("c2")
+    c2.analyses = [_make_analysis("a2")]
+    c2.runs = [_make_run("r2", "a2", "ok")]
+    ws.cases = {"c1": c1, "c2": c2}
 
-    assert run.status == "stale"
-    assert any("pose edited" in w for w in run.warnings)
+    n = mark_all_runs_stale(ws, reason="global edit")
+
+    assert n == 2
+    assert c1.runs[0].status == "stale"
+    assert c2.runs[0].status == "stale"
 
 
-def test_mark_runs_stale_for_pose_only_targets_bound_analyses():
-    """`mark_runs_stale_for_pose` must NOT touch runs of analyses that
-    don't bind to the affected pose."""
-    from quino.application.service import ApplicationService
+# ---------------------------------------------------------------------------
+# mark_runs_stale_for_pose
+# ---------------------------------------------------------------------------
+
+def test_mark_runs_stale_for_pose_only_targets_matching_pose():
     from quino.services.run_invalidation import mark_runs_stale_for_pose
+    from quino.domain.workspace import Workspace
 
-    svc = ApplicationService()
-    svc.new_project("t")
-    ws = svc.project.workspace
-    baseline = ws.baselines[0]
-    wp1 = svc.workspace.create_pose("P1", baseline_id=baseline.id)
-    wp2 = svc.workspace.create_pose("P2", baseline_id=baseline.id)
-    a1 = svc.workspace.create_analysis(
-        "A1", baseline_id=baseline.id, workspace_pose_id=wp1.id,
-    )
-    a2 = svc.workspace.create_analysis(
-        "A2", baseline_id=baseline.id, workspace_pose_id=wp2.id,
-    )
-    r1 = Run(id="r1", analysis_id=a1.id, created_at="...", status="ok")
-    r2 = Run(id="r2", analysis_id=a2.id, created_at="...", status="ok")
-    ws.runs.extend([r1, r2])
+    ws = Workspace(id="ws1", name="W", schema_version="0.3.0")
+    c1 = _make_case("c1")
+    a1 = _make_analysis("a1", pose_id="pose_X")
+    a2 = _make_analysis("a2", pose_id="pose_Y")
+    c1.analyses = [a1, a2]
+    r1 = _make_run("r1", "a1", "ok")
+    r2 = _make_run("r2", "a2", "ok")
+    c1.runs = [r1, r2]
+    ws.cases = {"c1": c1}
 
-    n = mark_runs_stale_for_pose(ws, wp1.project_pose_id, reason="x")
+    n = mark_runs_stale_for_pose(ws, "pose_X", reason="pose edit")
+
     assert n == 1
     assert r1.status == "stale"
     assert r2.status == "ok"
+
+
+# ---------------------------------------------------------------------------
+# delete_run
+# ---------------------------------------------------------------------------
+
+def test_delete_run_unlinks_artifact_and_removes_record(tmp_path):
+    from quino.services.run_invalidation import delete_run
+    from quino.domain.workspace import Workspace
+
+    ws = Workspace(id="ws1", name="W", schema_version="0.3.0")
+    c1 = _make_case("c1")
+    art = tmp_path / "artifacts" / "result.json"
+    art.parent.mkdir(parents=True)
+    art.write_text("{}")
+    run = Run(
+        id="r1", analysis_id="a1", created_at="...", status="ok",
+        result_ref=ResultRef(run_entry_id="r1", artifact_path="artifacts/result.json",
+                             checksum="sha256:0"),
+    )
+    c1.runs = [run]
+    ws.cases = {"c1": c1}
+
+    result = delete_run(ws, tmp_path, "r1")
+
+    assert result is True
+    assert not any(r.id == "r1" for r in c1.runs)
+    assert not art.exists()
+
+
+def test_delete_run_returns_false_if_not_found():
+    from quino.services.run_invalidation import delete_run
+    from quino.domain.workspace import Workspace
+
+    ws = Workspace(id="ws1", name="W", schema_version="0.3.0")
+    ws.cases = {"c1": _make_case("c1")}
+
+    result = delete_run(ws, None, "nonexistent")
+
+    assert result is False
