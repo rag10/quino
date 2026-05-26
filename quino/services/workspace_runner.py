@@ -2,176 +2,131 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
 
-from quino.domain.model import SimulationResult
+from quino.domain.model import Model, SimulationResult
 from quino.domain.workspace import (
     Analysis,
     ArtifactRef,
-    Baseline,
     Case,
-    MetricDefinition,
     ResultRef,
     Run,
     Workspace,
-    WorkspacePose,
 )
-from quino.simulation.runner import SimulationRunner
 
-from .workspace_composition import compose_project, compose_project_hash
+
+@dataclass
+class _CaseAsProject:
+    """Minimal adapter making a Case look like a Project for analysis runners."""
+    model: Model
+    parameters: list
+    poses: list
+    workspace: None = None
+
+    @classmethod
+    def from_case(cls, case: Case, workspace: Workspace) -> "_CaseAsProject":
+        return cls(
+            model=case.model,
+            parameters=workspace.parameters,
+            poses=case.poses,
+        )
+
+
+def _next_run_id(case: Case) -> str:
+    existing = {r.id for r in case.runs}
+    n = 1
+    while f"run-{n}" in existing:
+        n += 1
+    return f"run-{n}"
 
 
 def run_analysis(
-    project, analysis_id: str,
-    simulation_runner: SimulationRunner,
+    workspace: Workspace,
+    case: Case,
+    analysis_id: str,
+    simulation_runner,
     *,
     cancel_event=None,
     run: Run | None = None,
     project_dir: Path | None = None,
 ) -> Run:
-    workspace = project.workspace
-    if workspace is None:
-        raise ValueError("Project has no workspace")
-
-    analysis = _find_analysis(workspace, analysis_id)
-    case = _find_case(workspace, analysis.case_id) if analysis.case_id is not None else None
-    baseline = _find_baseline(workspace, analysis.baseline_id) if analysis.baseline_id is not None else None
-    pose = _find_workspace_pose(workspace, analysis.workspace_pose_id) if analysis.workspace_pose_id is not None else None
+    analysis = next((a for a in case.analyses if a.id == analysis_id), None)
+    if analysis is None:
+        raise ValueError(f"Analysis {analysis_id!r} not found in case {case.id!r}")
 
     if run is None:
         run = Run(
-            id=_next_id(workspace, "run"),
+            id=_next_run_id(case),
             analysis_id=analysis.id,
             created_at=datetime.now().isoformat(),
             status="running",
             config_snapshot=asdict(analysis.config),
         )
 
-    try:
-        composed = compose_project(project, case=case)
-        _apply_workspace_pose(composed, pose)
+    # No composition — case.model is the authoritative model
+    return _run_with_model(case.model, workspace, case, analysis, simulation_runner, run, cancel_event, project_dir)
 
-        runner = simulation_runner
+
+def _run_with_model(
+    model: Model,
+    workspace: Workspace,
+    case: Case,
+    analysis: Analysis,
+    runner,
+    run: Run,
+    cancel_event,
+    project_dir: Path | None,
+) -> Run:
+    project = _CaseAsProject.from_case(case, workspace)
+    try:
         if runner is None:
             raise RuntimeError("No simulation runner available")
+
         result = runner.run(
-            composed,
-            duration=analysis.config.duration,
-            steps=analysis.config.steps,
+            project,
+            analysis,
+            initial_pose=None,
             cancel_event=cancel_event,
+            run=run,
+            project_dir=project_dir,
         )
 
         cancelled = (
             cancel_event is not None and cancel_event.is_set()
-        ) or result.error == "Simulation cancelled by user"
+        ) or getattr(result, "status", None) == "to_be_run"
         if cancelled:
             run.status = "to_be_run"
-            run.error_message = "Cancelled by user"
+            run.error_message = getattr(result, "error_message", None) or "Cancelled by user"
             run.result_ref = None
             run.artifacts.clear()
             run.metrics.clear()
             return run
 
         if project_dir is not None:
-            save_result_artifact(project_dir, run, result)
+            # Artifact persistence is handled by the runner itself (if it supports it).
+            # For legacy SimulationResult objects, persist here.
+            if isinstance(result, SimulationResult):
+                save_result_artifact(project_dir, run, result)
 
-        run.metrics = _extract_metrics(result, baseline)
-        run.status = "ok" if result.success else "failed"
-        if not result.success and result.error:
+        run.metrics = {}
+        run.status = getattr(result, "status", "ok") if not isinstance(result, SimulationResult) else (
+            "ok" if result.success else "failed"
+        )
+        if isinstance(result, SimulationResult) and not result.success and result.error:
             run.error_message = result.error
+        elif hasattr(result, "error_message"):
+            run.error_message = result.error_message
     except Exception as exc:
         run.status = "failed"
         run.error_message = str(exc)
     finally:
         run.finished_at = datetime.now().isoformat()
 
-    if run not in workspace.runs:
-        workspace.runs.append(run)
+    if run not in case.runs:
+        case.runs.append(run)
     return run
-
-
-def _extract_metrics(result: SimulationResult, baseline: Baseline | None) -> dict[str, float]:
-    """Extract metrics from a simulation result using baseline definitions."""
-    if baseline is None or not baseline.metrics:
-        return {}
-
-    metrics: dict[str, float] = {}
-    for key, definition in baseline.metrics.items():
-        value = _evaluate_metric_extractor(result, definition.extractor)
-        if value is not None:
-            metrics[key] = value
-    return metrics
-
-
-def _evaluate_metric_extractor(result: SimulationResult, extractor: str) -> float | None:
-    """Evaluate a simple metric extractor string against a SimulationResult.
-
-    Supported patterns:
-    - ``frames[-1].<key>``  → value of <key> in last frame
-    - ``time[-1]``          → last time value
-    - ``max.<key>``         → maximum of <key> across all frames
-    - ``min.<key>``         → minimum of <key> across all frames
-    """
-    try:
-        if extractor == "time[-1]":
-            return result.time[-1] if result.time else None
-
-        if extractor.startswith("frames[-1]."):
-            key = extractor[len("frames[-1].") :]
-            if result.frames:
-                return result.frames[-1].get(key)
-            return None
-
-        if extractor.startswith("max."):
-            key = extractor[len("max.") :]
-            values = [frame.get(key) for frame in result.frames if key in frame]
-            return max(values) if values else None
-
-        if extractor.startswith("min."):
-            key = extractor[len("min.") :]
-            values = [frame.get(key) for frame in result.frames if key in frame]
-            return min(values) if values else None
-
-        return None
-    except Exception:
-        return None
-
-
-def _find_analysis(workspace: Workspace, analysis_id: str) -> Analysis:
-    for analysis in workspace.analyses:
-        if analysis.id == analysis_id:
-            return analysis
-    raise ValueError(f"Analysis {analysis_id!r} not found")
-
-
-def _find_case(workspace: Workspace, case_id: str) -> Case:
-    for case in workspace.cases:
-        if case.id == case_id:
-            return case
-    raise ValueError(f"Case {case_id!r} not found")
-
-
-def _find_baseline(workspace: Workspace, baseline_id: str) -> Baseline:
-    for baseline in workspace.baselines:
-        if baseline.id == baseline_id:
-            return baseline
-    raise ValueError(f"Baseline {baseline_id!r} not found")
-
-
-def _find_workspace_pose(workspace: Workspace, pose_id: str) -> WorkspacePose:
-    for pose in workspace.poses:
-        if pose.id == pose_id:
-            return pose
-    raise ValueError(f"Workspace pose {pose_id!r} not found")
-
-
-def _next_id(workspace: Workspace, prefix: str) -> str:
-    seq = workspace.next_sequence
-    workspace.next_sequence = seq + 1
-    return f"{prefix}_{seq:03d}"
 
 
 def load_result_artifact(project_dir: Path, run: Run) -> SimulationResult | None:
@@ -235,23 +190,3 @@ def _file_checksum(path: Path) -> str:
     h = hashlib.sha256()
     h.update(path.read_bytes())
     return f"sha256:{h.hexdigest()}"
-
-
-def _apply_workspace_pose(project, workspace_pose: WorkspacePose | None) -> None:
-    if workspace_pose is None or workspace_pose.is_default:
-        project.simulation_initial_pose_id = None
-        return
-    project.simulation_initial_pose_id = workspace_pose.project_pose_id
-
-
-def _resolve_entry_baseline_id(project, case: Case | None) -> str | None:
-    workspace = project.workspace
-    if case is not None and case.baseline_id is not None:
-        return case.baseline_id
-    if workspace is None:
-        return None
-    if workspace.active_baseline_id is not None:
-        return workspace.active_baseline_id
-    if workspace.baselines:
-        return workspace.baselines[0].id
-    return None

@@ -10,7 +10,7 @@ from PySide6 import QtCore
 
 from quino.analysis.registry import get_runner_for_type
 from quino.domain.workspace import Run
-from quino.services.workspace_composition import compose_project
+from quino.services.workspace_runner import _CaseAsProject, _next_run_id
 
 
 @dataclass(slots=True)
@@ -49,17 +49,18 @@ class RunExecutor(QtCore.QObject):
         self._worker.start()
 
     def enqueue(self, analysis_id: str) -> RunHandle:
-        project = self.app_service.project
-        if project is None or project.workspace is None:
+        ws = self.app_service._workspace
+        if ws is None:
             raise ValueError("No active workspace")
-        workspace = project.workspace
-        analysis = next((a for a in workspace.analyses if a.id == analysis_id), None)
+        case = self.app_service.current_case()
+        if case is None:
+            raise ValueError("No active case")
+        analysis = next((a for a in case.analyses if a.id == analysis_id), None)
         if analysis is None:
-            raise ValueError(f"Analysis {analysis_id!r} not found")
+            raise ValueError(f"Analysis {analysis_id!r} not found in case {case.id!r}")
 
         with self.app_service.workspace_lock:
-            run_id = f"run_{workspace.next_sequence:03d}"
-            workspace.next_sequence += 1
+            run_id = _next_run_id(case)
             run = Run(
                 id=run_id,
                 analysis_id=analysis_id,
@@ -67,7 +68,7 @@ class RunExecutor(QtCore.QObject):
                 status="queued",
                 config_snapshot=asdict(analysis.config),
             )
-            workspace.runs.append(run)
+            case.runs.append(run)
 
         handle = RunHandle(run_id=run_id)
         self.app_service.pending_run_handles[run_id] = handle
@@ -111,18 +112,19 @@ class RunExecutor(QtCore.QObject):
         self.run_started.emit(job.run_id)
 
         try:
-            project = self.app_service.project
-            if project is None or project.workspace is None:
+            ws = self.app_service._workspace
+            if ws is None:
                 raise ValueError("No active workspace")
-            workspace = project.workspace
-            analysis = next((a for a in workspace.analyses if a.id == job.analysis_id), None)
+            case = self.app_service.current_case()
+            if case is None:
+                raise ValueError("No active case")
+            analysis = next((a for a in case.analyses if a.id == job.analysis_id), None)
             if analysis is None:
                 raise ValueError(f"Analysis {job.analysis_id!r} not found")
-            case = next((c for c in workspace.cases if c.id == analysis.case_id), None) if analysis.case_id else None
-            composed = compose_project(project, case=case)
+            project = _CaseAsProject.from_case(case, ws)
             runner = get_runner_for_type(analysis.analysis_type)
             result = runner.run(
-                composed,
+                project,
                 analysis,
                 initial_pose=None,
                 cancel_event=job.cancel_event,
@@ -130,15 +132,15 @@ class RunExecutor(QtCore.QObject):
                 project_dir=self.app_service.current_project_dir,
             )
             with self.app_service.workspace_lock:
-                if job.cancel_event.is_set() or result.status == "to_be_run":
+                if job.cancel_event.is_set() or getattr(result, "status", None) == "to_be_run":
                     run.status = "to_be_run"
-                    run.error_message = result.error_message or "Cancelled by user"
+                    run.error_message = getattr(result, "error_message", None) or "Cancelled by user"
                     run.result_ref = None
                     run.artifacts.clear()
                     run.metrics.clear()
                 else:
-                    run.status = result.status
-                    run.error_message = result.error_message
+                    run.status = getattr(result, "status", "ok")
+                    run.error_message = getattr(result, "error_message", "")
         except Exception as exc:
             with self.app_service.workspace_lock:
                 run.status = "failed"
@@ -152,7 +154,10 @@ class RunExecutor(QtCore.QObject):
             self.run_finished.emit(job.run_id, run.status)
 
     def _find_run(self, run_id: str) -> Run | None:
-        project = self.app_service.project
-        if project is None or project.workspace is None:
+        ws = self.app_service._workspace
+        if ws is None:
             return None
-        return next((run for run in project.workspace.runs if run.id == run_id), None)
+        case = self.app_service.current_case()
+        if case is None:
+            return None
+        return next((r for r in case.runs if r.id == run_id), None)
