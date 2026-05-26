@@ -20,3 +20,15 @@ def test_case_overlay_defaults_are_empty():
     assert overlay.deleted_inherited_connections == set()
     assert overlay.poses == {}
     assert overlay.deleted_inherited_pose_ids == set()
+
+
+from quino.domain.workspace import Pose as WorkspacePoseV2
+
+
+def test_workspace_pose_defaults():
+    pose = WorkspacePoseV2(id="p1", name="Default")
+    assert pose.is_default is False
+    assert pose.requires_recompute is True
+    assert pose.solve_failed is False
+    assert pose.body_poses == {}
+    assert pose.parent_pose_id is None

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from quino.domain.model import BodyPose, Metadata
 from quino.domain.plotting import MetricDef, PlotDef
 
 
@@ -248,6 +249,24 @@ class Workspace:
             and not self.promotion_history
             and self.next_sequence == 1
         )
+
+
+@dataclass(slots=True)
+class Pose:
+    """Consolidated Pose dataclass for workspace-level poses.
+
+    This temporarily shadows `quino.domain.model.Pose` and will eventually
+    replace it after Task 4 removes the model-level Pose class.
+    """
+    id: str
+    name: str
+    body_poses: dict[str, BodyPose] = field(default_factory=dict)
+    initial_velocities: dict[str, float] = field(default_factory=dict)
+    parent_pose_id: str | None = None
+    is_default: bool = False
+    requires_recompute: bool = True
+    solve_failed: bool = False
+    metadata: Metadata = field(default_factory=Metadata)
 
 
 @dataclass(slots=True)
