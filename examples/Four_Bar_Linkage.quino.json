@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.2.0",
+  "schema_version": "0.3.0",
   "project": {
     "id": "proj_fourbar",
     "name": "Four-Bar Linkage",
@@ -59,29 +59,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "m_c1",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "25 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
           }
         ],
         "edge_order": [
@@ -100,7 +77,13 @@
           "line_width": 2.0,
           "marker_size": 6.0
         },
-        "metadata": {}
+        "metadata": {},
+        "com": {
+          "kind": "bar_percent",
+          "data": {
+            "percent": 50.0
+          }
+        }
       },
       {
         "id": "body_002",
@@ -152,29 +135,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "m_c2",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "115 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "30 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
           }
         ],
         "edge_order": [
@@ -193,7 +153,13 @@
           "line_width": 2.0,
           "marker_size": 6.0
         },
-        "metadata": {}
+        "metadata": {},
+        "com": {
+          "kind": "bar_percent",
+          "data": {
+            "percent": 50.0
+          }
+        }
       },
       {
         "id": "body_003",
@@ -245,29 +211,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "m_c3",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "190 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "30 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
           }
         ],
         "edge_order": [
@@ -286,7 +229,13 @@
           "line_width": 2.0,
           "marker_size": 6.0
         },
-        "metadata": {}
+        "metadata": {},
+        "com": {
+          "kind": "bar_percent",
+          "data": {
+            "percent": 50.0
+          }
+        }
       }
     ],
     "sliders": [],
@@ -487,7 +436,7 @@
     "poses": [
       {
         "id": "wpose_001",
-        "name": "Crank at 0\u00b0 (default)",
+        "name": "Crank at 0° (default)",
         "baseline_id": "baseline_001",
         "case_id": null,
         "project_pose_id": null,
@@ -496,7 +445,7 @@
       },
       {
         "id": "wpose_002",
-        "name": "Crank at 0\u00b0 (default)",
+        "name": "Crank at 0° (default)",
         "baseline_id": "baseline_001",
         "case_id": "case_001",
         "project_pose_id": null,
@@ -505,7 +454,7 @@
       },
       {
         "id": "wpose_003",
-        "name": "Crank at 0\u00b0 (default)",
+        "name": "Crank at 0° (default)",
         "baseline_id": "baseline_001",
         "case_id": "case_002",
         "project_pose_id": null,

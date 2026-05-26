@@ -6,6 +6,7 @@ from quino.application._context import ServiceContext
 from quino.domain.inputs import MarkerInput, PropertyValueInput
 from quino.domain.model import (
     Body,
+    CoMAnchor,
     Marker,
     ScalarProperty,
     Style,
@@ -93,14 +94,39 @@ class BodyCommands:
         for body in project.model.bodies:
             self._sync_special_com_marker(body)
 
+    def _default_com_anchor_for(self, body_type: BodyType, structural_markers: list[Marker]):
+        """Initial anchor inferred from the body's structural markers."""
+        from quino.domain.model import CoMAnchor
+        if body_type is BodyType.POINT_MASS and len(structural_markers) == 1:
+            return CoMAnchor(kind="marker", data={"marker_id": structural_markers[0].id})
+        if body_type is BodyType.BAR and len(structural_markers) == 2:
+            return CoMAnchor(kind="bar_percent", data={"percent": 50.0})
+        return CoMAnchor(
+            kind="barycentric",
+            data={"weights": {m.id: 1.0 for m in structural_markers}},
+        )
+
     def _sync_special_com_marker(self, body: Body) -> None:
-        com_marker = body.com_marker()
+        """Keep the COM marker (legacy cache) and the CoMAnchor (canonical)
+        coherent with the body's structural markers.
+
+        Schema 0.3.0+ no longer carries a COM marker; the anchor is the
+        source of truth. When the legacy cache is absent (typical for files
+        loaded at 0.3.0), this is a no-op."""
+        try:
+            com_marker = body.com_marker()
+        except ValueError:
+            # 0.3.0+ body — no legacy COM marker to refresh; anchor
+            # already drives derivation. Nothing to sync.
+            return
         structural = body.structural_markers()
         if body.type is BodyType.POINT_MASS and len(structural) == 1:
             base = structural[0]
             com_marker.x = self._scalar(base.x.expression, base.x.unit, Dimension.LENGTH)
             com_marker.y = self._scalar(base.y.expression, base.y.unit, Dimension.LENGTH)
             com_marker.metadata.values.pop("position_percent", None)
+            from quino.domain.model import CoMAnchor
+            body.com = CoMAnchor(kind="marker", data={"marker_id": base.id})
             return
         if body.type is BodyType.BAR and len(structural) == 2:
             self._set_bar_com_from_percent(body, self._bar_com_percent(body))
@@ -148,6 +174,8 @@ class BodyCommands:
         com_marker.x = self._scalar(self._mm_expression(cx), "mm", Dimension.LENGTH)
         com_marker.y = self._scalar(self._mm_expression(cy), "mm", Dimension.LENGTH)
         com_marker.metadata.values["position_percent"] = clamped
+        from quino.domain.model import CoMAnchor
+        body.com = CoMAnchor(kind="bar_percent", data={"percent": clamped})
 
     def _set_bar_com_from_distance(self, body: Body, distance_mm: float) -> None:
         length = self._bar_length(body)
@@ -217,6 +245,7 @@ class BodyCommands:
             edge_order=[marker.id for marker in structural_markers],
             closed_shape=actual_type is not BodyType.BAR,
             mass=None,
+            com=self._default_com_anchor_for(actual_type, structural_markers),
             style=Style(),
         )
         body.markers.append(self._make_com_marker(body))
@@ -552,3 +581,188 @@ class BodyCommands:
         marker.y = new_y
         self._sync_special_com_marker(body)
         self._ctx.invalidate_pose_state()
+
+    # ------------------------------------------------------------------
+    # CoMAnchor editing API
+    # ------------------------------------------------------------------
+
+    def set_com_anchor(self, body_id: str, anchor: CoMAnchor) -> None:
+        """Replace the body's CoMAnchor. Routes through the active case as
+        a structural override when a case is active."""
+        body = self._find_body(body_id)
+        if body.type is BodyType.POINT_MASS:
+            raise ValueError("CoM of a point mass is locked to its marker")
+        if not self._ctx.confirm_invalidation_if_runs_exist():
+            return
+        self._ctx.discard_runs_for_active_case()
+        case = self._ctx.get_active_case()
+        if case is not None:
+            self._emit_com_anchor_override(case, body_id, anchor)
+            self._ctx.invalidate_pose_state()
+            return
+        self._ctx.snapshot()
+        body.com = anchor
+        # Keep the legacy COM marker (still inside body.markers as a cache)
+        # in sync so consumers that haven't migrated yet still get a sane
+        # absolute value. For non-bar_percent kinds we update the cache from
+        # the anchor's derived position rather than the bar percent path.
+        try:
+            self._refresh_com_marker_cache(body)
+        except Exception:
+            pass
+        self._ctx.invalidate_pose_state()
+
+    def _refresh_com_marker_cache(self, body: Body) -> None:
+        """Refresh the legacy COM marker's x/y from the canonical anchor.
+
+        No-op when the body has no legacy COM marker (i.e. 0.3.0+ loads).
+        """
+        from quino.services.com_geometry import com_local_position
+        try:
+            com_marker = body.com_marker()
+        except ValueError:
+            return
+        lx, ly = com_local_position(self._project, body)
+        com_marker.x = self._scalar(self._mm_expression(lx), "mm", Dimension.LENGTH)
+        com_marker.y = self._scalar(self._mm_expression(ly), "mm", Dimension.LENGTH)
+        if body.com.kind == "bar_percent":
+            com_marker.metadata.values["position_percent"] = float(body.com.data.get("percent", 50.0))
+        else:
+            com_marker.metadata.values.pop("position_percent", None)
+
+    def set_com_percent(self, body_id: str, percent: float) -> None:
+        body = self._find_body(body_id)
+        if body.type is not BodyType.BAR:
+            raise ValueError("set_com_percent only applies to bars")
+        clamped = max(0.0, min(100.0, float(percent)))
+        self.set_com_anchor(body_id, CoMAnchor(kind="bar_percent", data={"percent": clamped}))
+
+    def set_com_offset(self, body_id: str, lx_mm: float, ly_mm: float) -> None:
+        self.set_com_anchor(
+            body_id,
+            CoMAnchor(kind="local_offset", data={"lx": float(lx_mm), "ly": float(ly_mm)}),
+        )
+
+    def set_com_weight(self, body_id: str, marker_id: str, weight: float) -> None:
+        body = self._find_body(body_id)
+        if body.type is not BodyType.BODY:
+            raise ValueError("set_com_weight only applies to generic bodies")
+        current_data = body.com.data if body.com.kind == "barycentric" else {}
+        weights = dict(current_data.get("weights", {}))
+        if not weights:
+            weights = {m.id: 1.0 for m in body.structural_markers()}
+        weights[marker_id] = max(0.0, float(weight))
+        self.set_com_anchor(body_id, CoMAnchor(kind="barycentric", data={"weights": weights}))
+
+    def drag_com_to_world(self, body_id: str, x_mm: float, y_mm: float) -> None:
+        """Map a world-space drag to the most appropriate anchor kind."""
+        body = self._find_body(body_id)
+        if body.type is BodyType.POINT_MASS:
+            raise ValueError("CoM of a point mass is locked to its marker")
+        project = self._project
+        lx, ly = self._world_to_body_local(project, body, x_mm, y_mm)
+        if body.type is BodyType.BAR and len(body.structural_markers()) == 2:
+            anchor = self._bar_drag_to_anchor(project, body, lx, ly)
+        else:
+            anchor = self._body_drag_to_anchor(project, body, lx, ly)
+        self.set_com_anchor(body_id, anchor)
+
+    # ------------------------------------------------------------------
+    # CoMAnchor helpers
+    # ------------------------------------------------------------------
+
+    def _bar_drag_to_anchor(self, project, body, lx, ly) -> CoMAnchor:
+        m1, m2 = body.structural_markers()
+        x1 = self._ctx.expressions.evaluate_property(m1.x, project.parameters).value
+        y1 = self._ctx.expressions.evaluate_property(m1.y, project.parameters).value
+        x2 = self._ctx.expressions.evaluate_property(m2.x, project.parameters).value
+        y2 = self._ctx.expressions.evaluate_property(m2.y, project.parameters).value
+        dx, dy = x2 - x1, y2 - y1
+        length_sq = dx * dx + dy * dy
+        if length_sq <= 1e-12:
+            return CoMAnchor(kind="local_offset", data={"lx": float(lx), "ly": float(ly)})
+        t = ((lx - x1) * dx + (ly - y1) * dy) / length_sq
+        proj_x = x1 + t * dx
+        proj_y = y1 + t * dy
+        residual = math.hypot(lx - proj_x, ly - proj_y)
+        if 0.0 - 1e-6 <= t <= 1.0 + 1e-6 and residual <= 1e-4:
+            percent = max(0.0, min(1.0, t)) * 100.0
+            return CoMAnchor(kind="bar_percent", data={"percent": float(percent)})
+        return CoMAnchor(kind="local_offset", data={"lx": float(lx), "ly": float(ly)})
+
+    def _body_drag_to_anchor(self, project, body, lx, ly) -> CoMAnchor:
+        import numpy as np
+        structural = body.structural_markers()
+        if not structural:
+            return CoMAnchor(kind="local_offset", data={"lx": float(lx), "ly": float(ly)})
+        coords = []
+        for m in structural:
+            x = self._ctx.expressions.evaluate_property(m.x, project.parameters).value
+            y = self._ctx.expressions.evaluate_property(m.y, project.parameters).value
+            coords.append((float(x), float(y)))
+        n = len(coords)
+        if n == 1:
+            only = structural[0]
+            if abs(lx - coords[0][0]) <= 1e-4 and abs(ly - coords[0][1]) <= 1e-4:
+                return CoMAnchor(kind="marker", data={"marker_id": only.id})
+            return CoMAnchor(kind="local_offset", data={"lx": float(lx), "ly": float(ly)})
+        A = np.array(
+            [[x for x, _ in coords], [y for _, y in coords], [1.0] * n],
+            dtype=float,
+        )
+        b = np.array([lx, ly, 1.0], dtype=float)
+        weights, *_ = np.linalg.lstsq(A, b, rcond=None)
+        weights = np.maximum(weights, 0.0)
+        total = float(weights.sum())
+        if total <= 1e-12:
+            return CoMAnchor(kind="local_offset", data={"lx": float(lx), "ly": float(ly)})
+        weights = weights / total
+        rx = float(sum(w * x for w, (x, _) in zip(weights, coords)))
+        ry = float(sum(w * y for w, (_, y) in zip(weights, coords)))
+        if math.hypot(lx - rx, ly - ry) > 1e-4:
+            return CoMAnchor(kind="local_offset", data={"lx": float(lx), "ly": float(ly)})
+        weight_map = {m.id: float(w) for m, w in zip(structural, weights)}
+        return CoMAnchor(kind="barycentric", data={"weights": weight_map})
+
+    def _world_to_body_local(self, project, body, x_mm, y_mm) -> tuple[float, float]:
+        """Convert world coords to body-local (reference frame).
+
+        For bars the local frame is anchored at the first structural marker
+        with x-axis along the segment. For other body kinds we use the
+        body's reference origin (first structural marker) and an axis-aligned
+        frame; this matches how MechanismAssembler treats generic bodies.
+        """
+        structural = body.structural_markers()
+        if not structural:
+            return float(x_mm), float(y_mm)
+        first = structural[0]
+        ox = self._ctx.expressions.evaluate_property(first.x, project.parameters).value
+        oy = self._ctx.expressions.evaluate_property(first.y, project.parameters).value
+        angle = 0.0
+        if body.type is BodyType.BAR and len(structural) == 2:
+            second = structural[1]
+            sx = self._ctx.expressions.evaluate_property(second.x, project.parameters).value
+            sy = self._ctx.expressions.evaluate_property(second.y, project.parameters).value
+            # The bar's local frame for anchor storage uses world-aligned axes
+            # at the bar's reference position. We return world-coords directly:
+            # markers themselves are stored in world coords, so lx == world x.
+            # (angle local frame conversion not needed because anchors are
+            # evaluated in the same coordinate system as the markers.)
+            _ = (sx, sy, angle, ox, oy)
+        return float(x_mm), float(y_mm)
+
+    def _emit_com_anchor_override(self, case, body_id: str, anchor: CoMAnchor) -> None:
+        """Persist a CoM change as a case structural override; clear stale
+        per-payload parameter overrides for the same body."""
+        self._ctx.snapshot()
+        overrides = case.reference_overrides.setdefault(body_id, {})
+        overrides["com_anchor"] = {"kind": anchor.kind, "data": dict(anchor.data)}
+        stale_prefixes = (
+            f"bodies/{body_id}/com_percent",
+            f"bodies/{body_id}/com_offset_x",
+            f"bodies/{body_id}/com_offset_y",
+            f"bodies/{body_id}/com_weight/",
+        )
+        for key in list(case.invariant_values):
+            if key in stale_prefixes[:3] or key.startswith(stale_prefixes[3]):
+                case.invariant_values.pop(key, None)

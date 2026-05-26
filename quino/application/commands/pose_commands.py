@@ -112,6 +112,7 @@ class PoseCommands:
             self._current_pose_id = completed.id
             return
         target.body_poses = copy.deepcopy(completed.body_poses)
+        self._mark_runs_stale_for_current_pose("pose edited")
 
     def create_pose(self, name: str | None = None, *, set_current: bool = True) -> Pose:
         project = self._project
@@ -174,6 +175,7 @@ class PoseCommands:
             self._current_pose_id = reference.id
             return reference
         current.body_poses = reference.body_poses
+        self._mark_runs_stale_for_current_pose("pose reset to reference")
         return current
 
     def get_simulation_initial_pose_id(self) -> str | None:
@@ -206,6 +208,7 @@ class PoseCommands:
             pose.initial_velocities.pop(driver_id, None)
         else:
             pose.initial_velocities[driver_id] = float(value)
+        self._mark_runs_stale_for_current_pose("driver initial velocity changed")
 
     def get_driver_initial_velocity(self, driver_id: str) -> float | None:
         pose = self.get_current_pose()
@@ -245,4 +248,20 @@ class PoseCommands:
             if current is not None:
                 solved = self.complete_pose(result.pose)
                 current.body_poses = solved.body_poses
+                self._mark_runs_stale_for_current_pose("pose solved")
         return result
+
+    def mark_runs_stale_for_current_pose(self, reason: str) -> int:
+        """Public hook so GUI-side pose mutations (prescribes, etc.) can
+        invalidate runs that depended on the now-edited pose."""
+        return self._mark_runs_stale_for_current_pose(reason)
+
+    def _mark_runs_stale_for_current_pose(self, reason: str) -> int:
+        project = self._project
+        if project is None or project.workspace is None:
+            return 0
+        pose_id = self._current_pose_id
+        if pose_id is None:
+            return 0
+        from quino.services.run_invalidation import mark_runs_stale_for_pose
+        return mark_runs_stale_for_pose(project.workspace, pose_id, reason=reason)

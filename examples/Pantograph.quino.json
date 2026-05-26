@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.2.0",
+  "schema_version": "0.3.0",
   "project": {
     "id": "proj_001",
     "name": "Pantograph",
@@ -425,29 +425,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "marker_003",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "30 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": false,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
           }
         ],
         "edge_order": [
@@ -463,7 +440,13 @@
           "line_width": 2.0,
           "marker_size": 6.0
         },
-        "metadata": {}
+        "metadata": {},
+        "com": {
+          "kind": "bar_percent",
+          "data": {
+            "percent": 50.0
+          }
+        }
       },
       {
         "id": "body_002",
@@ -515,29 +498,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "marker_006",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "60 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "-30 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": false,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
           }
         ],
         "edge_order": [
@@ -553,7 +513,13 @@
           "line_width": 2.0,
           "marker_size": 6.0
         },
-        "metadata": {}
+        "metadata": {},
+        "com": {
+          "kind": "bar_percent",
+          "data": {
+            "percent": 50.0
+          }
+        }
       },
       {
         "id": "body_003",
@@ -628,29 +594,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "marker_009",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "-30 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": false,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
           }
         ],
         "edge_order": [
@@ -667,7 +610,17 @@
           "line_width": 1.0,
           "marker_size": 6.0
         },
-        "metadata": {}
+        "metadata": {},
+        "com": {
+          "kind": "barycentric",
+          "data": {
+            "weights": {
+              "marker_007": 1.0,
+              "marker_008": 1.0,
+              "marker_010": 1.0
+            }
+          }
+        }
       },
       {
         "id": "body_004",
@@ -719,29 +672,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "marker_013",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "30 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "-60 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": false,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
           }
         ],
         "edge_order": [
@@ -757,7 +687,13 @@
           "line_width": 2.0,
           "marker_size": 6.0
         },
-        "metadata": {}
+        "metadata": {},
+        "com": {
+          "kind": "bar_percent",
+          "data": {
+            "percent": 50.0
+          }
+        }
       }
     ],
     "sliders": [],

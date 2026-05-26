@@ -1165,3 +1165,106 @@ def test_run_simulation_clears_reaction_outputs() -> None:
     )
     app.run_kinematic_simulation()
     assert len(app.project.reaction_outputs) == 0
+
+
+def test_body_inertia_derived_from_structural_markers() -> None:
+    """A bar's polar inertia about the CoM is m·L²/12 — sum of two point
+    masses at L/2 from the CoM. Regression guard against the old
+    `physicsInertia=1e-10` hard-coded value that crashed the dynamic
+    integrator on any mechanism with a free rotational DoF (e.g. a passive
+    double pendulum)."""
+    from quino.solver_adapters.exudyn_adapter import _body_inertia_kg_m2
+
+    app = ApplicationService()
+    app.new_project("InertiaTest")
+    bar_id = app.create_bar(
+        "Bar",
+        MarkerInput("0 mm", "0 mm", "A"),
+        MarkerInput("100 mm", "0 mm", "B"),
+    )
+    app.update_property(
+        bar_id, "mass", PropertyValueInput(kind="expression", value="2 kg"),
+    )
+    adapter = ExudynAdapter(app.expression_service)
+    assembled = adapter.assembler.assemble(app.project)
+    body = assembled.bodies[bar_id]
+    # Two structural markers ±50 mm from the CoM, mass split evenly:
+    # Iz = 2 × (1 kg × (0.05 m)²) = 5e-3 kg·m².
+    assert _body_inertia_kg_m2(body) == pytest.approx(5e-3, rel=1e-3)
+
+
+def test_unsaved_project_persists_artifacts_to_scratch_dir() -> None:
+    """An Untitled project (never saved → `current_project_path is None`)
+    must still surface its run artefacts on disk, otherwise the dynamic
+    controller can't re-hydrate the SimulationResult and the play / stop
+    buttons stay disabled even after a successful run."""
+    app = ApplicationService()
+    app.new_project("Unsaved")
+    assert app.current_project_path is None
+    scratch = app.current_project_dir
+    # Falls back to a real, existing scratch directory.
+    assert scratch is not None
+    assert scratch.exists()
+    # Stable across calls (same scratch reused).
+    assert app.current_project_dir == scratch
+
+
+def test_dynamic_run_succeeds_with_cancel_event_attached(tmp_path) -> None:
+    """Regression: the cancel sensor used to declare `(mbs, t)` and return a
+    bare float; Exudyn calls SensorUserFunction with 5 args and expects a
+    `list[float]`. The mismatch aborted SolveDynamic before any frame was
+    written and surfaced as a cryptic WinError 267 from the partial-frame
+    loader trying to read a solution file that never existed."""
+    import threading
+    from quino.analysis.registry import get_runner_for_type
+    from quino.services.workspace_composition import compose_project
+    from quino.domain.workspace import Run
+
+    app = ApplicationService()
+    app.load_project("examples/Double_Pendulum.quino.json")
+    app.current_project_path = tmp_path / "p.quino.json"
+    ws = app.project.workspace
+    pose = ws.poses[0]
+    analysis = app.workspace.create_analysis(
+        "DynRun",
+        analysis_type="dynamic",
+        baseline_id=pose.baseline_id,
+        case_id=pose.case_id,
+        workspace_pose_id=pose.id,
+    )
+    composed = compose_project(app.project, case=None)
+    run = Run(id="r1", analysis_id=analysis.id, created_at="now", status="queued")
+    app.project.workspace.runs.append(run)
+    cancel = threading.Event()  # never set, but must trip the cancel-sensor path
+    result = get_runner_for_type("dynamic").run(
+        composed, analysis,
+        initial_pose=None, run=run,
+        project_dir=app.current_project_dir,
+        cancel_event=cancel,
+    )
+    assert result.status == "ok", result.error_message
+    assert len(result.frames) == 101
+
+
+def test_body_inertia_floor_for_point_mass() -> None:
+    """A degenerate body (all markers at the CoM) gets `mass × ε²` rather
+    than zero, so Exudyn's NodeRigidBody2D still has positive inertia."""
+    from quino.solver_adapters.exudyn_adapter import (
+        _MIN_INERTIA_RADIUS_M2,
+        _body_inertia_kg_m2,
+    )
+
+    app = ApplicationService()
+    app.new_project("PointMass")
+    body_id = app.create_punctual_mass("M", x="0 mm", y="0 mm")
+    app.update_property(
+        body_id, "mass", PropertyValueInput(kind="expression", value="3 kg"),
+    )
+    adapter = ExudynAdapter(app.expression_service)
+    assembled = adapter.assembler.assemble(app.project)
+    body = assembled.bodies[body_id]
+    # Single structural marker at the CoM → geometric Iz is 0; the floor
+    # kicks in.
+    assert _body_inertia_kg_m2(body) == pytest.approx(
+        3.0 * _MIN_INERTIA_RADIUS_M2, rel=1e-6,
+    )

@@ -41,19 +41,36 @@ class ServiceContext:
     # False if it must be aborted.
     confirm_run_invalidation: Callable[[], bool] = lambda: True
 
+    def _affected_analysis_ids_for_active_scope(self) -> set[str]:
+        """Analyses whose runs an edit on the active scope can invalidate.
+
+        Active scope = active case, if any; otherwise the active baseline
+        (so editing the shared model on the baseline still invalidates the
+        baseline's analyses *and* every case hanging off it)."""
+        project = self.project_provider()
+        if project is None or project.workspace is None:
+            return set()
+        ws = project.workspace
+        if ws.active_case_id is not None:
+            return {a.id for a in ws.analyses if a.case_id == ws.active_case_id}
+        if ws.active_baseline_id is not None:
+            case_ids = {c.id for c in ws.cases if c.baseline_id == ws.active_baseline_id}
+            return {
+                a.id for a in ws.analyses
+                if (a.case_id is None and a.baseline_id == ws.active_baseline_id)
+                or (a.case_id in case_ids)
+            }
+        # No explicit working context: every analysis is fair game.
+        return {a.id for a in ws.analyses}
+
     def confirm_invalidation_if_runs_exist(self) -> bool:
-        """If a case is active AND has analyses with at least one ok/partial run,
-        delegate to *confirm_run_invalidation*. Otherwise return True
-        (no confirmation needed)."""
+        """Ask `confirm_run_invalidation` only when the edit will actually
+        flip an ok / partial run to stale; otherwise return True."""
         project = self.project_provider()
         if project is None or project.workspace is None:
             return True
         ws = project.workspace
-        if ws.active_case_id is None:
-            return True
-        analysis_ids = {
-            a.id for a in ws.analyses if a.case_id == ws.active_case_id
-        }
+        analysis_ids = self._affected_analysis_ids_for_active_scope()
         if not analysis_ids:
             return True
         has_ok_run = any(
@@ -65,17 +82,21 @@ class ServiceContext:
         return bool(self.confirm_run_invalidation())
 
     def discard_runs_for_active_case(self) -> None:
-        """A non-cosmetic edit on the active case marks every affected run
-        as stale. The data is kept (artifact files included). The user can
-        delete individual runs from the workflow tree."""
+        """A non-cosmetic edit marks every affected ok/partial run as stale
+        (data is preserved on disk, the canvas just locks playback). The
+        name is historical — the scope is `active case OR active baseline
+        OR whole workspace` (see `_affected_analysis_ids_for_active_scope`).
+
+        Kept under the old name so existing call sites don't need to change."""
         project = self.project_provider()
         if project is None or project.workspace is None:
             return
         ws = project.workspace
-        if ws.active_case_id is None:
+        analysis_ids = self._affected_analysis_ids_for_active_scope()
+        if not analysis_ids:
             return
-        from quino.services.run_invalidation import mark_runs_stale
-        mark_runs_stale(ws, ws.active_case_id, reason="model edited")
+        from quino.services.run_invalidation import _mark_set_stale
+        _mark_set_stale(ws, analysis_ids, reason="model edited")
 
     def get_active_case(self):
         """Return the active Case if one is set, otherwise None."""

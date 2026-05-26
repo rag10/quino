@@ -125,3 +125,95 @@ def test_edit_in_active_case_flips_runs_to_stale_not_deleted():
     # The run is still present, just stale.
     assert any(r.id == "r1" for r in svc.project.workspace.runs)
     assert run.status == "stale"
+
+
+def test_edit_in_baseline_scope_flips_runs_to_stale():
+    """Regression: editing the shared model while sitting on the baseline
+    (active_case_id is None) used to leave runs in 'ok' silently because
+    `discard_runs_for_active_case` short-circuited. The fix generalises the
+    scope to 'active case OR active baseline OR whole workspace'."""
+    from quino.application.service import ApplicationService
+    from quino.domain.inputs import PropertyValueInput
+
+    svc = ApplicationService()
+    svc.new_project("t")
+    ws = svc.project.workspace
+    baseline = ws.baselines[0]
+    pose = svc.workspace.create_pose("P", baseline_id=baseline.id)
+    a = svc.workspace.create_analysis(
+        "A", analysis_type="dynamic",
+        baseline_id=baseline.id, workspace_pose_id=pose.id,
+    )
+    run = Run(id="r1", analysis_id=a.id, created_at="...", status="ok")
+    ws.runs.append(run)
+    # No active case: working context defaults to baseline scope.
+    assert ws.active_case_id is None
+
+    svc._service_context.confirm_run_invalidation = lambda: True
+    body_id = svc.create_punctual_mass("M", x="0 mm", y="0 mm")
+    svc.update_property(body_id, "mass", PropertyValueInput(kind="expression", value="3 kg"))
+
+    assert run.status == "stale"
+
+
+def test_pose_edit_flips_runs_of_that_pose_to_stale():
+    """Regression: mutating a Pose used to leave linked runs untouched.
+    `set_current_pose` now calls `mark_runs_stale_for_pose`."""
+    from copy import deepcopy
+    from quino.application.service import ApplicationService
+    from quino.domain.model import BodyPose, Pose
+    from quino.domain.inputs import MarkerInput
+
+    svc = ApplicationService()
+    svc.new_project("t")
+    bar = svc.create_bar(
+        "Bar",
+        MarkerInput("0 mm", "0 mm", "A"),
+        MarkerInput("100 mm", "0 mm", "B"),
+    )
+    ws = svc.project.workspace
+    baseline = ws.baselines[0]
+    wp = svc.workspace.create_pose("P", baseline_id=baseline.id)
+    a = svc.workspace.create_analysis(
+        "A", analysis_type="dynamic",
+        baseline_id=baseline.id, workspace_pose_id=wp.id,
+    )
+    run = Run(id="r1", analysis_id=a.id, created_at="...", status="ok")
+    ws.runs.append(run)
+
+    svc.set_current_pose_id(wp.project_pose_id)
+    current = svc.get_current_pose()
+    mutated = deepcopy(current)
+    mutated.body_poses[bar] = BodyPose(body_id=bar, x=10.0, y=20.0, angle=0.5)
+    svc.set_current_pose(mutated)
+
+    assert run.status == "stale"
+    assert any("pose edited" in w for w in run.warnings)
+
+
+def test_mark_runs_stale_for_pose_only_targets_bound_analyses():
+    """`mark_runs_stale_for_pose` must NOT touch runs of analyses that
+    don't bind to the affected pose."""
+    from quino.application.service import ApplicationService
+    from quino.services.run_invalidation import mark_runs_stale_for_pose
+
+    svc = ApplicationService()
+    svc.new_project("t")
+    ws = svc.project.workspace
+    baseline = ws.baselines[0]
+    wp1 = svc.workspace.create_pose("P1", baseline_id=baseline.id)
+    wp2 = svc.workspace.create_pose("P2", baseline_id=baseline.id)
+    a1 = svc.workspace.create_analysis(
+        "A1", baseline_id=baseline.id, workspace_pose_id=wp1.id,
+    )
+    a2 = svc.workspace.create_analysis(
+        "A2", baseline_id=baseline.id, workspace_pose_id=wp2.id,
+    )
+    r1 = Run(id="r1", analysis_id=a1.id, created_at="...", status="ok")
+    r2 = Run(id="r2", analysis_id=a2.id, created_at="...", status="ok")
+    ws.runs.extend([r1, r2])
+
+    n = mark_runs_stale_for_pose(ws, wp1.project_pose_id, reason="x")
+    assert n == 1
+    assert r1.status == "stale"
+    assert r2.status == "ok"

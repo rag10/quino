@@ -80,6 +80,30 @@ class Marker:
 
 
 @dataclass(slots=True)
+class CoMAnchor:
+    """Declarative spec for a body's centre of mass.
+
+    The CoM is derived on every read from this anchor plus the body's
+    structural markers (or its local frame, for ``local_offset``). It is
+    never stored as a Marker; per-case diffs go through the composition
+    pipeline's dedicated resolvers.
+
+    Payload conventions per kind:
+      - ``"bar_percent"``  : ``{"percent": float}`` in [0, 100].
+            CoM = A + (percent / 100) * (B - A) where A, B are the bar's
+            two structural markers.
+      - ``"barycentric"``  : ``{"weights": {marker_id: float, ...}}``.
+            Non-negative weights, normalised at read time. CoM = sum(w_i * m_i).
+      - ``"local_offset"`` : ``{"lx": float, "ly": float}`` in mm.
+            Detached CoM expressed in the body's local frame.
+      - ``"marker"``       : ``{"marker_id": str}``.
+            CoM coincides with the referenced structural marker.
+    """
+    kind: str
+    data: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class Body:
     id: str
     name: str
@@ -88,6 +112,9 @@ class Body:
     edge_order: list[str]
     closed_shape: bool
     mass: ScalarProperty | None = None
+    com: CoMAnchor = field(
+        default_factory=lambda: CoMAnchor(kind="local_offset", data={"lx": 0.0, "ly": 0.0})
+    )
     style: Style = field(default_factory=Style)
     metadata: Metadata = field(default_factory=Metadata)
 

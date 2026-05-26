@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.2.0",
+  "schema_version": "0.3.0",
   "project": {
     "id": "proj_001",
     "name": "Active Suspension Validation Rig",
@@ -307,29 +307,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "marker_002",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": false,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
           }
         ],
         "edge_order": [
@@ -337,6 +314,12 @@
         ],
         "closed_shape": true,
         "mass": null,
+        "com": {
+          "kind": "marker",
+          "data": {
+            "marker_id": "marker_001"
+          }
+        },
         "style": {
           "color": "#000000",
           "visible": true,
@@ -375,29 +358,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "marker_004",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "300 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "320 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": false,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
           }
         ],
         "edge_order": [
@@ -405,6 +365,12 @@
         ],
         "closed_shape": true,
         "mass": null,
+        "com": {
+          "kind": "marker",
+          "data": {
+            "marker_id": "marker_003"
+          }
+        },
         "style": {
           "color": "#000000",
           "visible": true,
@@ -466,31 +432,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "marker_007",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "150 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {
-              "position_percent": 50.0
-            }
           }
         ],
         "edge_order": [
@@ -502,6 +443,12 @@
           "expression": "3 kg",
           "unit": "kg",
           "expected_dimension": "mass"
+        },
+        "com": {
+          "kind": "bar_percent",
+          "data": {
+            "percent": 50.0
+          }
         },
         "style": {
           "color": "#000000",
@@ -584,29 +531,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "marker_011",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "300 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "90 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
           }
         ],
         "edge_order": [
@@ -619,6 +543,16 @@
           "expression": "40 kg",
           "unit": "kg",
           "expected_dimension": "mass"
+        },
+        "com": {
+          "kind": "barycentric",
+          "data": {
+            "weights": {
+              "marker_008": 1.0,
+              "marker_009": 1.0,
+              "marker_010": 1.0
+            }
+          }
         },
         "style": {
           "color": "#000000",

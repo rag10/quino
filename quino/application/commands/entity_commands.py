@@ -645,6 +645,39 @@ class EntityCommands:
             self._update_gravity_property(property_path, value)
             return
         entity = self._find_entity(entity_id)
+        # Body inspector: route position_percent / position_distance / com_*
+        # to the BodyCommands API so the active-case scope is honoured.
+        if isinstance(entity, Body) and property_path in {
+            "position_percent", "position_distance", "com_offset_x", "com_offset_y",
+        }:
+            try:
+                raw = str(value.value).strip().replace(",", ".").rstrip(" %m")
+                num = float(raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{property_path} requires a number") from exc
+            if property_path == "position_percent":
+                self._bodies.set_com_percent(entity.id, num)
+            elif property_path == "position_distance":
+                structural = entity.structural_markers()
+                if len(structural) != 2:
+                    raise ValueError("position_distance only applies to bars")
+                proj = self._ctx.project_provider()
+                x1 = self._ctx.expressions.evaluate_property(structural[0].x, proj.parameters).value
+                y1 = self._ctx.expressions.evaluate_property(structural[0].y, proj.parameters).value
+                x2 = self._ctx.expressions.evaluate_property(structural[1].x, proj.parameters).value
+                y2 = self._ctx.expressions.evaluate_property(structural[1].y, proj.parameters).value
+                length = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+                percent = 0.0 if length <= 1e-12 else max(0.0, min(100.0, num / length * 100.0))
+                self._bodies.set_com_percent(entity.id, percent)
+            elif property_path in {"com_offset_x", "com_offset_y"}:
+                lx = float(entity.com.data.get("lx", 0.0)) if entity.com.kind == "local_offset" else 0.0
+                ly = float(entity.com.data.get("ly", 0.0)) if entity.com.kind == "local_offset" else 0.0
+                if property_path == "com_offset_x":
+                    lx = num
+                else:
+                    ly = num
+                self._bodies.set_com_offset(entity.id, lx, ly)
+            return
         if isinstance(entity, Marker) and entity.type is MarkerType.COM:
             body = self._bodies._find_body_by_marker(entity.id)
             if property_path in {"x", "y"}:
@@ -653,7 +686,30 @@ class EntityCommands:
                 if body.type is BodyType.BAR:
                     raise ValueError("Bar CoM must be edited with position_percent or position_distance")
             if body.type is BodyType.BAR and property_path in {"position_percent", "position_distance"}:
-                self._bodies._update_bar_com_property(body, property_path, value)
+                # Route through the new CoMAnchor API so the edit honours
+                # the active-case scope and the canonical anchor stays in sync.
+                if property_path == "position_percent":
+                    try:
+                        percent = float(str(value.value).strip().replace(",", ".").rstrip(" %"))
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError("position_percent must be a number 0..100") from exc
+                    self._bodies.set_com_percent(body.id, percent)
+                else:
+                    try:
+                        distance_mm = float(str(value.value).strip().replace(",", ".").rstrip(" mm"))
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError("position_distance must be a number in mm") from exc
+                    structural = body.structural_markers()
+                    if len(structural) != 2:
+                        raise ValueError("position_distance only applies to bars")
+                    proj = self._ctx.project_provider()
+                    x1 = self._ctx.expressions.evaluate_property(structural[0].x, proj.parameters).value
+                    y1 = self._ctx.expressions.evaluate_property(structural[0].y, proj.parameters).value
+                    x2 = self._ctx.expressions.evaluate_property(structural[1].x, proj.parameters).value
+                    y2 = self._ctx.expressions.evaluate_property(structural[1].y, proj.parameters).value
+                    length = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+                    percent = 0.0 if length <= 1e-12 else max(0.0, min(100.0, distance_mm / length * 100.0))
+                    self._bodies.set_com_percent(body.id, percent)
                 return
         if isinstance(entity, Joint) and property_path in {"friction_coulomb", "friction_viscous", "friction_pin_radius"}:
             self._joints._update_joint_friction_property(entity, property_path, value)

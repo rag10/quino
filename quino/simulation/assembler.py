@@ -200,7 +200,12 @@ class MechanismAssembler:
                 global_y=marker.global_y,
                 visible=marker.visible,
             )
-        com_marker = next(marker for marker in transformed_markers.values() if marker.marker_type == MarkerType.COM.value)
+        # Derive CoM from the body's anchor and project it into the body's
+        # assembled local frame (the COM marker is no longer the source of truth).
+        from quino.services.com_geometry import com_local_position
+        com_world_x, com_world_y = com_local_position(project, body)
+        com_lx = cos_a * (com_world_x - origin_x) + sin_a * (com_world_y - origin_y)
+        com_ly = -sin_a * (com_world_x - origin_x) + cos_a * (com_world_y - origin_y)
         mass = self._eval_optional(project, body.mass, default=0.0)
         if mass is None:
             mass = 0.0
@@ -215,8 +220,8 @@ class MechanismAssembler:
             origin_y=origin_y,
             angle=angle,
             mass=mass,
-            com_local_x=com_marker.local_x,
-            com_local_y=com_marker.local_y,
+            com_local_x=com_lx,
+            com_local_y=com_ly,
             markers=transformed_markers,
             warnings=warnings,
         )

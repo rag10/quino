@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.2.0",
+  "schema_version": "0.3.0",
   "project": {
     "id": "proj_001",
     "name": "Umbrella Mechanism",
@@ -369,31 +369,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "marker_003",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "51.622 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "126.276 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": false,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {
-              "position_percent": 50.0
-            }
           }
         ],
         "edge_order": [
@@ -403,6 +378,16 @@
         ],
         "closed_shape": true,
         "mass": null,
+        "com": {
+          "kind": "barycentric",
+          "data": {
+            "weights": {
+              "marker_001": 1.0,
+              "marker_002": 1.0,
+              "marker_004": 1.0
+            }
+          }
+        },
         "style": {
           "color": "#000000",
           "visible": true,
@@ -461,31 +446,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "marker_007",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "25.811 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "89.4145 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": false,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {
-              "position_percent": 50.0
-            }
           }
         ],
         "edge_order": [
@@ -494,6 +454,12 @@
         ],
         "closed_shape": false,
         "mass": null,
+        "com": {
+          "kind": "bar_percent",
+          "data": {
+            "percent": 50.0
+          }
+        },
         "style": {
           "color": "#000000",
           "visible": true,

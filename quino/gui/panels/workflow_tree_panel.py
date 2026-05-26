@@ -756,6 +756,12 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             entry for entry in raw
             if not (isinstance(entry, dict) and entry.get("key") == key)
         ]
+        # Removing a prescribe changes the pose definition, so any persisted
+        # run that started from this pose must be flagged stale.
+        from quino.services.run_invalidation import mark_runs_stale_for_pose
+        mark_runs_stale_for_pose(
+            ws, pose.id, reason="pose prescribe deleted",
+        )
         self.refresh()
         # If the deleted prescribe belongs to the currently-edited pose, the
         # main window must drop it from its in-memory cache and re-render the

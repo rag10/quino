@@ -23,7 +23,9 @@ def test_roundtrip_project_json() -> None:
 
     assert restored.name == "Demo"
     assert restored.model.bodies[0].name == "Crank"
-    assert restored.model.bodies[0].com_marker().type.value == "com"
+    assert restored.model.bodies[0].com.kind in {
+        "bar_percent", "barycentric", "marker", "local_offset",
+    }
     assert restored.model.joints[0].name == "Ground_A"
 
 

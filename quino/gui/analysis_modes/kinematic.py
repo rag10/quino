@@ -28,8 +28,9 @@ class KinematicModeController(AnalysisModeController):
         bar.clear()
         add_action = bar.addAction("Add sweep")
         add_action.triggered.connect(self._on_add_sweep)
-        recompute_action = bar.addAction("Recompute")
-        recompute_action.triggered.connect(self._on_recompute)
+        run_action = bar.addAction("Run")
+        run_action.setToolTip("Run (or re-run) the sweep on the current model")
+        run_action.triggered.connect(self._on_recompute)
         bar.addSeparator()
         self.action_show_traj = bar.addAction("Show trajectories")
         self.action_show_traj.setCheckable(True)
@@ -75,13 +76,23 @@ class KinematicModeController(AnalysisModeController):
         self._refresh_metrics_tab(latest)
 
     def on_leave(self):
-        self.main_window.canvas.set_mode_badge_suffix("")
-        self._cache = None
         self._clear_canvas()
+        self.main_window.canvas.set_mode_badge_suffix("")
+        self.main_window.canvas.set_state_overlay(None)
+        self._cache = None
         for row in self._rows:
             row.deleteLater()
         self._rows.clear()
         self._current_analysis = None
+
+    def apply_current_frame(self) -> None:
+        """Called by MainWindow.refresh_all in place of the default analysis frame.
+
+        Kinematic mode owns its overlay: re-emit it from the cache so the
+        canvas keeps showing the selected sweep cell instead of reverting to
+        the reference pose.
+        """
+        self._refresh_canvas_from_current_indices()
 
     def on_run_clicked(self) -> None:
         self._on_recompute()
@@ -94,11 +105,23 @@ class KinematicModeController(AnalysisModeController):
     def on_run_finished(self, run_id: str, status: str) -> None:
         for row in self._rows:
             row.set_disabled_recomputing(False)
-        if self._current_analysis is None or status not in {"ok", "partial"}:
+        if self._current_analysis is None:
             return
-        latest = self._latest_cached_run()
-        if latest is not None:
-            self.on_run_selected(latest)
+        if status == "failed":
+            self._clear_canvas()
+            if self._summary_label is not None:
+                self._summary_label.setText(
+                    "Last run failed — see the dialog for details."
+                )
+            return
+        if status in {"ok", "partial"}:
+            latest = self._latest_cached_run()
+            if latest is not None:
+                self.on_run_selected(latest)
+            if status == "partial" and self._summary_label is not None:
+                self._summary_label.setText(
+                    self._summary_label.text() + "    (partial: some cells unsolved)"
+                )
 
     def _refresh_summary(self) -> None:
         if self._summary_label is None or self._current_analysis is None:
@@ -161,15 +184,26 @@ class KinematicModeController(AnalysisModeController):
         self._current_analysis.config.sweeps = [item for item in self._current_analysis.config.sweeps if item.id != sweep_id]
         self._rebuild_rows()
         self._refresh_summary()
-        self._on_recompute()
+        if self._current_analysis.config.sweeps:
+            self._on_recompute()
+        else:
+            # No sweeps left → nothing to compute, just drop overlays.
+            self._cache = None
+            self._clear_canvas()
 
     def _on_toggle_trajectories(self, on: bool) -> None:
         self.main_window.canvas.set_show_trajectories(on)
         self.main_window.canvas.set_kinematic_trajectory(self._cache.inner_axis_line(self._current_indices()) if on and self._cache else [])
 
     def _on_recompute(self) -> None:
-        if self._current_analysis is None or not self._current_analysis.config.sweeps:
-            self._clear_canvas()
+        if self._current_analysis is None:
+            return
+        if not self._current_analysis.config.sweeps:
+            QtWidgets.QMessageBox.information(
+                self.main_window,
+                "No sweeps configured",
+                "Add at least one sweep variable (Add sweep) before running the kinematic analysis.",
+            )
             return
         for row in self._rows:
             row.set_disabled_recomputing(True)

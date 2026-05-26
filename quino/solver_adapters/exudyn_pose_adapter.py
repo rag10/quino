@@ -124,6 +124,14 @@ class ExudynPoseAdapter(ExudynAdapter):
             simulation_settings = exu.SimulationSettings()
             simulation_settings.staticSolver.numberOfLoadSteps = 1
             simulation_settings.staticSolver.verboseMode = 1 if settings.verbose else 0
+            # Pose solves are throwaway: don't litter the process CWD with
+            # Exudyn's default `coordinatesSolution.txt`. Some user CWDs (UNC
+            # paths, OneDrive, read-only locations) refuse the write and the
+            # solver bubbles a Windows error (e.g. WinError 267) instead of
+            # producing a clean failure result.
+            simulation_settings.solutionSettings.writeSolutionToFile = False
+            simulation_settings.solutionSettings.writeFileFooter = False
+            simulation_settings.solutionSettings.writeFileHeader = False
             if hasattr(simulation_settings.staticSolver, "newton"):
                 simulation_settings.staticSolver.newton.maxIterations = settings.max_iterations
                 simulation_settings.staticSolver.newton.absoluteTolerance = settings.tolerance
@@ -367,9 +375,19 @@ class ExudynPoseAdapter(ExudynAdapter):
         body_a_angle_marker = mbs.AddMarker(
             item_interface.MarkerNodeCoordinate(nodeNumber=node_numbers[body_a_id], coordinate=2)
         )
-        body_b_angle_marker = mbs.AddMarker(
-            item_interface.MarkerNodeCoordinate(nodeNumber=node_numbers[body_b_id], coordinate=2)
-        )
+        if body_b_id == "__ground__" or body_b_id not in node_numbers:
+            # No physical body B → constrain body A's absolute angle to a
+            # ground node. ref_b and local_phi_b collapse to phi_b alone.
+            ground_node = mbs.AddNode(
+                item_interface.NodePointGround(referenceCoordinates=[0.0, 0.0, 0.0])
+            )
+            body_b_angle_marker = mbs.AddMarker(
+                item_interface.MarkerNodeCoordinate(nodeNumber=ground_node, coordinate=0)
+            )
+        else:
+            body_b_angle_marker = mbs.AddMarker(
+                item_interface.MarkerNodeCoordinate(nodeNumber=node_numbers[body_b_id], coordinate=2)
+            )
         mbs.AddObject(
             item_interface.CoordinateConstraint(
                 markerNumbers=[body_a_angle_marker, body_b_angle_marker],

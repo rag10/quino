@@ -79,6 +79,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.app_service = app_service or ApplicationService()
         if self.app_service.project is None:
             self.app_service.new_project("Untitled")
+        # Wire the confirmation prompt that command-services raise before
+        # they flip persisted runs to 'stale'. Without this the hook stays
+        # at its no-op default and the user never sees a warning before
+        # losing run data on a non-cosmetic edit.
+        self.app_service._service_context.confirm_run_invalidation = (
+            self._confirm_run_invalidation_dialog
+        )
 
         self._selected_entity_id: str | None = None
         self._suspend_property_updates = False
@@ -2231,6 +2238,38 @@ class MainWindow(QtWidgets.QMainWindow):
         self._clear_simulation_state("Simulation discarded because the model was edited")
         return True
 
+    def _confirm_run_invalidation_dialog(self) -> bool:
+        """Installed as `ServiceContext.confirm_run_invalidation`. Command-
+        services call this just before a non-cosmetic edit flips persisted
+        runs to 'stale'. Returns True to proceed, False to abort the edit."""
+        project = self.app_service.project
+        if project is None or project.workspace is None:
+            return True
+        ws = project.workspace
+        ctx = self.app_service._service_context
+        analysis_ids = ctx._affected_analysis_ids_for_active_scope()
+        affected_runs = [
+            r for r in ws.runs
+            if r.analysis_id in analysis_ids and r.status in {"ok", "partial"}
+        ]
+        if not affected_runs:
+            return True
+        n = len(affected_runs)
+        plural = "run" if n == 1 else "runs"
+        answer = QtWidgets.QMessageBox.warning(
+            self,
+            "Mark runs as stale?",
+            (
+                f"This edit will mark {n} persisted {plural} as stale.\n\n"
+                "Their data is preserved on disk (plots and metrics keep working) "
+                "but the canvas playback will be locked until you re-run the "
+                "affected analyses."
+            ),
+            QtWidgets.QMessageBox.StandardButton.Ok | QtWidgets.QMessageBox.StandardButton.Cancel,
+            QtWidgets.QMessageBox.StandardButton.Ok,
+        )
+        return answer == QtWidgets.QMessageBox.StandardButton.Ok
+
     def _prepare_for_sketch_edit(self) -> bool:
         if self._playback_timer.isActive():
             self._append_message("Editing is only available at t=0")
@@ -3187,6 +3226,14 @@ class MainWindow(QtWidgets.QMainWindow):
         ]
         self.canvas.set_pose_constraints(self._pose_constraints.values())
         self._mark_project_dirty()
+        # Prescribes are part of the pose's persisted state — any change
+        # invalidates simulation runs that started from this pose.
+        try:
+            self.app_service.poses.mark_runs_stale_for_current_pose(
+                "pose prescribes changed",
+            )
+        except Exception:
+            pass
         if hasattr(self, "pose_constraints_strip"):
             self.pose_constraints_strip.refresh()
 
@@ -5029,6 +5076,19 @@ class MainWindow(QtWidgets.QMainWindow):
         if isinstance(entity, Body):
             prop("closed_shape", "closed_shape", str(entity.closed_shape).lower(), "boolean", str(entity.closed_shape).lower())
             prop("mass", "mass", entity.mass.expression if entity.mass else "", "expression_or_null", self._evaluate_scalar(entity.mass))
+            # CoM controls (derived from the body's anchor)
+            anchor = entity.com
+            if anchor.kind == "bar_percent":
+                percent = float(anchor.data.get("percent", 50.0))
+                prop("CoM %", "position_percent", f"{percent:.6g}", "expression", f"{percent:.6g} %")
+            elif anchor.kind == "local_offset":
+                prop("CoM Lx", "com_offset_x", f"{float(anchor.data.get('lx', 0.0)):.6g}", "readonly", f"{float(anchor.data.get('lx', 0.0)):.6g} mm")
+                prop("CoM Ly", "com_offset_y", f"{float(anchor.data.get('ly', 0.0)):.6g}", "readonly", f"{float(anchor.data.get('ly', 0.0)):.6g} mm")
+            elif anchor.kind == "barycentric":
+                weights = anchor.data.get("weights", {}) or {}
+                prop("CoM kind", "_com_kind", "barycentric", "readonly", f"{len(weights)} weights")
+            elif anchor.kind == "marker":
+                prop("CoM (locked)", "_com_marker", str(anchor.data.get("marker_id", "")), "readonly", "marker")
             prop("color", "style.color", entity.style.color, "color", entity.style.color)
             prop("line width", "style.line_width", str(entity.style.line_width), "expression", str(entity.style.line_width))
 

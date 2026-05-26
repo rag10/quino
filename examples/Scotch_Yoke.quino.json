@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.2.0",
+  "schema_version": "0.3.0",
   "project": {
     "id": "proj_scotchyoke",
     "name": "Scotch Yoke",
@@ -59,29 +59,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "m_c",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "30 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
           }
         ],
         "edge_order": [
@@ -100,7 +77,13 @@
           "line_width": 2.0,
           "marker_size": 6.0
         },
-        "metadata": {}
+        "metadata": {},
+        "com": {
+          "kind": "bar_percent",
+          "data": {
+            "percent": 50.0
+          }
+        }
       },
       {
         "id": "body_002",
@@ -175,29 +158,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "m_ycm",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
           }
         ],
         "edge_order": [
@@ -216,7 +176,17 @@
           "line_width": 2.0,
           "marker_size": 6.0
         },
-        "metadata": {}
+        "metadata": {},
+        "com": {
+          "kind": "barycentric",
+          "data": {
+            "weights": {
+              "m_L": 1.0,
+              "m_R": 1.0,
+              "m_S": 1.0
+            }
+          }
+        }
       }
     ],
     "sliders": [

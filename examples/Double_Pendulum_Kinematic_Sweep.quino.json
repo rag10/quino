@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.2.0",
+  "schema_version": "0.3.0",
   "project": {
     "id": "proj_001",
     "name": "Double Pendulum Kinematic Sweep",
@@ -36,29 +36,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "marker_002",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": false,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
           }
         ],
         "edge_order": [
@@ -66,6 +43,12 @@
         ],
         "closed_shape": true,
         "mass": null,
+        "com": {
+          "kind": "marker",
+          "data": {
+            "marker_id": "marker_001"
+          }
+        },
         "style": {
           "color": "#000000",
           "visible": true,
@@ -127,31 +110,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "marker_005",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "100 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "-100 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": false,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {
-              "position_percent": 50.0
-            }
           }
         ],
         "edge_order": [
@@ -160,6 +118,12 @@
         ],
         "closed_shape": false,
         "mass": null,
+        "com": {
+          "kind": "bar_percent",
+          "data": {
+            "percent": 50.0
+          }
+        },
         "style": {
           "color": "#000000",
           "visible": true,
@@ -218,31 +182,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "marker_008",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "300 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "-300 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": false,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {
-              "position_percent": 50.0
-            }
           }
         ],
         "edge_order": [
@@ -251,6 +190,12 @@
         ],
         "closed_shape": false,
         "mass": null,
+        "com": {
+          "kind": "bar_percent",
+          "data": {
+            "percent": 50.0
+          }
+        },
         "style": {
           "color": "#000000",
           "visible": true,

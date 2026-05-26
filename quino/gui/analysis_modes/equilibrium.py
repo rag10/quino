@@ -20,6 +20,7 @@ class EquilibriumModeController(AnalysisModeController):
         self.report: ReportPanelWidget | None = None
         self._loaded_equilibria: list[dict] = []
         self._current_analysis = None
+        self._current_pose_blob: dict | None = None
 
     def build_toolbar(self, parent):
         bar = self.main_window._analysis_toolbar
@@ -79,7 +80,13 @@ class EquilibriumModeController(AnalysisModeController):
     def on_leave(self):
         self.main_window.canvas.set_mode_badge_suffix("")
         self.main_window.canvas.set_kinematic_pose(None)
+        self.main_window.canvas.set_state_overlay(None)
         self._loaded_equilibria = []
+        self._current_pose_blob = None
+
+    def apply_current_frame(self) -> None:
+        if self._current_pose_blob is not None:
+            self.main_window.canvas.set_kinematic_pose(self._current_pose_blob)
 
     def on_run_clicked(self) -> None:
         if self._current_analysis is None:
@@ -128,7 +135,8 @@ class EquilibriumModeController(AnalysisModeController):
         if index < 0 or index >= len(self._loaded_equilibria):
             return
         equilibrium = self._loaded_equilibria[index]
-        self.main_window.canvas.set_kinematic_pose(equilibrium.get("pose"))
+        self._current_pose_blob = equilibrium.get("pose")
+        self.main_window.canvas.set_kinematic_pose(self._current_pose_blob)
         self.report.clear_tabs()
         self.report.add_kv_tab(
             f"Equilibrium #{index + 1}",

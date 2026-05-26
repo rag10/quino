@@ -547,7 +547,15 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def set_kinematic_pose(self, pose: dict | None) -> None:
         self._kinematic_pose_overlay = _nested_pose_to_overlay(pose)
-        if self._interaction_mode == "analysis" and self._mode_badge_suffix == "(kinematic)":
+        # Both kinematic and static analysis modes share this overlay channel
+        # to paint a single solved configuration on the canvas. The suffix is
+        # the only signal we have for "the controller is currently driving the
+        # state overlay" — keep both modes in.
+        if self._interaction_mode == "analysis" and self._mode_badge_suffix in {
+            "(kinematic)",
+            "(static)",
+            "(equilibrium)",
+        }:
             self._state_overlay = self._kinematic_pose_overlay
         self.update()
 
@@ -1970,8 +1978,8 @@ class MechanismCanvas(QtWidgets.QWidget):
                 slider_actions[slider_menu.addAction(slider_item.name)] = slider_item.id
             body = self.app_service.get_body(marker.body_id)
             if body is not None:
-                com_marker = body.com_marker()
-                toggle_com_action = menu.addAction("Hide CoM" if com_marker.visible else "Show CoM")
+                com_visible = bool(body.metadata.values.get("com_visible", True))
+                toggle_com_action = menu.addAction("Hide CoM" if com_visible else "Show CoM")
         elif slider is not None:
             rename_action = menu.addAction("Rename Slider")
             delete_action = menu.addAction("Delete")
@@ -1996,8 +2004,8 @@ class MechanismCanvas(QtWidgets.QWidget):
             selected_body = self._selected_body()
             if selected_body is not None:
                 add_marker_action = menu.addAction("Add Marker To Body")
-                com_marker = selected_body.com_marker()
-                toggle_com_action = menu.addAction("Hide CoM" if com_marker.visible else "Show CoM")
+                com_visible = bool(selected_body.metadata.values.get("com_visible", True))
+                toggle_com_action = menu.addAction("Hide CoM" if com_visible else "Show CoM")
         chosen = menu.exec(event.globalPos())
         if chosen is None:
             return
@@ -2052,12 +2060,9 @@ class MechanismCanvas(QtWidgets.QWidget):
         if chosen is toggle_com_action:
             body = self.app_service.get_body(marker.body_id) if marker is not None else self._selected_body()
             if body is not None:
-                com_marker = body.com_marker()
-                self.app_service.update_property(
-                    com_marker.id,
-                    "visible",
-                    PropertyValueInput("boolean", not com_marker.visible),
-                )
+                # CoM visibility is now a body-level preference stored in metadata.
+                current = bool(body.metadata.values.get("com_visible", True))
+                body.metadata.values["com_visible"] = not current
                 self.modelChanged.emit("Toggled CoM visibility")
             return
         if chosen is add_load_action and marker is not None:
@@ -3862,11 +3867,27 @@ class MechanismCanvas(QtWidgets.QWidget):
             if mass <= 0:
                 continue
             force = mass * gravity.magnitude
-            com_marker = body.com_marker()
-            if com_marker is None or com_marker.id not in marker_map:
+            # CoM is derived from the body's anchor — use the helper rather
+            # than the (now-removed) COM marker. Build a Pose snapshot from
+            # the current state overlay (if any) so the arrow tracks playback.
+            from quino.services.com_geometry import com_global_position
+            from quino.domain.model import BodyPose, Pose
+            overlay = self._state_overlay
+            pose = None
+            if overlay is not None:
+                bp = BodyPose(
+                    body_id=body.id,
+                    x=float(overlay.get(f"{body.id}.x", 0.0)),
+                    y=float(overlay.get(f"{body.id}.y", 0.0)),
+                    angle=float(overlay.get(f"{body.id}.angle", 0.0)),
+                )
+                pose = Pose(id="_canvas_tmp", name="tmp", body_poses={body.id: bp})
+            try:
+                com_x, com_y = com_global_position(project, body, pose)
+            except Exception:
                 continue
-            canvas_com = marker_map[com_marker.id]
-            com_screen = self._to_screen(canvas_com.x, canvas_com.y, transform)
+            com_screen = self._to_screen(com_x, com_y, transform)
+            canvas_com = type("_CoMPt", (), {"x": com_x, "y": com_y})()
             dx = gravity.direction_x
             dy = gravity.direction_y
             length = math.sqrt(dx * dx + dy * dy)

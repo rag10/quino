@@ -53,6 +53,46 @@ def _marker_local_rel_com(body: "AssembledBody", marker: "AssembledMarker") -> t
     return (marker.local_x - body.com_local_x, marker.local_y - body.com_local_y)
 
 
+# Numerical floor for a body's rotational inertia about the CoM, in metres².
+# Used as `Iz = max(Iz_geometric, mass * _MIN_INERTIA_RADIUS_M2)` so that
+# bodies with a single structural marker (point-mass) still have a non-zero
+# inertia (Exudyn requires `physicsInertia > 0` for NodeRigidBody2D), without
+# polluting mechanisms whose bodies have a real geometric extent.
+# 1 mm² ≈ 1e-6 m² is mechanically negligible for any non-degenerate body.
+_MIN_INERTIA_RADIUS_M2 = 1.0e-6
+
+
+def _body_inertia_kg_m2(body: "AssembledBody") -> float:
+    """Estimate the polar moment of inertia of *body* about its CoM (kg·m²).
+
+    A QUINO body carries `mass` but no explicit inertia tensor; we approximate
+    the body as N equal point-masses distributed across its structural markers
+    and sum `m_i · r_i²` (in metres). This is exact for a bar with two
+    end-markers and a good proxy for any planar polygon defined by its
+    vertices; it never under-estimates the inertia enough to destabilise the
+    rotational DoF (which was the original bug — see commit history).
+    """
+    if body.mass <= 0.0:
+        # Massless / kinematic body: any non-zero inertia is fine, Exudyn
+        # just needs it to be positive. Keep it tiny to avoid masking other
+        # numerical issues.
+        return 1.0e-12
+    structural = [
+        marker for marker in body.markers.values()
+        if marker.marker_type == "structural"
+    ]
+    if not structural:
+        return max(body.mass * _MIN_INERTIA_RADIUS_M2, 1.0e-12)
+    n = len(structural)
+    per_marker_mass = body.mass / n
+    inertia_kg_mm2 = 0.0
+    for marker in structural:
+        dx_mm, dy_mm = _marker_local_rel_com(body, marker)
+        inertia_kg_mm2 += per_marker_mass * (dx_mm * dx_mm + dy_mm * dy_mm)
+    inertia_kg_m2 = inertia_kg_mm2 * _MM_TO_M * _MM_TO_M
+    return max(inertia_kg_m2, body.mass * _MIN_INERTIA_RADIUS_M2)
+
+
 def _make_constant_friction_fn(coulomb: float, viscous: float):
     """Constant-torque/force Coulomb model (no reaction force scaling)."""
     def fn(mbs, t, itemNumber, coordinate, velocity, stiffness, damping, offset):
@@ -319,12 +359,24 @@ class ExudynAdapter(SolverAdapter):
                         sensorNumbers=[],
                         sensorUserFunction=sensor_fn,
                     ))
-                # Cancel sensor: raises KeyboardInterrupt when cancel_event is set
+                # Cancel sensor: raises KeyboardInterrupt when cancel_event is set.
+                # Exudyn calls SensorUserFunction with 5 positional args
+                # (mbs, t, sensorNumbers, factors, configuration) — accept and
+                # ignore the trailing ones so we don't raise a TypeError on
+                # the very first integrator step (which masquerades as a
+                # cryptic 'WinError 267' once the partial-trajectory
+                # fallback tries to read a solution file that was never
+                # written).
                 if cancel_event is not None:
-                    def _cancel_sensor_fn(mbs_ref, t):
+                    def _cancel_sensor_fn(mbs_ref, t, *_args):
                         if cancel_event.is_set():
                             raise KeyboardInterrupt("Simulation cancelled by user")
-                        return 0.0
+                        # SensorUserFunction must return a vector of floats
+                        # (std::vector<Real> on the C++ side). Returning a
+                        # bare float made pybind11 raise an "unable to cast
+                        # <class 'float'> to C++ type" error on the very
+                        # first integrator step.
+                        return [0.0]
                     mbs.AddSensor(item_interface.SensorUserFunction(
                         sensorNumbers=[],
                         sensorUserFunction=_cancel_sensor_fn,
@@ -397,7 +449,19 @@ class ExudynAdapter(SolverAdapter):
                             )
                         if isinstance(exc, KeyboardInterrupt):
                             raise
-                        raise
+                        # No frames written: SolveDynamic died before
+                        # producing output. The raw `exc` is usually a
+                        # downstream WinError from Exudyn trying to read the
+                        # solution file it never created — not the real
+                        # cause. The actual cause (a User ERROR from a
+                        # user-function callback, a Jacobian singularity,
+                        # etc.) is printed by Exudyn to stderr just above.
+                        raise RuntimeError(
+                            "Exudyn dynamic solve aborted before any frame "
+                            "was written. Check stderr for the underlying "
+                            f"Exudyn 'User ERROR' / 'SYSTEM ERROR' message. "
+                            f"Downstream exception: {exc}"
+                        )
                     time, frames = self._load_solution_frames(
                         exu,
                         mbs,
@@ -476,9 +540,11 @@ class ExudynAdapter(SolverAdapter):
                 item_interface.ObjectRigidBody2D(
                     nodeNumber=node,
                     physicsMass=body.mass,
-                    # Small non-zero inertia required for friction connectors to take effect;
-                    # negligible compared to effective inertia m*L² through joint constraints.
-                    physicsInertia=1e-10,
+                    # Physically-grounded polar inertia about the CoM, derived
+                    # from the body's structural markers. A hard-coded 1e-10
+                    # used to crash the time integrator on any mechanism with
+                    # a free rotational DoF (e.g. a passive double pendulum).
+                    physicsInertia=_body_inertia_kg_m2(body),
                     physicsCenterOfMass=[0.0, 0.0],
                 )
             )

@@ -27,6 +27,7 @@ from quino.domain.workspace import (
 from quino.domain.model import (
     Body,
     BodyPose,
+    CoMAnchor,
     Driver,
     Expression,
     GravityLoad,
@@ -304,27 +305,64 @@ class JsonMapper:
         )
 
     def _body_to_dict(self, body: Body) -> dict:
+        # Persist structural markers only; the CoM is captured by `com`.
+        structural = [m for m in body.markers if m.type is MarkerType.STRUCTURAL]
         return {
             "id": body.id,
             "name": body.name,
             "type": body.type.value,
-            "markers": [self._marker_to_dict(marker) for marker in body.markers],
+            "markers": [self._marker_to_dict(marker) for marker in structural],
             "edge_order": body.edge_order,
             "closed_shape": body.closed_shape,
             "mass": self._scalar_to_dict(body.mass),
+            "com": {"kind": body.com.kind, "data": dict(body.com.data)},
             "style": self._style_to_dict(body.style),
             "metadata": body.metadata.values,
         }
 
     def _body_from_dict(self, data: dict) -> Body:
+        raw_markers = [self._marker_from_dict(item) for item in data.get("markers", [])]
+        # Legacy 0.2.0 files may still include a COM marker — silently drop
+        # it; the anchor (or its inferred default) is the source of truth.
+        structural = [m for m in raw_markers if m.type is MarkerType.STRUCTURAL]
+        com_payload = data.get("com")
+        if com_payload is None:
+            # Infer the default anchor from the body's shape. This branch
+            # fires for 0.2.0 files; 0.3.0 files always ship the field.
+            body_type = BodyType(data["type"])
+            if body_type is BodyType.POINT_MASS and len(structural) == 1:
+                anchor = CoMAnchor(kind="marker", data={"marker_id": structural[0].id})
+            elif body_type is BodyType.BAR and len(structural) == 2:
+                # Honour `position_percent` if it was stored on the legacy COM marker.
+                legacy_com = next(
+                    (m for m in raw_markers if m.type is not MarkerType.STRUCTURAL), None,
+                )
+                percent = 50.0
+                if legacy_com is not None:
+                    try:
+                        percent = float(legacy_com.metadata.values.get("position_percent", 50.0))
+                    except (TypeError, ValueError):
+                        percent = 50.0
+                anchor = CoMAnchor(kind="bar_percent", data={"percent": percent})
+            else:
+                anchor = CoMAnchor(
+                    kind="barycentric",
+                    data={"weights": {m.id: 1.0 for m in structural}},
+                )
+        else:
+            anchor = CoMAnchor(
+                kind=str(com_payload.get("kind", "local_offset")),
+                data=dict(com_payload.get("data", {})),
+            )
         return Body(
             id=data["id"],
             name=data["name"],
             type=BodyType(data["type"]),
-            markers=[self._marker_from_dict(item) for item in data.get("markers", [])],
+            markers=structural,
             edge_order=data.get("edge_order", []),
             closed_shape=data.get("closed_shape", True),
             mass=self._scalar_from_dict(data.get("mass")),
+            com=anchor,
             style=self._style_from_dict(data.get("style")),
             metadata=Metadata(data.get("metadata", {})),
         )

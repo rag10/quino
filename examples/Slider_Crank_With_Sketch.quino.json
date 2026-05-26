@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.2.0",
+  "schema_version": "0.3.0",
   "project": {
     "id": "proj_001",
     "name": "Slider Crank with Sketch",
@@ -258,31 +258,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "marker_003",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "25 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": false,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {
-              "position_percent": 50.0
-            }
           }
         ],
         "edge_order": [
@@ -291,6 +266,12 @@
         ],
         "closed_shape": false,
         "mass": null,
+        "com": {
+          "kind": "bar_percent",
+          "data": {
+            "percent": 50.0
+          }
+        },
         "style": {
           "color": "#000000",
           "visible": true,
@@ -349,31 +330,6 @@
               "marker_size": 6.0
             },
             "metadata": {}
-          },
-          {
-            "id": "marker_006",
-            "name": "CoM",
-            "type": "com",
-            "x": {
-              "expression": "100 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": false,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {
-              "position_percent": 50.0
-            }
           }
         ],
         "edge_order": [
@@ -382,6 +338,12 @@
         ],
         "closed_shape": false,
         "mass": null,
+        "com": {
+          "kind": "bar_percent",
+          "data": {
+            "percent": 50.0
+          }
+        },
         "style": {
           "color": "#000000",
           "visible": true,

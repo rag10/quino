@@ -70,11 +70,9 @@ class ValidationService:
                         body.id,
                     )
                 )
-            com_count = sum(1 for marker in body.markers if marker.type is MarkerType.COM)
-            if com_count != 1:
-                report.messages.append(
-                    ValidationMessage("error", "invalid_com_count", "Body must contain exactly one CoM marker", body.id)
-                )
+            # The CoM is now a derived entity (Body.com anchor); it is
+            # guaranteed by the dataclass and no longer requires per-body
+            # validation of a dedicated marker.
 
     def _validate_joint_duplicates(self, model: Model, report: ValidationReport) -> None:
         seen: set[tuple[str, str]] = set()

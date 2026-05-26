@@ -87,6 +87,7 @@ class KinematicAnalysisRunner(AnalysisRunner):
         poses_acc: list[dict] = []
         failed_mask: list[bool] = []
         any_failed = False
+        first_failure_reason: str | None = None
 
         for indices in self._snake_iter(shape):
             if cancel_event is not None and cancel_event.is_set():
@@ -113,6 +114,11 @@ class KinematicAnalysisRunner(AnalysisRunner):
                 result = pose_runner.solve(project, cell_pose, constraints, settings)
                 if not result.success or result.pose is None:
                     cell_success = False
+                    if first_failure_reason is None:
+                        first_failure_reason = (
+                            getattr(result, "error", None)
+                            or (getattr(result, "messages", None) or ["pose solve failed"])[-1]
+                        )
                     break
                 cell_pose = result.pose
             if cell_success and cell_pose is not None:
@@ -140,11 +146,24 @@ class KinematicAnalysisRunner(AnalysisRunner):
             sensor_id: {"channels": sensor_channels[sensor_id], "values": values}
             for sensor_id, values in sensors_acc.items()
         }
-        status = "partial" if any_failed else "ok"
+        if any_failed and all(failed_mask):
+            status = "failed"
+        elif any_failed:
+            status = "partial"
+        else:
+            status = "ok"
+        error_message = ""
+        if any_failed and first_failure_reason:
+            failed_count = sum(1 for failed in failed_mask if failed)
+            error_message = (
+                f"{failed_count}/{len(failed_mask)} sweep cells failed. "
+                f"First failure: {first_failure_reason}"
+            )
         result = KinematicResult(
             analysis_id=analysis.id,
             analysis_type="kinematic",
             status=status,
+            error_message=error_message,
             sweep_axes=axes,
             shape=shape,
             sensors=sensors_blob,

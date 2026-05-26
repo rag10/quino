@@ -55,7 +55,7 @@ from quino.services.workspace_composition import compose_project as _compose_pro
 
 
 class ApplicationService:
-    schema_version = "0.2.0"
+    schema_version = "0.3.0"
 
     def __init__(self) -> None:
         self.id_service = IdService()
@@ -68,6 +68,11 @@ class ApplicationService:
         self.executor = None
         self.pending_run_handles: dict[str, object] = {}
         self.workspace_lock = threading.Lock()
+        # Scratch directory used to persist run artefacts when the project
+        # hasn't been saved yet, so the GUI can still play back a freshly
+        # computed simulation. Lazily created on first use and cleaned up
+        # when the process exits.
+        self._scratch_dir: Path | None = None
         self._undo_stack: list[Project] = []
         self._redo_stack: list[Project] = []
         self._in_operation = False
@@ -199,8 +204,25 @@ class ApplicationService:
     @property
     def current_project_dir(self) -> Path | None:
         if self.current_project_path is None:
-            return None
+            # Fall back to a per-session scratch directory so runners can
+            # still persist artefacts (and the GUI can play them back) for
+            # an Untitled project the user hasn't saved yet.
+            return self._ensure_scratch_dir()
         return self.current_project_path.parent if self.current_project_path.suffix else self.current_project_path
+
+    def _ensure_scratch_dir(self) -> Path:
+        """Create (once) and return a process-lifetime scratch directory for
+        artefacts of unsaved projects. The directory is registered with
+        `atexit` so it disappears when QUINO closes."""
+        if self._scratch_dir is not None and self._scratch_dir.exists():
+            return self._scratch_dir
+        import atexit
+        import shutil
+        import tempfile
+        path = Path(tempfile.mkdtemp(prefix="quino_unsaved_"))
+        self._scratch_dir = path
+        atexit.register(lambda p=path: shutil.rmtree(p, ignore_errors=True))
+        return path
 
     def ensure_executor(self):
         from quino.services.run_executor import RunExecutor

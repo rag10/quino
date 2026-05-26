@@ -205,6 +205,14 @@ def _apply_structural_deltas(project: Project, case: Case) -> None:
             if isinstance(entity, _BlockInstance) and prop == "parameters" and isinstance(value, dict):
                 entity.parameters.update(copy.deepcopy(value))
                 continue
+            # Body CoMAnchor swap: structural change of how the CoM is derived.
+            if prop == "com_anchor" and hasattr(entity, "com") and isinstance(value, dict):
+                from quino.domain.model import CoMAnchor
+                entity.com = CoMAnchor(
+                    kind=str(value.get("kind", "local_offset")),
+                    data=dict(value.get("data", {})),
+                )
+                continue
             if hasattr(entity, prop):
                 try:
                     setattr(entity, prop, value)

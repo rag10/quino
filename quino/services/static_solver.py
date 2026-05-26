@@ -129,13 +129,17 @@ def _reaction_rows(project) -> list[dict]:
         if not output.data:
             continue
         fx, fy, _f, mz = output.data[-1]
+        position = output.positions[-1] if output.positions else (0.0, 0.0)
         rows.append(
             {
                 "joint_id": output.joint_id,
                 "joint_name": output.joint_name,
+                "endpoint_type": output.endpoint_type,
                 "fx": fx,
                 "fy": fy,
                 "moment": mz,
+                "position_x": position[0],
+                "position_y": position[1],
             }
         )
     return rows
