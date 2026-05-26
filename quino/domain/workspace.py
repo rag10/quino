@@ -248,3 +248,25 @@ class Workspace:
             and not self.promotion_history
             and self.next_sequence == 1
         )
+
+
+@dataclass(slots=True)
+class EntityOverlay:
+    origin: str = "local"  # "inherited" | "local"
+    linked_properties: set[str] = field(default_factory=set)
+
+    def __post_init__(self) -> None:
+        if self.origin not in {"inherited", "local"}:
+            raise ValueError(f"EntityOverlay.origin must be 'inherited' or 'local', got {self.origin!r}")
+        if self.origin == "local" and self.linked_properties:
+            raise ValueError("EntityOverlay with origin='local' must have empty linked_properties")
+
+
+@dataclass(slots=True)
+class CaseOverlay:
+    entities: dict[str, EntityOverlay] = field(default_factory=dict)
+    deleted_inherited_entity_ids: set[str] = field(default_factory=set)
+    inherited_connections: set[tuple[str, str, str, str]] = field(default_factory=set)
+    deleted_inherited_connections: set[tuple[str, str, str, str]] = field(default_factory=set)
+    poses: dict[str, EntityOverlay] = field(default_factory=dict)
+    deleted_inherited_pose_ids: set[str] = field(default_factory=set)
