@@ -47,7 +47,11 @@ class ForceCommands:
             metadata=Metadata(),
         )
         self._ctx.snapshot()
-        if not self._ctx.add_entity_to_case(sensor, "sensors"):
+        case = self._ctx.current_case_provider()
+        engine = self._ctx.cascade_provider()
+        if engine is not None and case is not None:
+            engine.add_entity(case.id, sensor, "sensors")
+        else:
             project.model.sensors.append(sensor)
         return sensor_id
 
@@ -92,7 +96,11 @@ class ForceCommands:
             metadata=Metadata(),
         )
         self._ctx.snapshot()
-        if not self._ctx.add_entity_to_case(load, "loads"):
+        case = self._ctx.current_case_provider()
+        engine = self._ctx.cascade_provider()
+        if engine is not None and case is not None:
+            engine.add_entity(case.id, load, "loads")
+        else:
             project.model.loads.append(load)
         return load_id
 
@@ -157,7 +165,11 @@ class ForceCommands:
             metadata=Metadata({"stiffness": 0.0, "damping": 0.0}),
         )
         self._ctx.snapshot()
-        if not self._ctx.add_entity_to_case(spring, "springs"):
+        case = self._ctx.current_case_provider()
+        engine = self._ctx.cascade_provider()
+        if engine is not None and case is not None:
+            engine.add_entity(case.id, spring, "springs")
+        else:
             project.model.springs.append(spring)
         return spring_id
 
@@ -191,17 +203,11 @@ class ForceCommands:
         project = self._project
         if value.kind != "expression" or not isinstance(value.value, str):
             raise ValueError(f"{property_path} requires an expression value")
-        case = self._ctx.get_active_case()
-        from quino.domain.workspace import ScalarValue as _WsScalarValue
         if property_path in ("stiffness", "damping"):
             try:
                 numeric = float(value.value.strip().replace(",", "."))
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"{property_path} must be a plain number") from exc
-            if case is not None:
-                self._ctx.snapshot()
-                case.invariant_values[f"springs_meta/{spring_id}/{property_path}"] = _WsScalarValue(value=numeric, unit="")
-                return
             self._ctx.snapshot()
             spring.metadata.values[property_path] = numeric
             return
@@ -212,11 +218,7 @@ class ForceCommands:
                 "deg" if is_rotational else "mm",
                 Dimension.ANGLE if is_rotational else Dimension.LENGTH,
             )
-            evaluated = self._ctx.expressions.evaluate_property(scalar, project.parameters)
-            if case is not None:
-                self._ctx.snapshot()
-                case.invariant_values[f"springs/{spring_id}/rest_value"] = _WsScalarValue(value=float(evaluated.value), unit=evaluated.unit or scalar.unit)
-                return
+            self._ctx.expressions.evaluate_property(scalar, project.parameters)
             self._ctx.snapshot()
             spring.rest_value = scalar
             return
@@ -227,15 +229,11 @@ class ForceCommands:
                 "N*mm" if is_rotational else "N",
                 Dimension.TORQUE if is_rotational else Dimension.FORCE,
             )
-            evaluated = self._ctx.expressions.evaluate_property(
+            self._ctx.expressions.evaluate_property(
                 scalar,
                 project.parameters,
                 variables={"t": self._ctx.units.quantity(0.0, "s")},
             )
-            if case is not None:
-                self._ctx.snapshot()
-                case.invariant_values[f"springs/{spring_id}/law"] = _WsScalarValue(value=float(evaluated.value), unit=scalar.unit)
-                return
             self._ctx.snapshot()
             spring.law = scalar
             return

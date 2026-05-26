@@ -249,7 +249,11 @@ class BodyCommands:
             style=Style(),
         )
         body.markers.append(self._make_com_marker(body))
-        if not self._ctx.add_entity_to_case(body, "bodies"):
+        case = self._ctx.current_case_provider()
+        engine = self._ctx.cascade_provider()
+        if engine is not None and case is not None:
+            engine.add_entity(case.id, body, "bodies")
+        else:
             project.model.bodies.append(body)
         self._ctx.invalidate_pose_state()
         return body.id
@@ -261,50 +265,24 @@ class BodyCommands:
         return self.create_body(name=name, markers=[MarkerInput(x, y, "P")], body_type=BodyType.POINT_MASS.value)
 
     def _locate_created_body(self, body_id: str):
-        """Return (body_obj, owner_dict_or_None). When a case is active and
-        the body was just added by the case, ``body_obj`` is a Body deserialized
-        from the case's added_entities[bodies] entry; mutating it must be
-        reflected back into the dict via _serialize_body_into_case_dict.
-        Outside case mode, returns the live Body in project.model.bodies."""
-        case = self._ctx.get_active_case()
+        """Return (body_obj, None). Bodies are always in case.model directly,
+        so we just look in project.model.bodies."""
         project = self._project
-        # Try baseline first
         for body in project.model.bodies:
             if body.id == body_id:
                 return body, None
-        # Try case added_entities
-        if case is not None:
-            from quino.serialization.json_io import JsonMapper
-            mapper = JsonMapper()
-            for ent in case.added_entities.get("bodies", []):
-                if ent.get("id") == body_id:
-                    body_obj = mapper._body_from_dict(ent)
-                    return body_obj, ent
         raise ValueError(f"Unknown body: {body_id}")
 
     def _persist_body_back_to_case(self, body_obj, owner_dict) -> None:
-        """Re-serialize the in-memory Body back into its case dict so changes
-        (e.g. metadata flags) take effect when the case is composed."""
-        from quino.serialization.json_io import JsonMapper
-        mapper = JsonMapper()
-        owner_dict.update(mapper._body_to_dict(body_obj))
+        """No-op: bodies are now live objects in case.model, no dict to persist back."""
+        pass
 
     def _tag_joint_internal_ground(self, joint_id: str) -> None:
-        case = self._ctx.get_active_case()
         project = self._project
-        # Live baseline joint
         for j in project.model.joints:
             if j.id == joint_id:
                 j.metadata.values["internal_ground_anchor"] = True
                 return
-        # Case-added joint
-        if case is not None:
-            for ent in case.added_entities.get("joints", []):
-                if ent.get("id") == joint_id:
-                    meta = ent.setdefault("metadata", {})
-                    values = meta.setdefault("values", {})
-                    values["internal_ground_anchor"] = True
-                    return
 
     def create_ground_anchor(self, name: str, x: str, y: str) -> tuple[str, str]:
         """Create a PointMass body + rigid ground joint as one undo step.
@@ -438,16 +416,12 @@ class BodyCommands:
         x_expression: str,
         y_expression: str,
     ) -> None:
-        """Apply a marker move as a case overlay, dragging joint counterparts.
+        """Apply a marker move directly on case.model, dragging joint counterparts.
 
-        Joints (especially rigid ones) require both endpoints to stay
-        coincident. In case mode we don't mutate baseline markers; instead
-        we compute the geometric delta and emit one ``markers/<id>/{x,y}``
-        override for the moved marker AND each marker directly linked to
-        it via a joint that already had coincident endpoints. This mirrors
-        the baseline behaviour of ``_translate_direct_joint_counterparts``.
+        In the case-as-model design, case.model is complete and mutable.
+        We set the marker's coordinates directly and propagate the delta to
+        any coincident joint counterparts.
         """
-        from quino.domain.workspace import ScalarValue as _WsScalarValue
         from quino.domain.types import JointEndpointKind
 
         project = self._project
@@ -465,20 +439,13 @@ class BodyCommands:
         delta_y = target_y - current_y
 
         self._ctx.snapshot()
-        # Primary override for the dragged marker.
-        case.invariant_values[f"markers/{marker_id}/x"] = _WsScalarValue(
-            value=float(target_x), unit="mm"
-        )
-        case.invariant_values[f"markers/{marker_id}/y"] = _WsScalarValue(
-            value=float(target_y), unit="mm"
-        )
+        # Set the dragged marker's new coordinates directly on case.model.
+        marker.x = new_x
+        marker.y = new_y
 
-        # Propagate to counterparts of joints that were already coincident
-        # with this marker. Look up joints through the effective (composed)
-        # project so joints added by the case chain are also considered.
+        # Propagate to counterparts of joints that were already coincident.
         if abs(delta_x) > 1e-12 or abs(delta_y) > 1e-12:
-            eff = self._ctx.effective_project()
-            for joint in eff.model.joints:
+            for joint in project.model.joints:
                 ep_a, ep_b = joint.endpoint_a, joint.endpoint_b
                 counterpart_id: str | None = None
                 if ep_a.kind is JointEndpointKind.MARKER and ep_a.marker_id == marker_id:
@@ -489,10 +456,9 @@ class BodyCommands:
                         counterpart_id = ep_a.marker_id
                 if counterpart_id is None or counterpart_id == marker_id:
                     continue
-                # Resolve the counterpart marker in the effective (composed)
-                # project so we read its already-composed coordinates.
+                # Resolve the counterpart marker in case.model.
                 counterpart = None
-                for b in eff.model.bodies:
+                for b in project.model.bodies:
                     for m in b.markers:
                         if m.id == counterpart_id:
                             counterpart = m
@@ -501,21 +467,22 @@ class BodyCommands:
                         break
                 if counterpart is None:
                     continue
-                # Were the two markers coincident? If not, the joint was
-                # already disassembled; don't drag.
+                # Only drag if the two markers were coincident.
                 cx_eval = self._ctx.expressions.evaluate_property(counterpart.x, project.parameters)
                 cy_eval = self._ctx.expressions.evaluate_property(counterpart.y, project.parameters)
                 cx_mm = self._ctx.units.convert(self._ctx.units.quantity(cx_eval.value, cx_eval.unit), "mm")
                 cy_mm = self._ctx.units.convert(self._ctx.units.quantity(cy_eval.value, cy_eval.unit), "mm")
                 if abs(cx_mm - current_x) > 1e-6 or abs(cy_mm - current_y) > 1e-6:
                     continue
-                # Emit override for the counterpart so the joint stays
-                # assembled after composition.
-                case.invariant_values[f"markers/{counterpart_id}/x"] = _WsScalarValue(
-                    value=float(cx_mm + delta_x), unit="mm"
+                counterpart.x = ScalarProperty(
+                    expression=f"{cx_mm + delta_x:.6f} mm",
+                    unit=counterpart.x.unit,
+                    expected_dimension=Dimension.LENGTH,
                 )
-                case.invariant_values[f"markers/{counterpart_id}/y"] = _WsScalarValue(
-                    value=float(cy_mm + delta_y), unit="mm"
+                counterpart.y = ScalarProperty(
+                    expression=f"{cy_mm + delta_y:.6f} mm",
+                    unit=counterpart.y.unit,
+                    expected_dimension=Dimension.LENGTH,
                 )
         self._ctx.invalidate_pose_state()
 
@@ -752,17 +719,12 @@ class BodyCommands:
         return float(x_mm), float(y_mm)
 
     def _emit_com_anchor_override(self, case, body_id: str, anchor: CoMAnchor) -> None:
-        """Persist a CoM change as a case structural override; clear stale
-        per-payload parameter overrides for the same body."""
+        """Persist a CoM change directly on case.model (case-as-model design)."""
         self._ctx.snapshot()
-        overrides = case.reference_overrides.setdefault(body_id, {})
-        overrides["com_anchor"] = {"kind": anchor.kind, "data": dict(anchor.data)}
-        stale_prefixes = (
-            f"bodies/{body_id}/com_percent",
-            f"bodies/{body_id}/com_offset_x",
-            f"bodies/{body_id}/com_offset_y",
-            f"bodies/{body_id}/com_weight/",
-        )
-        for key in list(case.invariant_values):
-            if key in stale_prefixes[:3] or key.startswith(stale_prefixes[3]):
-                case.invariant_values.pop(key, None)
+        engine = self._ctx.cascade_provider()
+        if engine is not None:
+            engine.edit_property(case.id, body_id, "com", anchor)
+        else:
+            # Fallback: find the body in the case model directly.
+            body = self._find_body(body_id)
+            body.com = anchor

@@ -160,8 +160,6 @@ class PoseCommands:
             return
         self._ctx.snapshot()
         project.poses = [pose for pose in project.poses if pose.id != pose_id]
-        if project.simulation_initial_pose_id == pose_id:
-            project.simulation_initial_pose_id = None
         if self._current_pose_id == pose_id:
             self._current_pose_id = project.poses[0].id if project.poses else None
 
@@ -258,11 +256,11 @@ class PoseCommands:
         return self._mark_runs_stale_for_current_pose(reason)
 
     def _mark_runs_stale_for_current_pose(self, reason: str) -> int:
-        project = self._project
-        if project is None or project.workspace is None:
+        ws = self._ctx.workspace_provider()
+        if ws is None:
             return 0
         pose_id = self._current_pose_id
         if pose_id is None:
             return 0
         from quino.services.run_invalidation import mark_runs_stale_for_pose
-        return mark_runs_stale_for_pose(project.workspace, pose_id, reason=reason)
+        return mark_runs_stale_for_pose(ws, pose_id, reason=reason)

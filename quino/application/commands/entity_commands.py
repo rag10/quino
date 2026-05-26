@@ -10,7 +10,6 @@ PoseCommands. EntityCommands must be instantiated AFTER all the others.
 """
 from __future__ import annotations
 
-import copy
 import re
 
 from quino.application._context import ServiceContext
@@ -36,7 +35,6 @@ from quino.domain.model import (
     Spring,
 )
 from quino.domain.types import BodyType, Dimension, MarkerType
-from quino.domain.workspace import ScalarValue as _WsScalarValue
 
 
 class EntityCommands:
@@ -112,12 +110,12 @@ class EntityCommands:
     def invalidate_index(self) -> None:
         self._entity_index = None
 
-    def _resolve_case_chain(self, case):
-        """Return cases from root to leaf for the given case."""
-        from quino.services.workspace_composition import _resolve_case_chain
-        return _resolve_case_chain(self._project, case)
-
     def _build_entity_index(self) -> dict[str, object]:
+        """Build a flat index of all entities in the active case.
+
+        In the case-as-model design, case.model is already complete — no
+        chain reconstruction or overlay application needed here.
+        """
         project = self._project
         index: dict[str, object] = {}
         if project.sketch is not None:
@@ -126,195 +124,24 @@ class EntityCommands:
                 index[entity.id] = entity
             for constraint in project.sketch.constraints.values():
                 index[constraint.id] = constraint
+        model = project.model
+        if model is None:
+            return index
         for collection in (
-            project.model.bodies,
-            project.model.joints,
-            project.model.sliders,
-            project.model.drivers,
-            project.model.loads,
-            project.model.sensors,
-            project.model.springs,
+            model.bodies,
+            model.joints,
+            model.sliders,
+            model.drivers,
+            model.loads,
+            model.sensors,
+            model.springs,
             project.parameters,
         ):
             for entity in collection:
                 index[entity.id] = entity
-        for body in project.model.bodies:
+        for body in model.bodies:
             for marker in body.markers:
                 index[marker.id] = marker
-
-        # Apply structural deltas from the active case chain (root → leaf)
-        case = self._ctx.get_active_case()
-        if case is not None:
-            from quino.serialization.json_io import JsonMapper
-            mapper = JsonMapper()
-            deserializers = {
-                "bodies": mapper._body_from_dict,
-                "joints": mapper._joint_from_dict,
-                "sliders": mapper._slider_from_dict,
-                "drivers": mapper._driver_from_dict,
-                "loads": mapper._load_from_dict,
-                "sensors": mapper._sensor_from_dict,
-                "springs": mapper._spring_from_dict,
-            }
-            removed_ids: set[str] = set()
-            all_overrides: dict[str, _WsScalarValue] = {}
-            for inherited_case in self._resolve_case_chain(case):
-                # Apply removals first
-                removed_ids.update(inherited_case.removed_entity_ids)
-                # Then apply additions
-                for domain, entities_data in inherited_case.added_entities.items():
-                    deserializer = deserializers.get(domain)
-                    if deserializer is None:
-                        continue
-                    for entity_data in entities_data:
-                        try:
-                            entity = deserializer(entity_data)
-                            index[entity.id] = entity
-                            if domain == "bodies":
-                                for marker in entity.markers:
-                                    index[marker.id] = marker
-                        except Exception:
-                            pass
-                # Collect invariant overrides
-                all_overrides.update(inherited_case.invariant_values)
-            # Remove entities that were deleted anywhere in the chain
-            for entity_id in removed_ids:
-                if entity_id in index:
-                    del index[entity_id]
-            # Apply invariant overrides to entities in the index.
-            # IMPORTANT: clone the entity before mutating so we don't contaminate
-            # the baseline objects (which are shared with project.model).
-            cloned_ids: set[str] = set()
-            # marker_id -> owning body_id for fast lookup
-            marker_owner: dict[str, str] = {}
-            for body in self._project.model.bodies:
-                for m in body.markers:
-                    marker_owner[m.id] = body.id
-
-            def _clone_for_override(entity_id: str, entity):
-                if entity_id in cloned_ids:
-                    return entity
-                # If this is a marker, clone the owning body too so its
-                # markers list points to clones (keeps the index consistent
-                # with body.markers).
-                if isinstance(entity, Marker):
-                    body_id = marker_owner.get(entity_id)
-                    if body_id is not None and body_id not in cloned_ids:
-                        owning_body = index.get(body_id)
-                        if owning_body is not None:
-                            body_clone = copy.copy(owning_body)
-                            body_clone.markers = [copy.copy(m) for m in body_clone.markers]
-                            for m in body_clone.markers:
-                                index[m.id] = m
-                            index[body_id] = body_clone
-                            cloned_ids.add(body_id)
-                            cloned_ids.add(entity_id)
-                            return index[entity_id]
-                    cloned_ids.add(entity_id)
-                    return entity
-                clone = copy.copy(entity)
-                if isinstance(clone, Body):
-                    clone.markers = [copy.copy(m) for m in clone.markers]
-                    for m in clone.markers:
-                        index[m.id] = m
-                # Deep-copy mutable shared attrs so baseline objects stay clean.
-                if hasattr(clone, "metadata"):
-                    try:
-                        clone.metadata = copy.deepcopy(clone.metadata)
-                    except Exception:
-                        pass
-                index[entity_id] = clone
-                cloned_ids.add(entity_id)
-                return clone
-
-            _JOINT_METADATA_KEYS = {
-                "friction_coulomb": "friction_coulomb",
-                "friction_viscous": "friction_viscous",
-                "friction_pin_radius": "friction_pin_radius",
-                "angle_limit_positive": "angle_limit_positive_deg",
-                "angle_limit_negative": "angle_limit_negative_deg",
-            }
-
-            for path, scalar in all_overrides.items():
-                parts = path.split("/")
-                if len(parts) < 3:
-                    continue
-                domain = parts[0]
-                entity_id = parts[1]
-                prop = parts[2]
-                # Domain-specific metadata overrides (joints/springs_meta)
-                if domain == "joints":
-                    joint = next((j for j in self._project.model.joints if j.id == entity_id), None)
-                    if joint is not None and prop in _JOINT_METADATA_KEYS:
-                        cloned = _clone_for_override(entity_id, joint)
-                        cloned.metadata.values[_JOINT_METADATA_KEYS[prop]] = scalar.value
-                        continue
-                if domain == "springs_meta":
-                    spring = next((s for s in self._project.model.springs if s.id == entity_id), None)
-                    if spring is not None:
-                        cloned = _clone_for_override(entity_id, spring)
-                        cloned.metadata.values[prop] = scalar.value
-                        continue
-                # Generic ScalarProperty-on-entity overrides
-                if len(parts) >= 3:
-                    entity = index.get(entity_id)
-                    if entity is not None:
-                        entity = _clone_for_override(entity_id, entity)
-                        current = getattr(entity, prop, None)
-                        if isinstance(current, ScalarProperty):
-                            new_expr = f"{scalar.value:g} {scalar.unit}".strip() if scalar.unit else f"{scalar.value:g}"
-                            setattr(
-                                entity,
-                                prop,
-                                ScalarProperty(
-                                    expression=new_expr,
-                                    unit=scalar.unit or current.unit,
-                                    expected_dimension=current.expected_dimension,
-                                ),
-                            )
-                        elif current is None:
-                            # Property is unset; infer dimension and create ScalarProperty
-                            from quino.domain.types import Dimension, DriverType
-                            dim_map: dict[str, Dimension] = {
-                                "mass": Dimension.MASS,
-                                "x": Dimension.LENGTH,
-                                "y": Dimension.LENGTH,
-                                "origin_x": Dimension.LENGTH,
-                                "origin_y": Dimension.LENGTH,
-                                "travel_min": Dimension.LENGTH,
-                                "travel_max": Dimension.LENGTH,
-                                "angle": Dimension.ANGLE,
-                                "angle_limit_positive": Dimension.ANGLE,
-                                "angle_limit_negative": Dimension.ANGLE,
-                                "fx": Dimension.FORCE,
-                                "fy": Dimension.FORCE,
-                                "law": Dimension.ANGLE,
-                            }
-                            expected = dim_map.get(prop)
-                            if prop == "law":
-                                if isinstance(entity, Driver):
-                                    expected = Dimension.ANGLE if entity.type is DriverType.ROTATION else Dimension.LENGTH
-                                else:
-                                    expected = Dimension.FORCE
-                            if expected is not None:
-                                default_unit = {
-                                    Dimension.LENGTH: "mm",
-                                    Dimension.ANGLE: "deg",
-                                    Dimension.MASS: "kg",
-                                    Dimension.FORCE: "N",
-                                    Dimension.TORQUE: "N*mm",
-                                    Dimension.TIME: "s",
-                                }.get(expected, "")
-                                new_expr = f"{scalar.value:g} {scalar.unit}".strip() if scalar.unit else f"{scalar.value:g}"
-                                setattr(
-                                    entity,
-                                    prop,
-                                    ScalarProperty(
-                                        expression=new_expr,
-                                        unit=scalar.unit or default_unit,
-                                        expected_dimension=expected,
-                                    ),
-                                )
         return index
 
     def _find_entity(self, entity_id: str) -> object:
@@ -344,21 +171,17 @@ class EntityCommands:
         except ValueError:
             return None
 
-    def _find_case_entity_dict(self, entity_id: str) -> tuple[str, dict, Case] | None:
-        """Search the active case chain's added_entities for *entity_id*.
-        Returns (domain, entity_dict, owning_case) or None."""
-        case = self._ctx.get_active_case()
-        if case is None:
-            return None
-        for inherited_case in reversed(self._resolve_case_chain(case)):
-            for domain, entities in inherited_case.added_entities.items():
-                for ent in entities:
-                    if ent.get("id") == entity_id:
-                        return (domain, ent, inherited_case)
+    # ------------------------------------------------------------------
+    # Legacy case-diff helpers — removed in case-as-model redesign.
+    # These stubs keep any remaining call sites from failing at import time.
+    # ------------------------------------------------------------------
+
+    def _find_case_entity_dict(self, entity_id: str):
+        """No-op stub (case-as-model: entities live directly in case.model)."""
         return None
 
     def _entity_exists_in_base(self, entity_id: str) -> bool:
-        """Return True if the entity exists in the base project model."""
+        """In case-as-model all entities exist in case.model — always True if found."""
         project = self._project
         if any(b.id == entity_id for b in project.model.bodies):
             return True
@@ -380,36 +203,15 @@ class EntityCommands:
         return False
 
     def _remove_from_case_added_entities(self, entity_id: str) -> bool:
-        """Remove *entity_id* from the active case's added_entities.
-        Return True if found and removed."""
-        case = self._ctx.get_active_case()
-        if case is None:
-            return False
-        for domain, entities in list(case.added_entities.items()):
-            for i, ent in enumerate(entities):
-                if ent.get("id") == entity_id:
-                    entities.pop(i)
-                    if not entities:
-                        case.added_entities.pop(domain, None)
-                    return True
+        """No-op stub (case-as-model: entities live directly in case.model)."""
         return False
 
     def _record_case_removal(self, entity_id: str) -> None:
-        """Record *entity_id* as removed in the active case."""
-        case = self._ctx.get_active_case()
-        if case is None:
-            return
-        if entity_id not in case.removed_entity_ids:
-            case.removed_entity_ids.append(entity_id)
+        """No-op stub (use engine.remove_entity instead)."""
+        pass
 
     def _entity_is_removed_in_chain(self, entity_id: str) -> bool:
-        """Return True if the entity is removed by any case in the active chain."""
-        case = self._ctx.get_active_case()
-        if case is None:
-            return False
-        for inherited_case in self._resolve_case_chain(case):
-            if entity_id in inherited_case.removed_entity_ids:
-                return True
+        """No-op stub."""
         return False
 
     # ------------------------------------------------------------------
@@ -470,20 +272,6 @@ class EntityCommands:
             entity.com_marker().visible = value != 0
 
     # ------------------------------------------------------------------
-    # Case overlay helpers
-    # ------------------------------------------------------------------
-
-    def _entity_overlay_path(self, entity: object, property_path: str) -> str:
-        if isinstance(entity, Body):
-            return f"bodies/{entity.id}/{property_path}"
-        if isinstance(entity, Driver):
-            return f"drivers/{entity.id}/{property_path}"
-        if isinstance(entity, Spring):
-            return f"springs/{entity.id}/{property_path}"
-        if isinstance(entity, Load):
-            return f"loads/{entity.id}/{property_path}"
-        raise TypeError(f"Entity type {type(entity).__name__} does not support overlay")
-
     # ------------------------------------------------------------------
     # Style update
     # ------------------------------------------------------------------
@@ -555,16 +343,10 @@ class EntityCommands:
         self._validate_entity_name(entity, new_name)
         self._ctx.snapshot()
         case = self._ctx.get_active_case()
-        if case is not None and self._entity_exists_in_base(entity_id):
-            # Record the rename in the case instead of mutating baseline
-            case.reference_overrides.setdefault(entity_id, {})["name"] = new_name
-            return
         if case is not None:
-            # Entity may be in added_entities — update the dict
-            case_ent = self._find_case_entity_dict(entity_id)
-            if case_ent is not None:
-                domain, ent_dict, owning_case = case_ent
-                ent_dict["name"] = new_name
+            engine = self._ctx.cascade_provider()
+            if engine is not None:
+                engine.edit_property(case.id, entity_id, "name", new_name)
                 return
         self._rename_entity_no_snapshot(entity, new_name)
 
@@ -586,29 +368,22 @@ class EntityCommands:
     # ------------------------------------------------------------------
 
     def add_gravity(self) -> None:
-        case = self._ctx.get_active_case()
-        effective = self._ctx.effective_project()
-        if effective.model.gravity is not None:
+        project = self._project
+        if project.model is None or project.model.gravity is not None:
             return
         self._ctx.snapshot()
-        if case is not None:
-            case.reference_overrides.setdefault("__gravity__", {})["enabled"] = True
-            return
-        self._project.model.gravity = GravityLoad()
+        project.model.gravity = GravityLoad()
 
     def delete_gravity(self) -> None:
-        case = self._ctx.get_active_case()
-        effective = self._ctx.effective_project()
-        if effective.model.gravity is None:
+        project = self._project
+        if project.model is None or project.model.gravity is None:
             return
         self._ctx.snapshot()
-        if case is not None:
-            case.reference_overrides.setdefault("__gravity__", {})["enabled"] = False
-            return
-        self._project.model.gravity = None
+        project.model.gravity = None
 
     def _update_gravity_property(self, path: str, value: PropertyValueInput) -> None:
-        gravity = self._ctx.effective_project().model.gravity
+        project = self._project
+        gravity = project.model.gravity if project.model is not None else None
         if gravity is None:
             raise ValueError("No gravity in this project")
         if path not in {"magnitude", "direction_x", "direction_y"}:
@@ -620,10 +395,6 @@ class EntityCommands:
         except (ValueError, TypeError):
             raise ValueError(f"Gravity {path} must be a number, got: {value.value!r}")
         self._ctx.snapshot()
-        case = self._ctx.get_active_case()
-        if case is not None:
-            case.invariant_values[f"gravity/{path}"] = _WsScalarValue(value=float_val, unit="")
-            return
         setattr(gravity, path, float_val)
 
     # ------------------------------------------------------------------
@@ -777,37 +548,25 @@ class EntityCommands:
                 unit=entity.law.unit,
                 expected_dimension=entity.law.expected_dimension,
             )
-            evaluated = self._ctx.expressions.evaluate_property(
+            self._ctx.expressions.evaluate_property(
                 law,
                 self._project.parameters,
                 variables={"t": self._ctx.units.quantity(0.0, "s")},
             )
-            _case = self._ctx.get_active_case()
-            if _case is not None:
-                _path = f"drivers/{entity.id}/law"
-                float_val = float(evaluated.value)
-                self._ctx.snapshot()
-                _case.invariant_values[_path] = _WsScalarValue(value=float_val, unit=law.unit)
-                return
             self._ctx.snapshot()
             entity.law = law
             return
         if value.kind != "expression" or not isinstance(value.value, str):
             raise ValueError("Scalar properties require an expression value")
         scalar = self._build_validated_scalar_property(entity, property_path, value.value)
-        # If a case is active and the entity is a case-overridable type, route to
-        # the case overlay instead of mutating the base model.
+        # In case-as-model design: mutate case.model directly.
         case = self._ctx.get_active_case()
-        if case is not None and isinstance(entity, (Body, Driver, Spring, Load)):
-            float_val = float(
-                self._ctx.expressions.evaluate_property(
-                    scalar, self._project.parameters
-                ).value
-            )
-            path = self._entity_overlay_path(entity, property_path)
-            self._ctx.snapshot()
-            case.invariant_values[path] = _WsScalarValue(value=float_val, unit=scalar.unit)
-            return
+        if case is not None:
+            engine = self._ctx.cascade_provider()
+            if engine is not None:
+                self._ctx.snapshot()
+                engine.edit_property(case.id, entity_id, property_path, scalar)
+                return
         self._ctx.snapshot()
         self._assign_scalar_property(entity, property_path, scalar)
 
@@ -833,22 +592,8 @@ class EntityCommands:
 
         case = self._ctx.get_active_case()
 
-        # 1. Try to remove from the active case's added_entities first.
-        if self._remove_from_case_added_entities(entity_id):
-            self._ctx.invalidate_pose_state()
-            return
-
-        # 2. Check if the entity was added by a parent case — if so, record
-        #    removal in the active case (the child).
-        case_entity = self._find_case_entity_dict(entity_id)
-        if case_entity is not None:
-            self._ctx.snapshot()
-            self._record_case_removal(entity_id)
-            self._ctx.invalidate_pose_state()
-            return
-
-        # 3. Determine entity type so we can apply cascade deletion when
-        #    there is no active case (direct baseline edit).
+        # In case-as-model: check if this is a marker deletion (markers aren't
+        # top-level entities with their own removal via engine).
         entity_type = None
         if any(b.id == entity_id for b in project.model.bodies):
             entity_type = "body"
@@ -865,7 +610,7 @@ class EntityCommands:
         elif any(sp.id == entity_id for sp in project.model.springs):
             entity_type = "spring"
         else:
-            # Marker deletion
+            # Marker deletion — markers are always directly mutated on case.model.
             body = self._bodies._find_body_by_marker(entity_id)
             if any(marker.id == entity_id and marker.type is MarkerType.COM for marker in body.markers):
                 raise ValueError("CoM marker cannot be deleted")
@@ -877,38 +622,36 @@ class EntityCommands:
                 for joint in project.model.joints
                 if joint.endpoint_a.marker_id == entity_id or joint.endpoint_b.marker_id == entity_id
             }
-            if case is None:
-                body.markers = [marker for marker in body.markers if marker.id != entity_id]
-                body.edge_order = [marker_id for marker_id in body.edge_order if marker_id != entity_id]
-                project.model.joints = [
-                    joint
-                    for joint in project.model.joints
-                    if joint.endpoint_a.marker_id != entity_id and joint.endpoint_b.marker_id != entity_id
-                ]
-                project.model.drivers = [
-                    driver for driver in project.model.drivers if driver.target_joint_id not in removed_joint_ids
-                ]
-                project.model.sensors = [
-                    sensor
-                    for sensor in project.model.sensors
-                    if entity_id not in sensor.marker_ids
-                ]
-                project.model.loads = [
-                    load for load in project.model.loads if load.target_marker_id != entity_id
-                ]
-                if len(body.structural_markers()) == 1:
-                    body.type = BodyType.POINT_MASS
-                    body.closed_shape = False
-                elif body.type is BodyType.BODY and len(body.structural_markers()) == 2:
-                    body.closed_shape = True
-                self._bodies._sync_special_com_marker(body)
-            else:
-                self._record_case_removal(entity_id)
+            body.markers = [marker for marker in body.markers if marker.id != entity_id]
+            body.edge_order = [marker_id for marker_id in body.edge_order if marker_id != entity_id]
+            project.model.joints = [
+                joint
+                for joint in project.model.joints
+                if joint.endpoint_a.marker_id != entity_id and joint.endpoint_b.marker_id != entity_id
+            ]
+            project.model.drivers = [
+                driver for driver in project.model.drivers if driver.target_joint_id not in removed_joint_ids
+            ]
+            project.model.sensors = [
+                sensor
+                for sensor in project.model.sensors
+                if entity_id not in sensor.marker_ids
+            ]
+            project.model.loads = [
+                load for load in project.model.loads if load.target_marker_id != entity_id
+            ]
+            if len(body.structural_markers()) == 1:
+                body.type = BodyType.POINT_MASS
+                body.closed_shape = False
+            elif body.type is BodyType.BODY and len(body.structural_markers()) == 2:
+                body.closed_shape = True
+            self._bodies._sync_special_com_marker(body)
             self._ctx.invalidate_pose_state()
             return
 
-        # 3. Handle structural entity deletion.
+        # Structural entity deletion — use engine when available, otherwise direct.
         self._ctx.snapshot()
+        engine = self._ctx.cascade_provider()
 
         if entity_type == "body":
             body = self._bodies._find_body(entity_id)
@@ -918,20 +661,21 @@ class EntityCommands:
                 for joint in project.model.joints
                 if joint.endpoint_a.marker_id in marker_ids or joint.endpoint_b.marker_id in marker_ids
             }
-            if case is None:
-                project.model.joints = [
-                    joint
-                    for joint in project.model.joints
-                    if joint.endpoint_a.marker_id not in marker_ids and joint.endpoint_b.marker_id not in marker_ids
-                ]
-                project.model.drivers = [
-                    driver for driver in project.model.drivers if driver.target_joint_id not in removed_joint_ids
-                ]
-                project.model.loads = [
-                    load for load in project.model.loads if load.target_marker_id not in marker_ids
-                ]
+            project.model.joints = [
+                joint
+                for joint in project.model.joints
+                if joint.endpoint_a.marker_id not in marker_ids and joint.endpoint_b.marker_id not in marker_ids
+            ]
+            project.model.drivers = [
+                driver for driver in project.model.drivers if driver.target_joint_id not in removed_joint_ids
+            ]
+            project.model.loads = [
+                load for load in project.model.loads if load.target_marker_id not in marker_ids
+            ]
+            if engine is not None and case is not None:
+                engine.remove_entity(case.id, entity_id)
+            else:
                 project.model.bodies = [item for item in project.model.bodies if item.id != entity_id]
-            self._record_case_removal(entity_id)
             self._ctx.invalidate_pose_state()
             return
 
@@ -941,51 +685,57 @@ class EntityCommands:
                 for joint in project.model.joints
                 if joint.endpoint_a.slider_id == entity_id or joint.endpoint_b.slider_id == entity_id
             }
-            if case is None:
-                project.model.joints = [
-                    joint
-                    for joint in project.model.joints
-                    if joint.endpoint_a.slider_id != entity_id and joint.endpoint_b.slider_id != entity_id
-                ]
-                project.model.drivers = [
-                    driver for driver in project.model.drivers if driver.target_joint_id not in slider_joint_ids
-                ]
+            project.model.joints = [
+                joint
+                for joint in project.model.joints
+                if joint.endpoint_a.slider_id != entity_id and joint.endpoint_b.slider_id != entity_id
+            ]
+            project.model.drivers = [
+                driver for driver in project.model.drivers if driver.target_joint_id not in slider_joint_ids
+            ]
+            if engine is not None and case is not None:
+                engine.remove_entity(case.id, entity_id)
+            else:
                 project.model.sliders = [item for item in project.model.sliders if item.id != entity_id]
-            self._record_case_removal(entity_id)
             self._ctx.invalidate_pose_state()
             return
 
         if entity_type == "joint":
-            if case is None:
+            project.model.drivers = [driver for driver in project.model.drivers if driver.target_joint_id != entity_id]
+            if engine is not None and case is not None:
+                engine.remove_entity(case.id, entity_id)
+            else:
                 project.model.joints = [item for item in project.model.joints if item.id != entity_id]
-                project.model.drivers = [driver for driver in project.model.drivers if driver.target_joint_id != entity_id]
-            self._record_case_removal(entity_id)
             self._ctx.invalidate_pose_state()
             return
 
         if entity_type == "driver":
-            if case is None:
+            if engine is not None and case is not None:
+                engine.remove_entity(case.id, entity_id)
+            else:
                 project.model.drivers = [item for item in project.model.drivers if item.id != entity_id]
-                self._cleanup_driver_velocities({entity_id})
-            self._record_case_removal(entity_id)
+            self._cleanup_driver_velocities({entity_id})
             return
 
         if entity_type == "load":
-            if case is None:
+            if engine is not None and case is not None:
+                engine.remove_entity(case.id, entity_id)
+            else:
                 project.model.loads = [item for item in project.model.loads if item.id != entity_id]
-            self._record_case_removal(entity_id)
             return
 
         if entity_type == "sensor":
-            if case is None:
+            if engine is not None and case is not None:
+                engine.remove_entity(case.id, entity_id)
+            else:
                 project.model.sensors = [item for item in project.model.sensors if item.id != entity_id]
-            self._record_case_removal(entity_id)
             return
 
         if entity_type == "spring":
-            if case is None:
+            if engine is not None and case is not None:
+                engine.remove_entity(case.id, entity_id)
+            else:
                 project.model.springs = [item for item in project.model.springs if item.id != entity_id]
-            self._record_case_removal(entity_id)
             return
 
     def _cleanup_driver_velocities(self, removed_driver_ids: set[str]) -> None:
