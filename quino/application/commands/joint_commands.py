@@ -538,11 +538,12 @@ class JointCommands:
             self._ctx.expressions.evaluate_property(slider_obj.travel_max, project.parameters)
         self._ctx.snapshot()
         case = self._ctx.current_case_provider()
+        if case is None:
+            raise ValueError("No active case")
         engine = self._ctx.cascade_provider()
-        if engine is not None and case is not None:
-            engine.add_entity(case.id, slider_obj, "sliders")
-        else:
-            project.model.sliders.append(slider_obj)
+        if engine is None:
+            raise ValueError("No active cascade engine")
+        engine.add_entity(case.id, slider_obj, "sliders")
         self._ctx.invalidate_pose_state()
         return slider_obj.id
 
@@ -608,11 +609,12 @@ class JointCommands:
         self._ensure_joint_not_duplicate(joint)
         self._ctx.snapshot()
         case = self._ctx.current_case_provider()
+        if case is None:
+            raise ValueError("No active case")
         engine = self._ctx.cascade_provider()
-        if engine is not None and case is not None:
-            engine.add_entity(case.id, joint, "joints")
-        else:
-            project.model.joints.append(joint)
+        if engine is None:
+            raise ValueError("No active cascade engine")
+        engine.add_entity(case.id, joint, "joints")
         # Invalidate entity index on the facade — there is no ctx field for it,
         # so we signal it via invalidate_pose_state which already handles the rest.
         # The entity index is rebuilt lazily; topology change forces rebuild via
@@ -684,11 +686,12 @@ class JointCommands:
             law=law,
         )
         case = self._ctx.current_case_provider()
+        if case is None:
+            raise ValueError("No active case")
         engine = self._ctx.cascade_provider()
-        if engine is not None and case is not None:
-            engine.add_entity(case.id, driver, "drivers")
-        else:
-            project.model.drivers.append(driver)
+        if engine is None:
+            raise ValueError("No active cascade engine")
+        engine.add_entity(case.id, driver, "drivers")
         return driver.id
 
     def set_joint_type(self, joint_id: str, joint_type: str) -> None:

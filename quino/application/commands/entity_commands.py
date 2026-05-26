@@ -512,9 +512,7 @@ class EntityCommands:
         if property_path == "name":
             if value.kind != "expression" or not isinstance(value.value, str):
                 raise ValueError("Name updates require an expression/string value")
-            self._validate_entity_name(entity, value.value)
-            self._ctx.snapshot()
-            self._rename_entity_no_snapshot(entity, value.value)
+            self.rename_entity(entity_id, value.value)
             return
         if property_path == "edge_order":
             if not isinstance(entity, Body):
@@ -672,10 +670,7 @@ class EntityCommands:
             project.model.loads = [
                 load for load in project.model.loads if load.target_marker_id not in marker_ids
             ]
-            if engine is not None and case is not None:
-                engine.remove_entity(case.id, entity_id)
-            else:
-                project.model.bodies = [item for item in project.model.bodies if item.id != entity_id]
+            project.model.bodies = [item for item in project.model.bodies if item.id != entity_id]
             self._ctx.invalidate_pose_state()
             return
 
@@ -693,10 +688,7 @@ class EntityCommands:
             project.model.drivers = [
                 driver for driver in project.model.drivers if driver.target_joint_id not in slider_joint_ids
             ]
-            if engine is not None and case is not None:
-                engine.remove_entity(case.id, entity_id)
-            else:
-                project.model.sliders = [item for item in project.model.sliders if item.id != entity_id]
+            project.model.sliders = [item for item in project.model.sliders if item.id != entity_id]
             self._ctx.invalidate_pose_state()
             return
 

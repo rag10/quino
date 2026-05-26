@@ -53,9 +53,10 @@ class ServiceContext:
     )
 
     # ------------------------------------------------------------------
-    # Back-compat: some command-services still call project_provider().
-    # This shim returns the model from the active case.
-    # TODO: remove in Task 17 when command-services use cascade_provider().
+    # Back-compat: command-services use cascade_provider() for mutations,
+    # but may still call project_provider() for read-only access (expressions,
+    # parameter lookup, etc.) via _WorkspaceProjectProxy.
+    # Remove once all reads are also migrated to workspace_provider() + current_case_provider().
     # ------------------------------------------------------------------
     def project_provider(self):
         """Shim: returns the active Case's model wrapper for backward compat.

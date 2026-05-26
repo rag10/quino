@@ -250,11 +250,12 @@ class BodyCommands:
         )
         body.markers.append(self._make_com_marker(body))
         case = self._ctx.current_case_provider()
+        if case is None:
+            raise ValueError("No active case")
         engine = self._ctx.cascade_provider()
-        if engine is not None and case is not None:
-            engine.add_entity(case.id, body, "bodies")
-        else:
-            project.model.bodies.append(body)
+        if engine is None:
+            raise ValueError("No active cascade engine")
+        engine.add_entity(case.id, body, "bodies")
         self._ctx.invalidate_pose_state()
         return body.id
 
@@ -263,19 +264,6 @@ class BodyCommands:
 
     def create_punctual_mass(self, name: str, x: str, y: str) -> str:
         return self.create_body(name=name, markers=[MarkerInput(x, y, "P")], body_type=BodyType.POINT_MASS.value)
-
-    def _locate_created_body(self, body_id: str):
-        """Return (body_obj, None). Bodies are always in case.model directly,
-        so we just look in project.model.bodies."""
-        project = self._project
-        for body in project.model.bodies:
-            if body.id == body_id:
-                return body, None
-        raise ValueError(f"Unknown body: {body_id}")
-
-    def _persist_body_back_to_case(self, body_obj, owner_dict) -> None:
-        """No-op: bodies are now live objects in case.model, no dict to persist back."""
-        pass
 
     def _tag_joint_internal_ground(self, joint_id: str) -> None:
         project = self._project
@@ -295,12 +283,10 @@ class BodyCommands:
         self._ctx.validation.ensure_unique_name(existing_bodies, name)
         with self._ctx.operation():
             body_id = self.create_body(name=name, markers=[MarkerInput(x, y, "P")], body_type=BodyType.POINT_MASS.value)
-            body, owner_dict = self._locate_created_body(body_id)
+            body = self._find_body(body_id)
             structural = next(m for m in body.markers if m.type is MarkerType.STRUCTURAL)
             body.metadata.values["ground_anchor"] = True
             body.metadata.values["ground_marker_id"] = structural.id
-            if owner_dict is not None:
-                self._persist_body_back_to_case(body, owner_dict)
             joint_id = self._ctx.connect_marker_to_ground(structural.id, joint_type="rigid", name=f"Ground_{name}")
             self._tag_joint_internal_ground(joint_id)
         return body_id, structural.id
@@ -316,12 +302,10 @@ class BodyCommands:
         self._ctx.validation.ensure_unique_name(existing_bodies, name)
         with self._ctx.operation():
             body_id = self.create_body(name=name, markers=[MarkerInput(x, y, "P")], body_type=BodyType.POINT_MASS.value)
-            body, owner_dict = self._locate_created_body(body_id)
+            body = self._find_body(body_id)
             structural = next(m for m in body.markers if m.type is MarkerType.STRUCTURAL)
             body.metadata.values["ground_anchor"] = True
             body.metadata.values["ground_marker_id"] = structural.id
-            if owner_dict is not None:
-                self._persist_body_back_to_case(body, owner_dict)
             joint_id = self._ctx.connect_marker_to_ground(structural.id, joint_type="rigid", name=f"Ground_{name}")
             self._tag_joint_internal_ground(joint_id)
         return body_id, structural.id

@@ -48,17 +48,26 @@ class ForceCommands:
         )
         self._ctx.snapshot()
         case = self._ctx.current_case_provider()
+        if case is None:
+            raise ValueError("No active case")
         engine = self._ctx.cascade_provider()
-        if engine is not None and case is not None:
-            engine.add_entity(case.id, sensor, "sensors")
-        else:
-            project.model.sensors.append(sensor)
+        if engine is None:
+            raise ValueError("No active cascade engine")
+        engine.add_entity(case.id, sensor, "sensors")
         return sensor_id
 
     def delete_sensor(self, sensor_id: str) -> None:
-        project = self._project
+        case = self._ctx.current_case_provider()
+        if case is None:
+            return
+        engine = self._ctx.cascade_provider()
         self._ctx.snapshot()
-        project.model.sensors = [s for s in project.model.sensors if s.id != sensor_id]
+        if engine is not None:
+            engine.remove_entity(case.id, sensor_id)
+        else:
+            project = self._ctx.project_provider()
+            if project is not None and project.model is not None:
+                project.model.sensors = [s for s in project.model.sensors if s.id != sensor_id]
 
     def rename_sensor(self, sensor_id: str, name: str) -> None:
         project = self._project
@@ -97,17 +106,26 @@ class ForceCommands:
         )
         self._ctx.snapshot()
         case = self._ctx.current_case_provider()
+        if case is None:
+            raise ValueError("No active case")
         engine = self._ctx.cascade_provider()
-        if engine is not None and case is not None:
-            engine.add_entity(case.id, load, "loads")
-        else:
-            project.model.loads.append(load)
+        if engine is None:
+            raise ValueError("No active cascade engine")
+        engine.add_entity(case.id, load, "loads")
         return load_id
 
     def delete_load(self, load_id: str) -> None:
-        project = self._project
+        case = self._ctx.current_case_provider()
+        if case is None:
+            return
+        engine = self._ctx.cascade_provider()
         self._ctx.snapshot()
-        project.model.loads = [ld for ld in project.model.loads if ld.id != load_id]
+        if engine is not None:
+            engine.remove_entity(case.id, load_id)
+        else:
+            project = self._ctx.project_provider()
+            if project is not None and project.model is not None:
+                project.model.loads = [ld for ld in project.model.loads if ld.id != load_id]
 
     def rename_load(self, load_id: str, name: str) -> None:
         project = self._project
@@ -166,11 +184,12 @@ class ForceCommands:
         )
         self._ctx.snapshot()
         case = self._ctx.current_case_provider()
+        if case is None:
+            raise ValueError("No active case")
         engine = self._ctx.cascade_provider()
-        if engine is not None and case is not None:
-            engine.add_entity(case.id, spring, "springs")
-        else:
-            project.model.springs.append(spring)
+        if engine is None:
+            raise ValueError("No active cascade engine")
+        engine.add_entity(case.id, spring, "springs")
         return spring_id
 
     def delete_spring(self, spring_id: str) -> None:
