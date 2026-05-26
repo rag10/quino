@@ -239,15 +239,6 @@ class BodyPose:
 
 
 @dataclass(slots=True)
-class Pose:
-    id: str
-    name: str
-    body_poses: dict[str, BodyPose] = field(default_factory=dict)
-    initial_velocities: dict[str, float] = field(default_factory=dict)
-    metadata: Metadata = field(default_factory=Metadata)
-
-
-@dataclass(slots=True)
 class SketchPoint:
     id: str
     name: str
@@ -404,32 +395,6 @@ class ViewState:
 
 
 @dataclass(slots=True)
-class Project:
-    id: str
-    name: str
-    schema_version: str
-    model: Model = field(default_factory=Model)
-    parameters: list[Parameter] = field(default_factory=list)
-    sketch: Sketch | None = None
-    poses: list[Pose] = field(default_factory=list)
-    simulation_initial_pose_id: str | None = None
-    view_state: ViewState = field(default_factory=ViewState)
-    metadata: Metadata = field(default_factory=Metadata)
-    sensor_outputs: dict[str, SensorOutput] = field(default_factory=dict)
-    reaction_outputs: dict[str, ReactionOutput] = field(default_factory=dict)
-    workspace: "Workspace | None" = None
-
-    @property
-    def block_diagram(self) -> "BlockDiagram | None":
-        """Backward-compatible proxy for the model-level control graph."""
-        return self.model.control_graph
-
-    @block_diagram.setter
-    def block_diagram(self, value: "BlockDiagram | None") -> None:
-        self.model.control_graph = value
-
-
-@dataclass(slots=True)
 class ValidationMessage:
     level: str
     code: str
@@ -464,3 +429,12 @@ class SimulationResult:
             self.states = list(self.frames)
         if not self.time and self.frames:
             self.time = [float(index) for index in range(len(self.frames))]
+
+
+def __getattr__(name: str):
+    if name in {"Project", "Pose"}:
+        raise ImportError(
+            f"{name!r} was removed from quino.domain.model in the case-as-model redesign. "
+            f"Use quino.domain.workspace.Workspace (root container) and quino.domain.workspace.Pose."
+        )
+    raise AttributeError(f"module 'quino.domain.model' has no attribute {name!r}")

@@ -59,3 +59,18 @@ def test_analysis_no_baseline_id_or_case_id():
     assert not hasattr(a, "case_id")
     assert not hasattr(a, "workspace_pose_id")
     assert a.pose_id is None
+
+
+import pytest
+
+
+def test_project_removed_from_model():
+    import quino.domain.model as m
+    with pytest.raises(ImportError):
+        m.Project
+
+
+def test_pose_removed_from_model():
+    import quino.domain.model as m
+    with pytest.raises(ImportError):
+        m.Pose
