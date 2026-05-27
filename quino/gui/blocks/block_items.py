@@ -14,18 +14,18 @@ BLOCK_WIDTH = 120
 BLOCK_HEIGHT = 60
 PORT_RADIUS = 6
 PORT_HIT_RADIUS = 10
-CONNECTION_COLOR = QtGui.QColor("#31556f")
-CONNECTION_SELECTED_COLOR = QtGui.QColor("#e67e22")
+CONNECTION_COLOR = QtGui.QColor("#2d74a7")
+CONNECTION_SELECTED_COLOR = QtGui.QColor("#c76f1f")
 CONNECTION_WIDTH = 2
-BLOCK_BG = QtGui.QColor("#f8f9fa")
-BLOCK_BORDER = QtGui.QColor("#dee2e6")
-BLOCK_SELECTED_BORDER = QtGui.QColor("#31556f")
-BLOCK_ERROR_BORDER = QtGui.QColor("#dc3545")
-BLOCK_ERROR_BG = QtGui.QColor("#f8d7da")
-BLOCK_TEXT_COLOR = QtGui.QColor("#212529")
-PORT_INPUT_COLOR = QtGui.QColor("#28a745")
-PORT_OUTPUT_COLOR = QtGui.QColor("#dc3545")
-PORT_ERROR_COLOR = QtGui.QColor("#dc3545")
+BLOCK_BG = QtGui.QColor("#fbfdff")
+BLOCK_BORDER = QtGui.QColor("#cbd6e2")
+BLOCK_SELECTED_BORDER = QtGui.QColor("#2d74a7")
+BLOCK_ERROR_BORDER = QtGui.QColor("#b43a2f")
+BLOCK_ERROR_BG = QtGui.QColor("#fdecea")
+BLOCK_TEXT_COLOR = QtGui.QColor("#17212b")
+PORT_INPUT_COLOR = QtGui.QColor("#25815f")
+PORT_OUTPUT_COLOR = QtGui.QColor("#c76f1f")
+PORT_ERROR_COLOR = QtGui.QColor("#b43a2f")
 
 
 # ---------------------------------------------------------------------------

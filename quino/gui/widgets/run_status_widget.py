@@ -8,6 +8,7 @@ class RunStatusWidget(QtWidgets.QWidget):
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("runStatusWidget")
         self._current_id: str | None = None
 
         layout = QtWidgets.QHBoxLayout(self)
@@ -15,6 +16,7 @@ class RunStatusWidget(QtWidgets.QWidget):
         layout.setSpacing(8)
 
         self._label = QtWidgets.QLabel("Idle")
+        self._label.setObjectName("runStatusLabel")
         self._cancel_btn = QtWidgets.QToolButton()
         self._cancel_btn.setText("Cancel")
         self._cancel_btn.setEnabled(False)

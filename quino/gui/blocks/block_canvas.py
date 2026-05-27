@@ -674,7 +674,7 @@ class BlockEditorCanvas(QtWidgets.QGraphicsView):
         self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.setTransformationAnchor(QtWidgets.QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QtWidgets.QGraphicsView.ViewportAnchor.AnchorViewCenter)
-        self.setBackgroundBrush(QtGui.QBrush(QtGui.QColor("#ffffff")))
+        self.setBackgroundBrush(QtGui.QBrush(QtGui.QColor("#f8fbfd")))
         self._dragging = False
         self._last_mouse_pos: QtCore.QPointF = QtCore.QPointF()
 
@@ -723,7 +723,7 @@ class BlockEditorCanvas(QtWidgets.QGraphicsView):
         scene_rect = self.mapToScene(viewport_rect).boundingRect()
         if scene._block_items:
             painter.save()
-            painter.setPen(QtGui.QPen(QtGui.QColor("#e7eaef"), 1))
+            painter.setPen(QtGui.QPen(QtGui.QColor("#dfe8f1"), 1))
             step = 40.0
             x = int(scene_rect.left() / step) * step
             while x < scene_rect.right():
@@ -736,7 +736,7 @@ class BlockEditorCanvas(QtWidgets.QGraphicsView):
             return
         # Empty state hint when there are no blocks yet.
         painter.save()
-        painter.setPen(QtGui.QPen(QtGui.QColor("#9aa3ad")))
+        painter.setPen(QtGui.QPen(QtGui.QColor("#66727e")))
         font = painter.font()
         font.setPointSize(11)
         painter.setFont(font)

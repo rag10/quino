@@ -12,11 +12,12 @@ from pathlib import Path
 
 from PySide6 import QtCore, QtGui
 
-
 _CACHE_DIR: Path | None = None
-_CACHE_TOKEN = "v2-black-1px"  # bump to invalidate cached PNGs after restyle
-_LINE_COLOR = QtGui.QColor("#000000")
-_TRIANGLE_COLOR = QtGui.QColor("#333")
+_CACHE_TOKEN = "v6-triangle-overlay-halo"
+_LINE_COLOR = QtGui.QColor("#b7c5d3")
+_TRIANGLE_COLOR = QtGui.QColor("#66727e")
+_TRIANGLE_EDGE_COLOR = QtGui.QColor("#3f4f5e")
+_TRIANGLE_HALO_COLOR = QtGui.QColor("#fbfdff")
 _SIZE = 16
 
 
@@ -51,33 +52,8 @@ def _render_all(out: Path) -> None:
 
     _draw(out / "end.png", _end)
 
-    # Closed disclosure (right-pointing triangle), with the same T-connector.
-    def _closed(p):
-        _vline(p, cx, 0, _SIZE)
-        _triangle(p, cx, cy, closed=True)
-
-    _draw(out / "closed.png", _closed)
-
-    # Open disclosure (down-pointing triangle).
-    def _open(p):
-        _vline(p, cx, 0, _SIZE)
-        _triangle(p, cx, cy, closed=False)
-
-    _draw(out / "open.png", _open)
-
-    # Closed disclosure at the end of a branch.
-    def _closed_end(p):
-        _vline(p, cx, 0, cy)
-        _triangle(p, cx, cy, closed=True)
-
-    _draw(out / "closed_end.png", _closed_end)
-
-    # Open disclosure at the end of a branch.
-    def _open_end(p):
-        _vline(p, cx, 0, cy)
-        _triangle(p, cx, cy, closed=False)
-
-    _draw(out / "open_end.png", _open_end)
+    _draw(out / "closed_triangle.png", lambda p: _triangle(p, cx, cy, closed=True))
+    _draw(out / "open_triangle.png", lambda p: _triangle(p, cx, cy, closed=False))
 
 
 def _draw(path: Path, fn) -> None:
@@ -115,23 +91,37 @@ def _hline(painter: QtGui.QPainter, x0: int, x1: int, y: int) -> None:
 
 
 def _triangle(painter: QtGui.QPainter, cx: int, cy: int, *, closed: bool) -> None:
-    """Filled triangle pointing right (closed) or down (open)."""
-    size = 4
+    """Filled triangle pointing right (closed) or down (open).
+
+    The light underlay deliberately covers the hierarchy guide behind the
+    disclosure glyph, so the triangle always reads as being above the lines.
+    """
+    halo = _triangle_polygon(cx, cy, closed=closed, size=6.2)
     painter.setPen(QtCore.Qt.PenStyle.NoPen)
+    painter.setBrush(QtGui.QBrush(_TRIANGLE_HALO_COLOR))
+    painter.drawPolygon(halo)
+
+    triangle = _triangle_polygon(cx, cy, closed=closed, size=5.1)
+    pen = QtGui.QPen(_TRIANGLE_EDGE_COLOR)
+    pen.setWidthF(0.8)
+    pen.setCosmetic(True)
+    painter.setPen(pen)
     painter.setBrush(QtGui.QBrush(_TRIANGLE_COLOR))
+    painter.drawPolygon(triangle)
+
+
+def _triangle_polygon(cx: int, cy: int, *, closed: bool, size: float) -> QtGui.QPolygonF:
     if closed:
-        poly = QtGui.QPolygonF([
-            QtCore.QPointF(cx - 1, cy - size),
-            QtCore.QPointF(cx + size - 1, cy),
-            QtCore.QPointF(cx - 1, cy + size),
+        return QtGui.QPolygonF([
+            QtCore.QPointF(cx - 1.4, cy - size),
+            QtCore.QPointF(cx + size - 0.8, cy),
+            QtCore.QPointF(cx - 1.4, cy + size),
         ])
-    else:
-        poly = QtGui.QPolygonF([
-            QtCore.QPointF(cx - size, cy - 1),
-            QtCore.QPointF(cx + size, cy - 1),
-            QtCore.QPointF(cx, cy + size - 1),
-        ])
-    painter.drawPolygon(poly)
+    return QtGui.QPolygonF([
+        QtCore.QPointF(cx - size, cy - 1.2),
+        QtCore.QPointF(cx + size, cy - 1.2),
+        QtCore.QPointF(cx, cy + size - 0.6),
+    ])
 
 
 def tree_branch_stylesheet() -> str:
@@ -151,14 +141,20 @@ def tree_branch_stylesheet() -> str:
         "QTreeView::branch:!has-children:!has-siblings:adjoins-item {"
         f" border-image: url({url('end')}) 0;"
         " }"
-        "QTreeView::branch:has-children:!has-siblings:closed,"
-        " QTreeView::branch:closed:has-children:has-siblings {"
-        " border-image: none;"
-        f" image: url({url('closed')});"
+        "QTreeView::branch:closed:has-children:has-siblings {"
+        f" border-image: url({url('more')}) 0;"
+        f" image: url({url('closed_triangle')});"
         " }"
-        "QTreeView::branch:open:has-children:!has-siblings,"
-        " QTreeView::branch:open:has-children:has-siblings {"
-        " border-image: none;"
-        f" image: url({url('open')});"
+        "QTreeView::branch:open:has-children:has-siblings {"
+        f" border-image: url({url('more')}) 0;"
+        f" image: url({url('open_triangle')});"
+        " }"
+        "QTreeView::branch:closed:has-children:!has-siblings {"
+        f" border-image: url({url('end')}) 0;"
+        f" image: url({url('closed_triangle')});"
+        " }"
+        "QTreeView::branch:open:has-children:!has-siblings {"
+        f" border-image: url({url('end')}) 0;"
+        f" image: url({url('open_triangle')});"
         " }"
     )

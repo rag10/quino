@@ -69,9 +69,10 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("inspectorProperties")
         self.layout = QtWidgets.QVBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 0)
-        self.layout.setSpacing(2)
+        self.layout.setContentsMargins(8, 8, 8, 8)
+        self.layout.setSpacing(3)
         self._row_widgets: dict[str, QtWidgets.QWidget] = {}
         self._compat_rows: list[dict[str, object]] = []
 
@@ -88,6 +89,7 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
         """Add a single property row to the form."""
         # Outer container supports an optional hint label below the row
         outer_widget = QtWidgets.QWidget()
+        outer_widget.setObjectName("propertyRow")
         outer_layout = QtWidgets.QVBoxLayout(outer_widget)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
@@ -99,6 +101,7 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
 
         # Label
         label_widget = QtWidgets.QLabel(label)
+        label_widget.setObjectName("propertyLabel")
         label_widget.setMinimumWidth(100)
         label_widget.setMaximumWidth(150)
         row_layout.addWidget(label_widget)
@@ -137,6 +140,7 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
         selects the matching pair (when present), else falls back to the first
         item or an empty entry."""
         outer_widget = QtWidgets.QWidget()
+        outer_widget.setObjectName("propertyRow")
         outer_layout = QtWidgets.QVBoxLayout(outer_widget)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
@@ -145,6 +149,7 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(8)
         label_widget = QtWidgets.QLabel(label)
+        label_widget.setObjectName("propertyLabel")
         label_widget.setMinimumWidth(100)
         label_widget.setMaximumWidth(150)
         row_layout.addWidget(label_widget)
@@ -184,6 +189,7 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
 
     def add_property_checkbox(self, label: str, path: str, value: bool, enabled: bool = True) -> None:
         outer_widget = QtWidgets.QWidget()
+        outer_widget.setObjectName("propertyRow")
         outer_layout = QtWidgets.QVBoxLayout(outer_widget)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
@@ -192,6 +198,7 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(8)
         label_widget = QtWidgets.QLabel(label)
+        label_widget.setObjectName("propertyLabel")
         label_widget.setMinimumWidth(100)
         label_widget.setMaximumWidth(150)
         row_layout.addWidget(label_widget)
@@ -248,7 +255,8 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
         # Apply a left-border accent to the outer widget to flag the override.
         # Orange is the override semantic; see quino/gui/_palette.py.
         outer_widget.setStyleSheet(
-            "QWidget { border-left: 3px solid #c75b12; padding-left: 4px; }"
+            "QWidget#propertyRow { border-left: 3px solid #c76f1f; padding-left: 4px;"
+            " background: #fffaf5; }"
         )
         hint_row = QtWidgets.QWidget()
         hint_row.setProperty("is_baseline_hint_row", True)
@@ -256,7 +264,7 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
         hint_layout.setContentsMargins(108, 0, 0, 0)
         hint_layout.setSpacing(6)
         hint_label = QtWidgets.QLabel(hint)
-        hint_label.setStyleSheet("color: #888888; font-size: 8pt; border: none;")
+        hint_label.setStyleSheet("color: #66727e; font-size: 8pt; border: none;")
         hint_label.setWordWrap(False)
         hint_layout.addWidget(hint_label)
         if resettable:
@@ -266,7 +274,7 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
             reset_btn.setToolTip(
                 "Clear this local override so the inherited (or baseline) value applies again"
             )
-            reset_btn.setStyleSheet("QToolButton { color: #2255aa; font-size: 8pt; }")
+            reset_btn.setStyleSheet("QToolButton { color: #2d74a7; font-size: 8pt; }")
             reset_btn.clicked.connect(lambda _, p=path: self.override_reset_requested.emit(p))
             hint_layout.addWidget(reset_btn)
         hint_layout.addStretch()
@@ -304,13 +312,15 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
 
         if kind == "section_header":
             section_label = QtWidgets.QLabel(value)
-            section_label.setStyleSheet("color: #888888; font-style: italic;")
+            section_label.setObjectName("propertySection")
+            section_label.setStyleSheet("color: #66727e; font-weight: 650;")
             layout.addWidget(section_label)
             layout.addStretch()
             return container
 
         elif kind == "readonly":
             value_label = QtWidgets.QLabel(evaluated)
+            value_label.setObjectName("propertyReadonly")
             layout.addWidget(value_label)
             layout.addStretch()
             return container
@@ -328,7 +338,7 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
         elif kind == "color":
             preview = QtWidgets.QLabel()
             preview.setFixedSize(20, 20)
-            preview.setStyleSheet(f"background-color: {value}; border: 1px solid #888;")
+            preview.setStyleSheet(f"background-color: {value}; border: 1px solid #aebdcb;")
             layout.addWidget(preview)
 
             def pick_color():
@@ -337,7 +347,7 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
                 )
                 if color.isValid():
                     new_color = color.name()
-                    preview.setStyleSheet(f"background-color: {new_color}; border: 1px solid #888;")
+                    preview.setStyleSheet(f"background-color: {new_color}; border: 1px solid #aebdcb;")
                     self.property_changed.emit(path, new_color, kind)
 
             pick_btn = QtWidgets.QPushButton("…")
@@ -360,7 +370,8 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
                 return container
 
             eval_label = QtWidgets.QLabel(evaluated)
-            eval_label.setStyleSheet("color: #666; font-size: 9pt;")
+            eval_label.setObjectName("propertyEval")
+            eval_label.setStyleSheet("color: #66727e; font-size: 9pt;")
             eval_label.setMaximumWidth(150)
             layout.addWidget(eval_label)
             return container
@@ -369,7 +380,7 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
             key_label = QtWidgets.QLabel(value)
             mono_font = QtGui.QFont("Courier New", key_label.font().pointSize() - 1)
             key_label.setFont(mono_font)
-            key_label.setStyleSheet("color: #666; background-color: #f0f0f0; padding: 2px;")
+            key_label.setStyleSheet("color: #66727e; background-color: #eef4f8; padding: 2px;")
             layout.addWidget(key_label)
             layout.addStretch()
             return container

@@ -5,6 +5,8 @@ from __future__ import annotations
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from quino.blocks.library import BLOCK_REGISTRY
+from quino.gui.icons import get_icon
+from quino.gui.theme import INK_MUTED, apply_browser_tree_style
 
 
 def palette_categories() -> dict[str, list[str]]:
@@ -28,7 +30,8 @@ class BlockPalette(QtWidgets.QTreeWidget):
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setHeaderHidden(True)
+        self.setObjectName("blockPaletteTree")
+        apply_browser_tree_style(self, icon_size=16, indentation=18, show_header=False)
         self.setDragEnabled(True)
         self.setMaximumWidth(220)
         self.itemActivated.connect(self._emit_block_request)
@@ -37,10 +40,16 @@ class BlockPalette(QtWidgets.QTreeWidget):
     def _populate(self) -> None:
         for cat_name, block_names in palette_categories().items():
             cat_item = QtWidgets.QTreeWidgetItem([cat_name])
+            cat_item.setIcon(0, get_icon("workspace-blocks", INK_MUTED, size=16))
+            font = cat_item.font(0)
+            font.setBold(True)
+            cat_item.setFont(0, font)
+            cat_item.setForeground(0, QtGui.QBrush(QtGui.QColor(INK_MUTED)))
             cat_item.setFlags(cat_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsDragEnabled)
             for name in block_names:
                 if name in BLOCK_REGISTRY:
                     child = QtWidgets.QTreeWidgetItem([name])
+                    child.setIcon(0, get_icon("block-instance", INK_MUTED, size=16))
                     child.setData(0, QtCore.Qt.ItemDataRole.UserRole, name)
                     cat_item.addChild(child)
             self.addTopLevelItem(cat_item)

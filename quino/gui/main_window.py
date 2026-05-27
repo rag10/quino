@@ -55,6 +55,14 @@ from quino.viewer.plot_window import PlotWindow
 from quino.gui.widgets.inspector_widget import InspectorPropertyWidget
 from quino.gui.blocks import BlockEditorWidget
 from quino.gui.widgets.divergences_dock import DivergencesDock
+from quino.gui.theme import (
+    BLUE,
+    BORDER_STRONG,
+    INK,
+    INK_MUTED,
+    MODE_INDICATOR_QSS,
+    apply_browser_tree_style,
+)
 
 
 def _changed_entity_ids_for_case(case) -> set[str]:
@@ -142,19 +150,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.tree = QtWidgets.QTreeWidget()
         self.tree.setHeaderLabels(["Model", "Type"])
-        self.tree.setIconSize(QtCore.QSize(18, 18))
-        self.tree.setIndentation(18)
         self.tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Stretch)
         self.tree.header().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
-        self.tree.setAlternatingRowColors(False)
-        from quino.gui.tree_branches import tree_branch_stylesheet
-        self.tree.setStyleSheet(
-            "QTreeWidget { background-color: #eef3f8; } "
-            "QTreeWidget::item { background-color: #eef3f8; color: #3d3d3d; padding: 2px; } "
-            "QTreeWidget::item:selected { background-color: #d4e5f7; color: #3d3d3d; outline: none; border: none; }"
-            + tree_branch_stylesheet()
-        )
-        self.tree.setUniformRowHeights(True)
+        apply_browser_tree_style(self.tree, icon_size=18, indentation=18, show_header=True)
         self._tree_delegate = TreeBranchDelegate(self.tree)
         self.tree.setItemDelegateForColumn(0, self._tree_delegate)
         self._tree_delegate.visibility_toggled.connect(self._on_tree_visibility_toggled)
@@ -289,6 +287,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Title label: shows selected entity name + type
         self.inspector_title = QtWidgets.QLabel()
+        self.inspector_title.setObjectName("inspectorTitle")
         self.inspector_title.setContentsMargins(8, 6, 8, 4)
         self.inspector_title.setTextFormat(QtCore.Qt.TextFormat.RichText)
         title_font = self.inspector_title.font()
@@ -352,14 +351,17 @@ class MainWindow(QtWidgets.QMainWindow):
         right_panel.addTab(parameters_widget, "Parameters")
 
         self.validation_view = QtWidgets.QPlainTextEdit()
+        self.validation_view.setObjectName("validationView")
         self.validation_view.setReadOnly(True)
         right_panel.addTab(self.validation_view, "Validation")
 
         self.messages = QtWidgets.QPlainTextEdit()
+        self.messages.setObjectName("messagesView")
         self.messages.setReadOnly(True)
         right_panel.addTab(self.messages, "Messages")
 
         self.canvas_summary = QtWidgets.QPlainTextEdit()
+        self.canvas_summary.setObjectName("infoView")
         self.canvas_summary.setReadOnly(True)
         right_panel.addTab(self.canvas_summary, "Info")
 
@@ -760,7 +762,7 @@ class MainWindow(QtWidgets.QMainWindow):
         font = lbl.font()
         font.setPointSize(7)
         lbl.setFont(font)
-        lbl.setStyleSheet("color: #888; padding-bottom: 2px;")
+        lbl.setStyleSheet(f"color: {INK_MUTED}; padding-bottom: 2px;")
         outer.addWidget(lbl)
 
         wa = QtWidgets.QWidgetAction(toolbar)
@@ -772,6 +774,7 @@ class MainWindow(QtWidgets.QMainWindow):
         sep.setFrameShape(QtWidgets.QFrame.Shape.VLine)
         sep.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
         sep.setFixedWidth(8)
+        sep.setStyleSheet("QFrame { color: #cbd6e2; background: #cbd6e2; margin: 6px 3px; }")
         wa = QtWidgets.QWidgetAction(toolbar)
         wa.setDefaultWidget(sep)
         toolbar.addAction(wa)
@@ -804,9 +807,7 @@ class MainWindow(QtWidgets.QMainWindow):
         layout = QtWidgets.QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        container.setStyleSheet(
-            "QWidget#modeIndicatorOverlay { background: transparent; border: none; }"
-        )
+        container.setStyleSheet(MODE_INDICATOR_QSS)
 
         def _pill(text: str, role: str, *, position: str) -> QtWidgets.QToolButton:
             btn = QtWidgets.QToolButton()
@@ -819,11 +820,32 @@ class MainWindow(QtWidgets.QMainWindow):
                 "middle": "",
             }[position]
             btn.setStyleSheet(
-                "QToolButton { border: 1px solid #ccc; %s background: #f0f0f0;"
-                " color: #666; font-weight: bold; font-size: 11px; }"
-                "QToolButton:checked { background: #31556f; color: white; border-color: #31556f; }"
-                "QToolButton:disabled { background: #f6f6f6; color: #aaa; }"
-                % radii
+                "QToolButton {"
+                f" border: 1px solid {BORDER_STRONG};"
+                f" {radii}"
+                " background: rgba(255, 255, 255, 230);"
+                f" color: {INK_MUTED};"
+                " font-weight: 650;"
+                " font-size: 11px;"
+                "}"
+                "QToolButton:hover {"
+                " background: #edf5fb;"
+                f" color: {INK};"
+                "}"
+                "QToolButton:checked {"
+                f" background: {BLUE};"
+                " color: white;"
+                f" border-color: {BLUE};"
+                "}"
+                "QToolButton:disabled {"
+                " background: rgba(255, 255, 255, 215);"
+                " color: #96a4b2;"
+                "}"
+                "QToolButton:checked:disabled {"
+                f" background: {BLUE};"
+                " color: white;"
+                f" border-color: {BLUE};"
+                "}"
             )
             btn.setProperty("mode_role", role)
             return btn
@@ -841,11 +863,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._mode_analysis_btn.setEnabled(False)
         # Make the disabled buttons still readable when checked.
         for btn in (self._mode_pose_btn, self._mode_analysis_btn):
-            btn.setStyleSheet(
-                btn.styleSheet()
-                + "QToolButton:checked:disabled { background: #31556f; color: white;"
-                " border-color: #31556f; }"
-            )
+            btn.setStyleSheet(btn.styleSheet())
 
         layout.addWidget(self._mode_sketch_btn)
         layout.addWidget(self._mode_model_btn)

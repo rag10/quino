@@ -328,7 +328,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self._show_grid: bool = True
         self._show_sensors: bool = True
         self._collapsed_sensor_scopes: set[str] = set()
-        self._background_color: str = "#f5f1e8"
+        self._background_color: str = "#f8fbfd"
         self.setMinimumSize(420, 320)
         self.setMouseTracking(True)
         self.setAutoFillBackground(True)
@@ -2780,7 +2780,7 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def _draw_grid(self, painter: QtGui.QPainter, transform) -> None:
         scale, center_x, center_y = transform
-        painter.setPen(QtGui.QPen(QtGui.QColor("#e2dbcf"), 1.0))
+        painter.setPen(QtGui.QPen(QtGui.QColor("#dfe8f1"), 1.0))
         spacing_world = 20.0
         spacing = max(spacing_world * scale, 18.0)
         if spacing <= 0:
@@ -2828,8 +2828,8 @@ class MechanismCanvas(QtWidgets.QWidget):
         font = painter.font()
         font.setPointSizeF(max(6.5, font.pointSizeF() - 1.5 if font.pointSizeF() > 0 else 7.0))
         painter.setFont(font)
-        label_pen = QtGui.QPen(QtGui.QColor("#5f666d"), 1.0)
-        tick_pen = QtGui.QPen(QtGui.QColor("#8f969d"), 1.0)
+        label_pen = QtGui.QPen(QtGui.QColor("#66727e"), 1.0)
+        tick_pen = QtGui.QPen(QtGui.QColor("#9fb0bf"), 1.0)
 
         painter.setClipRect(QtCore.QRectF(gutter_left, height - gutter_bottom, width - gutter_left, gutter_bottom))
         painter.setPen(tick_pen)
@@ -2857,7 +2857,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             y += step_world
 
         painter.setClipping(False)
-        painter.setPen(QtGui.QPen(QtGui.QColor("#a5acae"), 1.0))
+        painter.setPen(QtGui.QPen(QtGui.QColor("#c4d0dc"), 1.0))
         painter.drawLine(QtCore.QPointF(gutter_left, 0.0), QtCore.QPointF(gutter_left, height))
         painter.drawLine(QtCore.QPointF(0.0, height - gutter_bottom), QtCore.QPointF(width, height - gutter_bottom))
         painter.setPen(label_pen)
@@ -2888,17 +2888,17 @@ class MechanismCanvas(QtWidgets.QWidget):
         h = float(self.height())
         if self._show_axes:
             # X axis (red)
-            painter.setPen(QtGui.QPen(QtGui.QColor("#e74c3c"), 1.2))
+            painter.setPen(QtGui.QPen(QtGui.QColor("#b43a2f"), 1.2))
             painter.drawLine(QtCore.QPointF(0.0, origin.y()), QtCore.QPointF(w, origin.y()))
             # Y axis (green)
-            painter.setPen(QtGui.QPen(QtGui.QColor("#27ae60"), 1.2))
+            painter.setPen(QtGui.QPen(QtGui.QColor("#25815f"), 1.2))
             painter.drawLine(QtCore.QPointF(origin.x(), 0.0), QtCore.QPointF(origin.x(), h))
             # Arrowheads at positive ends
             arrow = 8.0
-            painter.setPen(QtGui.QPen(QtGui.QColor("#e74c3c"), 1.2))
+            painter.setPen(QtGui.QPen(QtGui.QColor("#b43a2f"), 1.2))
             painter.drawLine(QtCore.QPointF(w - arrow, origin.y() - arrow / 2), QtCore.QPointF(w, origin.y()))
             painter.drawLine(QtCore.QPointF(w - arrow, origin.y() + arrow / 2), QtCore.QPointF(w, origin.y()))
-            painter.setPen(QtGui.QPen(QtGui.QColor("#27ae60"), 1.2))
+            painter.setPen(QtGui.QPen(QtGui.QColor("#25815f"), 1.2))
             painter.drawLine(QtCore.QPointF(origin.x() - arrow / 2, arrow), QtCore.QPointF(origin.x(), 0.0))
             painter.drawLine(QtCore.QPointF(origin.x() + arrow / 2, arrow), QtCore.QPointF(origin.x(), 0.0))
         if self._show_origin:

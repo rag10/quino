@@ -4,19 +4,27 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from quino.application.service import ApplicationService
 from quino.domain.workspace import Case
+from quino.gui.icons import get_icon
+from quino.gui.theme import (
+    BLUE_DARK,
+    BLUE_SOFT,
+    INK_MUTED,
+    INK_SUBTLE,
+    apply_browser_tree_style,
+)
 
 ROLE_NODE_KIND = QtCore.Qt.ItemDataRole.UserRole
 ROLE_ID = QtCore.Qt.ItemDataRole.UserRole + 1
 
 # Status colours for run badges
 _RUN_STATUS_COLORS = {
-    "ok":      "#2a9d2a",
-    "partial": "#c77b00",
-    "failed":  "#cc2222",
-    "stale":   "#888888",
-    "running": "#1a6ec2",
-    "queued":  "#1a6ec2",
-    "to_be_run": "#999999",
+    "ok": "#25815f",
+    "partial": "#a66a00",
+    "failed": "#b43a2f",
+    "stale": "#66727e",
+    "running": "#2d74a7",
+    "queued": "#2d74a7",
+    "to_be_run": "#81909f",
 }
 
 _ANALYSIS_TYPE_LABELS = {
@@ -27,14 +35,15 @@ _ANALYSIS_TYPE_LABELS = {
 }
 
 
-def _group_item(label: str) -> QtWidgets.QTreeWidgetItem:
+def _group_item(label: str, icon_name: str) -> QtWidgets.QTreeWidgetItem:
     """Non-selectable section header."""
     item = QtWidgets.QTreeWidgetItem([label])
+    item.setIcon(0, get_icon(icon_name, INK_MUTED, size=16))
     item.setData(0, ROLE_NODE_KIND, "group")
     font = item.font(0)
     font.setBold(True)
     item.setFont(0, font)
-    item.setForeground(0, QtGui.QBrush(QtGui.QColor("#666666")))
+    item.setForeground(0, QtGui.QBrush(QtGui.QColor(INK_MUTED)))
     flags = item.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable
     item.setFlags(flags)
     return item
@@ -52,8 +61,9 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self._tree = QtWidgets.QTreeWidget()
+        self._tree.setObjectName("workflowTree")
         self._tree.setHeaderLabels(["Workspace"])
-        self._tree.setIndentation(14)
+        apply_browser_tree_style(self._tree, icon_size=16, indentation=18, show_header=True)
         self._tree.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
         self._tree.itemClicked.connect(self._on_item_clicked)
         self._tree.customContextMenuRequested.connect(self._on_context_menu_requested)
@@ -118,14 +128,19 @@ class WorkflowTreePanel(QtWidgets.QWidget):
 
     def _build_case_item(self, case: Case, ws) -> QtWidgets.QTreeWidgetItem:
         is_active = ws.selected_case_id == case.id
-        label = f"📁 {case.name}" if not is_active else f"📂 {case.name}"
-        item = QtWidgets.QTreeWidgetItem([label])
+        icon_name = "workspace-subcase" if case.parent_case_id else "workspace-case"
+        item = QtWidgets.QTreeWidgetItem([case.name])
+        item.setIcon(
+            0,
+            get_icon(icon_name, BLUE_DARK if is_active else INK_MUTED, size=16),
+        )
         item.setData(0, ROLE_NODE_KIND, "case")
         item.setData(0, ROLE_ID, case.id)
         if is_active:
             font = item.font(0)
             font.setBold(True)
             item.setFont(0, font)
+            item.setBackground(0, QtGui.QBrush(QtGui.QColor(BLUE_SOFT)))
         item.setToolTip(0, f"Case: {case.name}" + (" (active)" if is_active else ""))
 
         # Build lookup tables
@@ -140,11 +155,12 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         # --- Default pose (reference, read-only) ---
         default_pose = next((p for p in case.poses if p.is_default), None)
         if default_pose is not None:
-            dp_item = QtWidgets.QTreeWidgetItem([f"⊙ {default_pose.name}  [reference]"])
+            dp_item = QtWidgets.QTreeWidgetItem([f"{default_pose.name}  [reference]"])
+            dp_item.setIcon(0, get_icon("workspace-pose", INK_SUBTLE, size=16))
             dp_item.setData(0, ROLE_NODE_KIND, "default_pose")
             dp_item.setData(0, ROLE_ID, default_pose.id)
-            dp_item.setForeground(0, QtGui.QBrush(QtGui.QColor("#777777")))
-            dp_item.setToolTip(0, "Reference pose — shows model in its reference configuration (read-only)")
+            dp_item.setForeground(0, QtGui.QBrush(QtGui.QColor(INK_SUBTLE)))
+            dp_item.setToolTip(0, "Reference pose - shows model in its reference configuration (read-only)")
             # Analyses under default pose
             for analysis in analyses_by_pose.get(default_pose.id, []):
                 dp_item.addChild(self._build_analysis_item(analysis, runs_by_analysis, ws))
@@ -153,19 +169,24 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         # --- Non-default poses ---
         non_default_poses = [p for p in case.poses if not p.is_default]
         if non_default_poses:
-            poses_group = _group_item(f"Poses  ({len(non_default_poses)})")
+            poses_group = _group_item(f"Poses  ({len(non_default_poses)})", "workspace-poses")
             for pose in non_default_poses:
                 pose_analyses = analyses_by_pose.get(pose.id, [])
                 is_selected_pose = ws.selected_pose_id == pose.id
                 suffix = f"  ({len(pose_analyses)} analysis)" if len(pose_analyses) == 1 else (f"  ({len(pose_analyses)} analyses)" if pose_analyses else "")
-                pose_label = f"◈ {pose.name}{suffix}"
+                pose_label = f"{pose.name}{suffix}"
                 pose_item = QtWidgets.QTreeWidgetItem([pose_label])
+                pose_item.setIcon(
+                    0,
+                    get_icon("workspace-pose", BLUE_DARK if is_selected_pose else INK_MUTED, size=16),
+                )
                 pose_item.setData(0, ROLE_NODE_KIND, "pose")
                 pose_item.setData(0, ROLE_ID, pose.id)
                 if is_selected_pose:
                     font = pose_item.font(0)
                     font.setBold(True)
                     pose_item.setFont(0, font)
+                    pose_item.setBackground(0, QtGui.QBrush(QtGui.QColor(BLUE_SOFT)))
                 pose_item.setToolTip(0, f"Pose: {pose.name}")
                 for analysis in pose_analyses:
                     pose_item.addChild(self._build_analysis_item(analysis, runs_by_analysis, ws))
@@ -181,7 +202,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             if a.pose_id is None or a.pose_id not in known_pose_ids
         ]
         if orphan_analyses:
-            orphan_group = _group_item(f"Analyses  ({len(orphan_analyses)})")
+            orphan_group = _group_item(f"Analyses  ({len(orphan_analyses)})", "workspace-analyses")
             for analysis in orphan_analyses:
                 orphan_group.addChild(self._build_analysis_item(analysis, runs_by_analysis, ws))
             orphan_group.setExpanded(True)
@@ -190,7 +211,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         # --- Child (sub)cases ---
         child_cases = [c for c in ws.cases.values() if c.parent_case_id == case.id]
         if child_cases:
-            sub_group = _group_item(f"Subcases  ({len(child_cases)})")
+            sub_group = _group_item(f"Subcases  ({len(child_cases)})", "workspace-subcase")
             for child_case in child_cases:
                 sub_group.addChild(self._build_case_item(child_case, ws))
             sub_group.setExpanded(True)
@@ -205,26 +226,32 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         is_selected = ws.selected_analysis_id == analysis.id
         label = f"[{type_badge}] {analysis.name}{run_summary}"
         a_item = QtWidgets.QTreeWidgetItem([label])
+        a_item.setIcon(
+            0,
+            get_icon("workspace-analysis", BLUE_DARK if is_selected else INK_MUTED, size=16),
+        )
         a_item.setData(0, ROLE_NODE_KIND, "analysis")
         a_item.setData(0, ROLE_ID, analysis.id)
         if is_selected:
             font = a_item.font(0)
             font.setBold(True)
             a_item.setFont(0, font)
+            a_item.setBackground(0, QtGui.QBrush(QtGui.QColor(BLUE_SOFT)))
         a_item.setToolTip(0, f"{analysis.analysis_type.capitalize()} analysis: {analysis.name}")
 
         for run in runs:
-            date_part = run.created_at[:10] if run.created_at else "—"
+            date_part = run.created_at[:10] if run.created_at else "-"
             status = run.status
             status_color = _RUN_STATUS_COLORS.get(status, "#888888")
-            label = f"  ▸ {date_part}  [{status}]"
+            label = f"{date_part}  [{status}]"
             if run.note:
                 label += f"  {run.note}"
             r_item = QtWidgets.QTreeWidgetItem([label])
+            r_item.setIcon(0, get_icon("run-simulation", status_color, size=16))
             r_item.setData(0, ROLE_NODE_KIND, "run")
             r_item.setData(0, ROLE_ID, run.id)
             r_item.setForeground(0, QtGui.QBrush(QtGui.QColor(status_color)))
-            r_item.setToolTip(0, f"Run {date_part} — {status}" + (f": {run.error_message}" if run.error_message else ""))
+            r_item.setToolTip(0, f"Run {date_part} - {status}" + (f": {run.error_message}" if run.error_message else ""))
             a_item.addChild(r_item)
 
         if runs:

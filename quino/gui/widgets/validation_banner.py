@@ -3,9 +3,9 @@ from __future__ import annotations
 from PySide6 import QtWidgets
 
 _COLORS = {
-    "error": "#aa2222",
-    "warning": "#c75b12",
-    "ok": "#228822",
+    "error": ("#fdecea", "#b43a2f", "#e4afa9"),
+    "warning": ("#fff1e2", "#c76f1f", "#e5bd92"),
+    "ok": ("#e7f4ee", "#25815f", "#b8d9cb"),
 }
 
 
@@ -20,9 +20,10 @@ class ValidationBanner(QtWidgets.QLabel):
             self.clear()
             self.setVisible(False)
             return
-        color = _COLORS.get(severity, "#666666")
+        background, color, border = _COLORS.get(severity, ("#eef4f8", "#66727e", "#cbd6e2"))
         self.setStyleSheet(
-            f"QLabel {{ background: {color}; color: white; padding: 4px; border-radius: 3px; }}"
+            f"QLabel {{ background: {background}; color: {color}; padding: 6px 8px;"
+            f" border: 1px solid {border}; border-radius: 4px; font-weight: 600; }}"
         )
         self.setText(message)
         self.setVisible(True)
