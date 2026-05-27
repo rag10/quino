@@ -1,30 +1,95 @@
 <RCC>
   <qresource prefix="/icons">
-    <file>file-new.svg</file>
-    <file>folder-open.svg</file>
-    <file>content-save.svg</file>
-    <file>undo.svg</file>
-    <file>redo.svg</file>
-    <file>check-circle.svg</file>
-    <file>play.svg</file>
-    <file>pause.svg</file>
-    <file>stop.svg</file>
-    <file>four-bar.svg</file>
-    <file>slider-crank.svg</file>
-    <file>fit-view.svg</file>
-    <file>select.svg</file>
+    <file>actuator.svg</file>
+    <file>add.svg</file>
+    <file>angle-constraint.svg</file>
+    <file>arc-center.svg</file>
     <file>bar.svg</file>
+    <file>block-instance.svg</file>
     <file>body.svg</file>
+    <file>check-circle.svg</file>
+    <file>collinear.svg</file>
+    <file>concentric.svg</file>
+    <file>constraint-coincident.svg</file>
+    <file>constraint-distance.svg</file>
+    <file>constraint-fix.svg</file>
+    <file>constraint-horizontal.svg</file>
+    <file>constraint-vertical.svg</file>
+    <file>content-save.svg</file>
+    <file>content-save-as.svg</file>
+    <file>delete.svg</file>
+    <file>equal-length.svg</file>
+    <file>file-new.svg</file>
+    <file>fit-view.svg</file>
+    <file>folder-open.svg</file>
+    <file>four-bar.svg</file>
+    <file>gravity.svg</file>
+    <file>grid.svg</file>
+    <file>ground.svg</file>
+    <file>load-gravity.svg</file>
+    <file>marker.svg</file>
     <file>marker-plus.svg</file>
+    <file>midpoint.svg</file>
+    <file>new-graph.svg</file>
+    <file>on-circle.svg</file>
+    <file>origin.svg</file>
+    <file>parallel.svg</file>
+    <file>pause.svg</file>
+    <file>perpendicular.svg</file>
+    <file>play.svg</file>
+    <file>point-mass.svg</file>
+    <file>preferences.svg</file>
+    <file>redo.svg</file>
+    <file>refresh.svg</file>
+    <file>remove.svg</file>
     <file>revolute.svg</file>
     <file>rigid.svg</file>
-    <file>slider.svg</file>
-    <file>ground.svg</file>
-    <file>slider-connect.svg</file>
+    <file>rot-actuator.svg</file>
+    <file>rot-spring.svg</file>
     <file>rotate-driver.svg</file>
+    <file>run-simulation.svg</file>
+    <file>section-bodies.svg</file>
+    <file>section-drivers.svg</file>
+    <file>section-joints.svg</file>
+    <file>section-loads.svg</file>
+    <file>section-reactions.svg</file>
+    <file>section-sensors.svg</file>
+    <file>section-sketch.svg</file>
+    <file>section-sliders.svg</file>
+    <file>section-springs.svg</file>
+    <file>select.svg</file>
+    <file>sensor-angle-h.svg</file>
+    <file>sensor-angle-v.svg</file>
+    <file>sensor-angle-vec.svg</file>
+    <file>sensor-distance.svg</file>
+    <file>sensor-point.svg</file>
+    <file>sketch-arc.svg</file>
+    <file>sketch-circle.svg</file>
+    <file>sketch-infinite-line.svg</file>
+    <file>sketch-line.svg</file>
+    <file>sketch-point.svg</file>
+    <file>sketch-rectangle.svg</file>
+    <file>sketch-solve.svg</file>
+    <file>sketch-visible.svg</file>
+    <file>slider.svg</file>
+    <file>slider-connect.svg</file>
+    <file>slider-crank.svg</file>
+    <file>spring.svg</file>
+    <file>stop.svg</file>
+    <file>symmetric.svg</file>
+    <file>tangent.svg</file>
+    <file>torque.svg</file>
+    <file>trajectories.svg</file>
     <file>translate-driver.svg</file>
-    <file>delete.svg</file>
-    <file>add.svg</file>
-    <file>remove.svg</file>
+    <file>undo.svg</file>
+    <file>workspace-analyses.svg</file>
+    <file>workspace-analysis.svg</file>
+    <file>workspace-baseline.svg</file>
+    <file>workspace-blocks.svg</file>
+    <file>workspace-case.svg</file>
+    <file>workspace-diffs.svg</file>
+    <file>workspace-pose.svg</file>
+    <file>workspace-poses.svg</file>
+    <file>workspace-subcase.svg</file>
   </qresource>
 </RCC>

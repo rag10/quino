@@ -1,6 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
-  <!-- Group folder of analyses. -->
-  <path d="M5 10 L5 25 Q5 27 7 27 L25 27 Q27 27 27 25 L27 13 Q27 11 25 11 L15 11 L13 8 L7 8 Q5 8 5 10 Z"
-        stroke="#3d3d3d" stroke-width="1.5" fill="#e3eaf3"/>
-  <polyline points="10,21 13,18 17,20 22,15" stroke="#2f6f9f" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <g stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke">
+  <path stroke="#d58228" d="M7 23 L12 14 L17 19 L24 8" fill="none"/>
+  <line stroke="#326399" x1="7" y1="25" x2="25" y2="25"/>
+  <line stroke="#326399" x1="7" y1="7" x2="7" y2="25"/>
+  <line stroke="#326399" x1="12" y1="10" x2="18" y2="10"/>
+  <line stroke="#326399" x1="12" y1="13" x2="21" y2="13"/>
+  </g>
 </svg>

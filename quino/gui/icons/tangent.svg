@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-  <!-- circle -->
-  <circle cx="10" cy="14" r="6" fill="none" stroke="currentColor" stroke-width="2"/>
-  <!-- tangent line touching at top of circle -->
-  <line x1="2" y1="8" x2="22" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-  <!-- small square at tangent point -->
-  <rect x="8.5" y="6.5" width="3" height="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+  <g stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke">
+  <circle stroke="#66727e" cx="12" cy="17" r="6" fill="none"/>
+  <line stroke="#66727e" x1="17" y1="12" x2="25" y2="4"/>
+  <circle stroke="#66727e" cx="17" cy="12" r="1.9" fill="#f4f6f7"/>
+  <circle cx="17" cy="12" r="1.1" fill="#66727e" stroke="none"/>
+  </g>
 </svg>

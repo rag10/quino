@@ -1,5 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
-  <line x1="16" y1="6" x2="16" y2="26" stroke="#1a6ec2" stroke-width="2" stroke-linecap="round"/>
-  <polygon points="11,10 16,4 21,10" fill="#1a6ec2"/>
-  <polygon points="11,22 16,28 21,22" fill="#1a6ec2"/>
+  <g stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke">
+  <line stroke="#c76f1f" x1="16" y1="26" x2="16" y2="9"/>
+  <polygon stroke="#c76f1f" points="12,12 16,5 20,12" fill="#c76f1f"/>
+  <line stroke="#c76f1f" x1="7" y1="22" x2="25" y2="22"/>
+  <line stroke="#c76f1f" x1="10" y1="22" x2="7.5" y2="26"/>
+  <line stroke="#c76f1f" x1="15" y1="22" x2="12.5" y2="26"/>
+  <line stroke="#c76f1f" x1="20" y1="22" x2="17.5" y2="26"/>
+  <line stroke="#c76f1f" x1="24" y1="22" x2="21.5" y2="26"/>
+  <line stroke="#c76f1f" x1="16" y1="8" x2="16" y2="22"/>
+  <circle stroke="#c76f1f" cx="16" cy="8" r="3" fill="#fff1e2"/>
+  <circle cx="16" cy="8" r="1.1" fill="#c76f1f" stroke="none"/>
+  </g>
 </svg>

@@ -1,13 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
-  <!-- slider rail (two horizontal lines) -->
-  <line x1="4" y1="11" x2="28" y2="11" stroke="#457b9d" stroke-width="1.5"/>
-  <line x1="4" y1="21" x2="28" y2="21" stroke="#457b9d" stroke-width="1.5"/>
-  <!-- rail end caps -->
-  <line x1="4" y1="9" x2="4" y2="23" stroke="#457b9d" stroke-width="2" stroke-linecap="round"/>
-  <line x1="28" y1="9" x2="28" y2="23" stroke="#457b9d" stroke-width="2" stroke-linecap="round"/>
-  <!-- slider block -->
-  <rect x="10" y="12" width="12" height="8" rx="2" stroke="#7f5539" stroke-width="2.5" fill="#faf8f2"/>
-  <!-- prescribed-motion bold arrow pointing right -->
-  <line x1="6" y1="16" x2="26" y2="16" stroke="#7f5539" stroke-width="2.5" stroke-linecap="round"/>
-  <polyline points="22,12 27,16 22,20" stroke="#7f5539" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <g stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke">
+  <rect stroke="#c76f1f" x="5" y="12" width="22" height="8" rx="1.6" fill="#f6d3ac"/>
+  <line stroke="#c76f1f" x1="8" y1="15" x2="24" y2="15" stroke-width="1.1"/>
+  <line stroke="#c76f1f" x1="8" y1="18" x2="24" y2="18" stroke-width="1.1"/>
+  <rect stroke="#c76f1f" x="12" y="10" width="8" height="12" rx="1.4" fill="#fff9f1"/>
+  <circle stroke="#c76f1f" cx="16" cy="16" r="2.5" fill="#fff1e2"/>
+  <circle cx="16" cy="16" r="1.1" fill="#c76f1f" stroke="none"/>
+  <line stroke="#2d74a7" x1="7" y1="8" x2="23" y2="8"/>
+  <polygon stroke="#2d74a7" points="7,8 12,5 12,11" fill="#c76f1f"/>
+  <polygon stroke="#2d74a7" points="23,5 28,8 23,11" fill="#c76f1f"/>
+  </g>
 </svg>

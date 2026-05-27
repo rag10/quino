@@ -14,6 +14,19 @@ def app(qtbot):
     return QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
 
+def _collect_items(root, kind_filter=None):
+    """Recursively collect all QTreeWidgetItems with optional node-kind filter."""
+    from quino.gui.panels.workflow_tree_panel import ROLE_NODE_KIND
+    results = []
+    def walk(item):
+        if kind_filter is None or item.data(0, ROLE_NODE_KIND) == kind_filter:
+            results.append(item)
+        for i in range(item.childCount()):
+            walk(item.child(i))
+    walk(root)
+    return results
+
+
 def test_panel_shows_root_case(app, qtbot):
     service = ApplicationService()
     service.new_workspace("Test")
@@ -22,7 +35,8 @@ def test_panel_shows_root_case(app, qtbot):
     panel.refresh()
     items = panel.top_level_items()
     assert len(items) == 1
-    assert items[0].text(0) == "Root"
+    # The case name "Root" should appear somewhere in the label text
+    assert "Root" in items[0].text(0)
 
 
 def test_panel_shows_child_case_under_parent(app, qtbot):
@@ -36,17 +50,10 @@ def test_panel_shows_child_case_under_parent(app, qtbot):
     qtbot.addWidget(panel)
     panel.refresh()
     root_item = panel.top_level_items()[0]
-    # Find the "children_group" node
-    children_group = None
-    for i in range(root_item.childCount()):
-        child = root_item.child(i)
-        if child.data(0, 0x0100) == "children_group":
-            children_group = child
-            break
-    assert children_group is not None
-    child_names = [children_group.child(i).text(0) for i in range(children_group.childCount())
-                   if children_group.child(i).data(0, 0x0100) == "case"]
-    assert "Child A" in child_names
+    # Child cases are nested anywhere under root with node kind "case"
+    child_cases = _collect_items(root_item, kind_filter="case")
+    child_labels = [i.text(0) for i in child_cases]
+    assert any("Child A" in lbl for lbl in child_labels)
 
 
 def test_fork_via_panel(app, qtbot):

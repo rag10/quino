@@ -29,7 +29,8 @@ class StubModeController(AnalysisModeController):
         self.main_window.canvas.set_mode_badge_suffix("")
 
     def on_run_clicked(self) -> None:
-        analysis_id = self.main_window.app_service.project.workspace.selected_analysis_id
+        ws = self.main_window.app_service._workspace
+        analysis_id = ws.selected_analysis_id if ws is not None else None
         if analysis_id is not None:
             self.main_window._on_run_analysis_requested(analysis_id)
 

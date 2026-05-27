@@ -16,7 +16,7 @@ class MechanismDofResult:
 
 
 def compute_mechanism_dof(
-    project | None,
+    project,
     pose_constraint_count: int = 0,
 ) -> MechanismDofResult:
     """Compute a planar Gruebler-like DOF count for the mechanism.

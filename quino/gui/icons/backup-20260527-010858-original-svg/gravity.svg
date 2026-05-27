@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+  <!-- apple body -->
+  <path d="M 16 6 Q 12 6 9 9 Q 6 12 6 16 Q 6 21 11 25 Q 13 27 16 27 Q 19 27 21 25 Q 26 21 26 16 Q 26 12 23 9 Q 20 6 16 6 Z" stroke="#3d3d3d" stroke-width="2" fill="#e74c3c"/>
+  <!-- stem -->
+  <line x1="16" y1="5" x2="16" y2="2" stroke="#3d3d3d" stroke-width="2" stroke-linecap="round"/>
+  <!-- leaf -->
+  <path d="M 18 4 Q 21 3 22 5" stroke="#27ae60" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

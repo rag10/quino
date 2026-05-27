@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+  <!-- shaft -->
+  <line x1="6" y1="16" x2="26" y2="16" stroke="#3d3d3d" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- left pin joint -->
+  <circle cx="6" cy="16" r="4" stroke="#3d3d3d" stroke-width="2" fill="#faf8f2"/>
+  <circle cx="6" cy="16" r="1.5" fill="#3d3d3d"/>
+  <!-- right pin joint -->
+  <circle cx="26" cy="16" r="4" stroke="#3d3d3d" stroke-width="2" fill="#faf8f2"/>
+  <circle cx="26" cy="16" r="1.5" fill="#3d3d3d"/>
+</svg>

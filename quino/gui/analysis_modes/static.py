@@ -267,24 +267,24 @@ class StaticModeController(AnalysisModeController):
         """When no run exists yet, show the analysis's bound pose on the canvas."""
         if self._current_analysis is None:
             return
-        project = self.main_window.app_service.project
-        if project is None or project.workspace is None:
-            return
-        wp = next(
-            (p for p in project.workspace.poses if p.id == self._current_analysis.workspace_pose_id),
-            None,
-        )
-        if wp is None or wp.project_pose_id is None:
+        ws = self.main_window.app_service._workspace
+        if ws is None:
             self.main_window.canvas.set_kinematic_pose(None)
             return
-        backing = next(
-            (p for p in project.poses if p.id == wp.project_pose_id), None,
+        pose_id = self._current_analysis.pose_id
+        if pose_id is None:
+            self.main_window.canvas.set_kinematic_pose(None)
+            return
+        pose = next(
+            (p for case in ws.cases.values() for p in case.poses if p.id == pose_id),
+            None,
         )
-        if backing is None:
+        if pose is None or not pose.body_poses:
+            self.main_window.canvas.set_kinematic_pose(None)
             return
         blob = {
-            body_id: {"x": body_pose.x, "y": body_pose.y, "theta": body_pose.angle}
-            for body_id, body_pose in backing.body_poses.items()
+            body_id: {"x": bp.x, "y": bp.y, "theta": bp.angle}
+            for body_id, bp in pose.body_poses.items()
         }
         self.main_window.canvas.set_kinematic_pose(blob)
 

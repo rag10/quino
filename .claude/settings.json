@@ -1,6 +1,7 @@
 {
   "permissions": {
     "allow": [
+      "Bash()",
       "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\application\\\\service.py' -Pattern 'def create_sensor' | Select-Object -ExpandProperty LineNumber\")",
       "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\gui\\\\canvas.py' -Pattern '_create_sensor_from_markers|app_service.create_sensor' | Select-Object -ExpandProperty LineNumber\")",
       "Bash(PowerShell -Command \"Select-String -Path 'c:\\\\Users\\\\ruben\\\\Proyectos\\\\QUINO\\\\src\\\\quino\\\\gui\\\\main_window.py' -Pattern 'def refresh_all|def _populate_tree|modelChanged.connect' | Select-Object -ExpandProperty LineNumber\")",

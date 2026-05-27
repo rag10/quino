@@ -1,14 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
-  <!-- pin joint sitting on ground -->
-  <circle cx="16" cy="13" r="5" stroke="#3d3d3d" stroke-width="2" fill="#faf8f2"/>
-  <circle cx="16" cy="13" r="2" fill="#3d3d3d"/>
-  <!-- triangle support -->
-  <polygon points="16,18 10,24 22,24" stroke="#3d3d3d" stroke-width="2" stroke-linejoin="round" fill="#ddd9cc"/>
-  <!-- ground line -->
-  <line x1="6" y1="27" x2="26" y2="27" stroke="#3d3d3d" stroke-width="2" stroke-linecap="round"/>
-  <!-- hatching -->
-  <line x1="8" y1="27" x2="5" y2="30" stroke="#3d3d3d" stroke-width="1.5" stroke-linecap="round"/>
-  <line x1="13" y1="27" x2="10" y2="30" stroke="#3d3d3d" stroke-width="1.5" stroke-linecap="round"/>
-  <line x1="18" y1="27" x2="15" y2="30" stroke="#3d3d3d" stroke-width="1.5" stroke-linecap="round"/>
-  <line x1="23" y1="27" x2="20" y2="30" stroke="#3d3d3d" stroke-width="1.5" stroke-linecap="round"/>
+  <g stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke">
+  <line stroke="#2d74a7" x1="7" y1="22" x2="25" y2="22"/>
+  <line stroke="#2d74a7" x1="10" y1="22" x2="7.5" y2="26"/>
+  <line stroke="#2d74a7" x1="15" y1="22" x2="12.5" y2="26"/>
+  <line stroke="#2d74a7" x1="20" y1="22" x2="17.5" y2="26"/>
+  <line stroke="#2d74a7" x1="24" y1="22" x2="21.5" y2="26"/>
+  <line stroke="#2d74a7" x1="16" y1="8" x2="16" y2="22"/>
+  <circle stroke="#2d74a7" cx="16" cy="8" r="3" fill="#e8f3fa"/>
+  <circle cx="16" cy="8" r="1.1" fill="#2d74a7" stroke="none"/>
+  </g>
 </svg>

@@ -1,5 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#4a5568" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-  <line x1="5" y1="18" x2="19" y2="6"/>
-  <circle cx="5" cy="18" r="2" fill="#4a5568"/>
-  <circle cx="19" cy="6" r="2" fill="#4a5568"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+  <g stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke">
+  <line stroke="#66727e" x1="7" y1="23" x2="25" y2="9"/>
+  <circle stroke="#66727e" cx="7" cy="23" r="2" fill="#f4f6f7"/>
+  <circle cx="7" cy="23" r="1.1" fill="#66727e" stroke="none"/>
+  <circle stroke="#66727e" cx="25" cy="9" r="2" fill="#f4f6f7"/>
+  <circle cx="25" cy="9" r="1.1" fill="#66727e" stroke="none"/>
+  </g>
 </svg>

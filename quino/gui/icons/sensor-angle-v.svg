@@ -1,16 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
-  <!-- pivot marker at bottom -->
-  <circle cx="16" cy="25" r="3.5" stroke="#3d3d3d" stroke-width="2" fill="#faf8f2"/>
-  <circle cx="16" cy="25" r="1.5" fill="#3d3d3d"/>
-  <!-- vertical reference line -->
-  <line x1="16" y1="25" x2="16" y2="5" stroke="#3d3d3d" stroke-width="1.5" stroke-dasharray="3 2" stroke-linecap="round"/>
-  <!-- angled arm -->
-  <line x1="16" y1="25" x2="27" y2="10" stroke="#3d3d3d" stroke-width="2" stroke-linecap="round"/>
-  <!-- end marker -->
-  <circle cx="27" cy="10" r="3.5" stroke="#3d3d3d" stroke-width="2" fill="#faf8f2"/>
-  <circle cx="27" cy="10" r="1.5" fill="#3d3d3d"/>
-  <!-- angle arc -->
-  <path d="M 16 14 A 11 11 0 0 1 22 18.5" stroke="#1a6b4a" stroke-width="2" stroke-linecap="round" fill="none"/>
-  <!-- V label -->
-  <text x="5" y="13" font-size="8" font-family="monospace" fill="#1a6b4a" font-weight="bold">V</text>
+  <g stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke">
+  <circle stroke="#25815f" cx="8" cy="17" r="3" fill="#e7f4ee"/>
+  <circle cx="8" cy="17" r="1.1" fill="#25815f" stroke="none"/>
+  <circle stroke="#25815f" cx="24" cy="17" r="3" fill="#e7f4ee"/>
+  <circle cx="24" cy="17" r="1.1" fill="#25815f" stroke="none"/>
+  <line stroke="#25815f" x1="11" y1="17" x2="21" y2="17"/>
+  <line stroke="#d58228" x1="8" y1="25" x2="8" y2="8"/>
+  <path stroke="#d58228" d="M8 21 A8 8 0 0 0 15.5 17" fill="none"/>
+  <polygon stroke="#d58228" points="15.5,14 20.5,17 15.5,20" fill="#25815f"/>
+  </g>
 </svg>

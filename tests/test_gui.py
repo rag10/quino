@@ -2565,11 +2565,12 @@ def test_workflow_tree_emits_selection_changed_on_single_click(qtbot) -> None:
     received = []
     panel.case_selected.connect(lambda oid: received.append(("case", oid)))
 
+    from quino.gui.panels.workflow_tree_panel import ROLE_ID
     items = panel.top_level_items()
-    # Find the MyCase item
+    # Find the MyCase item by its stored ID
     target = None
     for item in items:
-        if item.text(0) == "MyCase":
+        if item.data(0, ROLE_ID) == case.id:
             target = item
             break
     assert target is not None
@@ -2590,8 +2591,9 @@ def test_workflow_single_click_on_case_enters_model_mode(qtbot):
     window = MainWindow(app)
     qtbot.addWidget(window)
     window.workflow_panel.refresh()
+    from quino.gui.panels.workflow_tree_panel import ROLE_ID
     items = window.workflow_panel.top_level_items()
-    target = next((i for i in items if i.text(0) == "C1"), None)
+    target = next((i for i in items if i.data(0, ROLE_ID) == case.id), None)
     assert target is not None
     # Simulate a click via the handler (setCurrentItem doesn't fire itemClicked)
     window.workflow_panel._on_item_clicked(target, 0)
@@ -2651,8 +2653,9 @@ def test_workflow_badge_shows_breadcrumb(qtbot):
             collect_names(item.child(i))
     for item in items:
         collect_names(item)
-    assert "Caso 3" in all_names
-    assert "Caso 3D" in all_names
+    # Labels now include emoji prefixes — check name appears anywhere in the label text
+    assert any("Caso 3" in n for n in all_names)
+    assert any("Caso 3D" in n for n in all_names)
 
 
 def test_block_editor_widget_no_inspector(qtbot):

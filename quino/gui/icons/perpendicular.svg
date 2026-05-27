@@ -1,5 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-  <line x1="12" y1="3"  x2="12" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-  <line x1="4"  y1="21" x2="20" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-  <rect x="12" y="16" width="5" height="5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+  <g stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke">
+  <line stroke="#66727e" x1="10" y1="22" x2="22" y2="10"/>
+  <line stroke="#66727e" x1="10" y1="22" x2="22" y2="22"/>
+  <polyline stroke="#d58228" points="14,22 14,18 18,18" fill="none"/>
+  </g>
 </svg>

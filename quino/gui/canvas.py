@@ -767,29 +767,14 @@ class MechanismCanvas(QtWidgets.QWidget):
         whose properties were overridden in the active case, and a green
         accent on entities added by the case.
         """
-        project = self.app_service.project
-        if project is None or project.workspace is None:
+        ws = self.app_service._workspace
+        if ws is None or ws.selected_case_id is None:
             return (set(), set())
-        ws = project.workspace
-        if ws.active_case_id is None:
-            return (set(), set())
-        case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
+        case = ws.cases.get(ws.selected_case_id)
         if case is None:
             return (set(), set())
-        overridden: set[str] = set()
-        for path in case.invariant_values:
-            parts = path.split("/")
-            if len(parts) >= 2:
-                overridden.add(parts[1])
-        for entity_id, _ in case.reference_overrides.items():
-            overridden.add(entity_id)
-        added: set[str] = set()
-        for domain, entities in case.added_entities.items():
-            for ent in entities:
-                eid = ent.get("id") or ent.get("instance_id")
-                if eid:
-                    added.add(eid)
-        return (overridden, added)
+        # Case-as-model (schema 0.3): overlay diffs not tracked on Case directly.
+        return (set(), set())
 
     def set_editing_enabled(self, enabled: bool) -> None:
         self._editing_enabled = enabled
@@ -1193,17 +1178,19 @@ class MechanismCanvas(QtWidgets.QWidget):
         - ``Pose: <name>`` when a workspace pose is selected (i.e. pose mode).
         Badges stack vertically with a small gap so they don't overlap.
         """
-        project = self.app_service.project
-        if project is None or project.workspace is None:
+        ws = self.app_service._workspace
+        if ws is None:
             return
-        ws = project.workspace
         badges: list[tuple[str, str]] = []  # (text, color)
-        if ws.active_case_id is not None:
-            case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
+        if ws.selected_case_id is not None:
+            case = ws.cases.get(ws.selected_case_id)
             if case is not None:
                 badges.append((f"Case: {case.name}", "#2255aa"))
         if self._interaction_mode == "pose" and ws.selected_pose_id:
-            wp = next((p for p in ws.poses if p.id == ws.selected_pose_id), None)
+            wp = next(
+                (p for case in ws.cases.values() for p in case.poses if p.id == ws.selected_pose_id),
+                None,
+            )
             if wp is not None:
                 tag = " [default]" if wp.is_default else ""
                 badges.append((f"Pose: {wp.name}{tag}", "#c75b12"))

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 
-from quino.domain.model import Pose
+from quino.domain.workspace import Pose
 from quino.pose.geometry import marker_world_position
 
 

@@ -1,11 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
-  <!-- irregular polygon body with fill -->
-  <polygon points="6,25 7,10 16,5 26,9 26,23 16,27" stroke="#3d3d3d" stroke-width="2" stroke-linejoin="round" fill="#ddd9cc"/>
-  <!-- pin joints at vertices -->
-  <circle cx="7" cy="10" r="2.5" stroke="#3d3d3d" stroke-width="1.5" fill="#faf8f2"/>
-  <circle cx="7" cy="10" r="1" fill="#3d3d3d"/>
-  <circle cx="26" cy="9" r="2.5" stroke="#3d3d3d" stroke-width="1.5" fill="#faf8f2"/>
-  <circle cx="26" cy="9" r="1" fill="#3d3d3d"/>
-  <circle cx="16" cy="27" r="2.5" stroke="#3d3d3d" stroke-width="1.5" fill="#faf8f2"/>
-  <circle cx="16" cy="27" r="1" fill="#3d3d3d"/>
+  <g stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke">
+  <polygon stroke="#2d74a7" points="7,20 9,10 17,7 25,12 24,22 15,25" fill="#e8f3fa"/>
+  <polygon stroke="#2d74a7" points="9,10 17,7 25,12 16,15" fill="#f7fbfe"/>
+  <polygon stroke="#2d74a7" points="16,15 25,12 24,22 15,25" fill="#cfe4f3"/>
+  <line stroke="#d58228" x1="16" y1="15" x2="15" y2="25" stroke-width="1.1"/>
+  <circle stroke="#2d74a7" cx="9" cy="10" r="2.3" fill="#e8f3fa"/>
+  <circle cx="9" cy="10" r="1.1" fill="#2d74a7" stroke="none"/>
+  <circle stroke="#2d74a7" cx="25" cy="12" r="2.3" fill="#e8f3fa"/>
+  <circle cx="25" cy="12" r="1.1" fill="#2d74a7" stroke="none"/>
+  <circle stroke="#2d74a7" cx="15" cy="25" r="2.3" fill="#e8f3fa"/>
+  <circle cx="15" cy="25" r="1.1" fill="#2d74a7" stroke="none"/>
+  </g>
 </svg>

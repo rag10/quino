@@ -59,19 +59,7 @@ from quino.gui.widgets.divergences_dock import DivergencesDock
 
 def _changed_entity_ids_for_case(case) -> set[str]:
     """Return entity ids that have overrides, additions, or removals in the case."""
-    ids = set()
-    for path in case.invariant_values:
-        parts = path.split("/")
-        if len(parts) >= 2:
-            ids.add(parts[1])
-    for entity_id in case.removed_entity_ids:
-        ids.add(entity_id)
-    for domain, entities in case.added_entities.items():
-        for ent in entities:
-            eid = ent.get("id")
-            if eid:
-                ids.add(eid)
-    return ids
+    return set()
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -1058,9 +1046,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._center_stack.setCurrentIndex(0)
             is_exudyn = self.app_service.simulation_runner.backend_name() == "exudyn"
             self.action_export_script.setEnabled(is_exudyn)
-            workspace = self.app_service.project.workspace if self.app_service.project else None
-            if workspace is not None and workspace.selected_analysis_id is not None:
-                analysis = next((item for item in workspace.analyses if item.id == workspace.selected_analysis_id), None)
+            ws = self.app_service._workspace
+            case = self.app_service.current_case()
+            if ws is not None and case is not None and ws.selected_analysis_id is not None:
+                analysis = next((item for item in case.analyses if item.id == ws.selected_analysis_id), None)
                 if analysis is not None:
                     self._set_app_mode_analysis(analysis)
             self.refresh_all()
@@ -1148,10 +1137,11 @@ class MainWindow(QtWidgets.QMainWindow):
         project = self.app_service.project
         if project is None:
             return
-        ws = project.workspace
-        if ws is not None:
+        ws = self.app_service._workspace
+        case = self.app_service.current_case()
+        if ws is not None and case is not None:
             from quino.services.workspace_invalidation import invalidate_on_model_change
-            invalidate_on_model_change(project)
+            invalidate_on_model_change(ws, case.id)
         self._mark_project_dirty()
         self._populate_tree(self.app_service.display_project)
         self._populate_inspector()
@@ -1445,50 +1435,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._apply_current_frame()
 
     def _on_workflow_selection_changed(self, kind: str, obj_id: str) -> None:
-        ws = self.app_service.project.workspace if self.app_service.project else None
-        if ws is None:
-            return
-        if kind == "baseline":
-            self.app_service.set_working_context(baseline_id=obj_id)
-            self._set_app_mode("model")
-        elif kind == "case":
-            case = next((c for c in ws.cases if c.id == obj_id), None)
-            if case is None:
-                return
-            self.app_service.set_working_context(case_id=obj_id, baseline_id=case.baseline_id)
-            self._set_app_mode("model")
-        elif kind == "pose":
-            pose = next((p for p in ws.poses if p.id == obj_id), None)
-            if pose is None:
-                return
-            if pose.case_id is not None:
-                case = next((c for c in ws.cases if c.id == pose.case_id), None)
-                if case is not None:
-                    self.app_service.set_working_context(case_id=case.id, baseline_id=case.baseline_id)
-            elif pose.baseline_id is not None:
-                self.app_service.set_working_context(baseline_id=pose.baseline_id)
-            self.app_service.set_selected_pose(obj_id)
-            self.canvas.set_pose_readonly(pose.is_default)
-            already_in_pose_mode = self._app_mode == "pose"
-            self._set_app_mode("pose")
-            if already_in_pose_mode:
-                self._load_pose_constraints_from_current_pose()
-                if hasattr(self, "pose_constraints_strip"):
-                    self.pose_constraints_strip.refresh()
-                self._apply_current_frame()
-        elif kind == "analysis":
-            analysis = next((a for a in ws.analyses if a.id == obj_id), None)
-            if analysis is None:
-                return
-            if analysis.case_id is not None:
-                case = next((c for c in ws.cases if c.id == analysis.case_id), None)
-                if case is not None:
-                    self.app_service.set_working_context(case_id=case.id, baseline_id=case.baseline_id)
-            elif analysis.baseline_id is not None:
-                self.app_service.set_working_context(baseline_id=analysis.baseline_id)
-            self.app_service.set_selected_analysis(obj_id)
-            self._set_app_mode("analysis")
-        self.refresh_all()
+        # Legacy dispatcher — superseded by _on_case_selected / _on_workflow_pose_selected /
+        # _on_analysis_selected / _on_run_selected.  Kept as a no-op stub so that any
+        # stray connection does not crash.
+        pass
 
     def _update_window_title(self) -> None:
         project = self.app_service.project
@@ -2226,13 +2176,7 @@ class MainWindow(QtWidgets.QMainWindow):
         When a case is active, edits are redirected into case structural diffs
         (added_entities / removed_entity_ids) instead of modifying the baseline.
         """
-        project = self.app_service.project
-        if project is None:
-            return True
-        ws = project.workspace
-        if ws is None or ws.active_case_id is None:
-            return True
-        # Structural edits in a case are now captured as diffs — no warning needed.
+        # Structural edits in a case are captured as diffs — always allowed.
         return True
 
     def _prepare_for_model_edit(self) -> bool:
@@ -2594,18 +2538,19 @@ class MainWindow(QtWidgets.QMainWindow):
         if not selected_entity_id:
             return
         project = self.app_service.project
-        if project is None or project.workspace is None:
+        ws = self.app_service._workspace
+        if project is None or ws is None or not ws.selected_case_id:
             return
-        ws = project.workspace
-        if not ws.active_case_id:
-            return
-        case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
+        case = ws.cases.get(ws.selected_case_id)
         if case is None:
             return
-        from quino.services.case_diff_summary import build_case_diff_summary
+        try:
+            from quino.services.case_diff_summary import build_case_diff_summary
+        except ImportError:
+            return
         summary = build_case_diff_summary(project, case)
         # Map source_case_id -> case object for name lookup.
-        case_by_id = {c.id: c for c in ws.cases}
+        case_by_id = ws.cases
         # Invariant override hints
         for entry in summary.invariant_overrides:
             parts = entry.path.split("/")
@@ -2667,21 +2612,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     instance_id, key = parts[1], parts[2]
                     # Try invariant first; fall back to reference_overrides.
                     ws_path = f"model/control_graph/instances/{instance_id}/parameters/{key}"
-                    if not self.app_service.reset_override(path=ws_path):
-                        # Look up the case's reference_overrides.parameters dict
-                        ws = self.app_service.project.workspace
-                        if ws and ws.active_case_id:
-                            case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
-                            if case is not None:
-                                refs = case.reference_overrides.get(instance_id, {})
-                                params = refs.get("parameters", {})
-                                if key in params:
-                                    params.pop(key)
-                                    if not params:
-                                        refs.pop("parameters", None)
-                                    if not refs:
-                                        case.reference_overrides.pop(instance_id, None)
-                                    self.app_service.entities.invalidate_index()
+                    self.app_service.reset_override(path=ws_path)
                 self.refresh_all()
                 return
             # Entity row paths: prop_path is the second component of the iv path
@@ -2883,22 +2814,23 @@ class MainWindow(QtWidgets.QMainWindow):
             it += 1
 
         project = self.app_service.project
-        if project is None or project.workspace is None:
+        ws = self.app_service._workspace
+        if project is None or ws is None or ws.selected_case_id is None:
             return
-        ws = project.workspace
-        if ws.active_case_id is None:
-            return
-        case = next((c for c in ws.cases if c.id == ws.active_case_id), None)
+        case = ws.cases.get(ws.selected_case_id)
         if case is None:
             return
 
-        from quino.services.case_diff_summary import build_case_diff_summary
+        try:
+            from quino.services.case_diff_summary import build_case_diff_summary
+        except ImportError:
+            return
         summary = build_case_diff_summary(project, case)
         if not (summary.invariant_overrides or summary.additions or summary.removals
                 or summary.reference_overrides):
             return
 
-        case_by_id = {c.id: c for c in ws.cases}
+        case_by_id = ws.cases
 
         # Aggregate per-entity: most specific tag wins (added > removed > override).
         # Each value: (color_hex, italic, tooltip)

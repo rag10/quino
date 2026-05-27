@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+  <!-- left attachment marker -->
+  <circle cx="5" cy="16" r="3.5" stroke="#3d3d3d" stroke-width="2" fill="#faf8f2"/>
+  <circle cx="5" cy="16" r="1.3" fill="#3d3d3d"/>
+  <!-- right attachment marker -->
+  <circle cx="27" cy="16" r="3.5" stroke="#3d3d3d" stroke-width="2" fill="#faf8f2"/>
+  <circle cx="27" cy="16" r="1.3" fill="#3d3d3d"/>
+  <!-- stub lines from markers to spring ends -->
+  <line x1="8.5" y1="16" x2="10" y2="16" stroke="#1a6b4a" stroke-width="2" stroke-linecap="round"/>
+  <line x1="22" y1="16" x2="23.5" y2="16" stroke="#1a6b4a" stroke-width="2" stroke-linecap="round"/>
+  <!-- spring zigzag body -->
+  <polyline points="10,16 11.5,9.5 14,22 16,9.5 18,22 20.5,9.5 22,16"
+            stroke="#1a6b4a" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

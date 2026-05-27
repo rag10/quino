@@ -1,6 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
-  <circle cx="16" cy="16" r="9" stroke="#3d3d3d" stroke-width="1.6" fill="#fff"/>
-  <path d="M16 16 L21 11" stroke="#3d3d3d" stroke-width="2" stroke-linecap="round"/>
-  <circle cx="16" cy="16" r="1.6" fill="#3d3d3d"/>
-  <path d="M16 5 A11 11 0 0 1 27 16" stroke="#2f6f9f" stroke-width="1.8" fill="none"/>
+  <g stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke">
+  <rect stroke="#c76f1f" x="5" y="12" width="22" height="8" rx="1.6" fill="#f6d3ac"/>
+  <line stroke="#c76f1f" x1="8" y1="15" x2="24" y2="15" stroke-width="1.1"/>
+  <line stroke="#c76f1f" x1="8" y1="18" x2="24" y2="18" stroke-width="1.1"/>
+  <rect stroke="#c76f1f" x="12" y="10" width="8" height="12" rx="1.4" fill="#fff9f1"/>
+  <circle stroke="#c76f1f" cx="16" cy="16" r="2.5" fill="#fff1e2"/>
+  <circle cx="16" cy="16" r="1.1" fill="#c76f1f" stroke="none"/>
+  <polygon stroke="#2d74a7" points="22,5 27,8 22,11" fill="#c76f1f"/>
+  </g>
 </svg>

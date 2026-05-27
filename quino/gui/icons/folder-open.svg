@@ -1,9 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
-  <!-- folder back -->
-  <path d="M4 10 L4 26 C4 27.1 4.9 28 6 28 L26 28 C27.1 28 28 27.1 28 26 L28 14 C28 12.9 27.1 12 26 12 L15 12 L12 8 L6 8 C4.9 8 4 8.9 4 10 Z" stroke="#3d3d3d" stroke-width="2" stroke-linejoin="round" fill="#ddd9cc"/>
-  <!-- open flap line -->
-  <path d="M4 14 L28 14" stroke="#3d3d3d" stroke-width="1.5"/>
-  <!-- upward arrow indicating open/load -->
-  <line x1="16" y1="20" x2="16" y2="26" stroke="#3d3d3d" stroke-width="2" stroke-linecap="round"/>
-  <polyline points="12,23 16,20 20,23" stroke="#3d3d3d" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <g stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke">
+  <path stroke="#3f4b59" d="M5 11 H13 L15 14 H27 L24 25 H6 Z" fill="#e8edf2"/>
+  <path stroke="#3f4b59" d="M6 11 V8 H14 L16 11" fill="none"/>
+  </g>
 </svg>

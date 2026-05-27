@@ -1,7 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
-  <polygon points="8,24 9,12 16,7 24,11 24,21 16,26"
-           stroke="#5a4634" stroke-width="1.6" stroke-linejoin="round" fill="#ddd9cc"/>
-  <circle cx="9" cy="12" r="1.6" fill="#5a4634"/>
-  <circle cx="24" cy="11" r="1.6" fill="#5a4634"/>
-  <circle cx="16" cy="26" r="1.6" fill="#5a4634"/>
+  <g stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke">
+  <polygon stroke="#2d74a7" points="7,20 9,10 17,7 25,12 24,22 15,25" fill="#e8f3fa"/>
+  <polygon stroke="#2d74a7" points="9,10 17,7 25,12 16,15" fill="#f7fbfe"/>
+  <polygon stroke="#2d74a7" points="16,15 25,12 24,22 15,25" fill="#cfe4f3"/>
+  <line stroke="#d58228" x1="16" y1="15" x2="15" y2="25" stroke-width="1.1"/>
+  <circle stroke="#2d74a7" cx="9" cy="10" r="2.3" fill="#e8f3fa"/>
+  <circle cx="9" cy="10" r="1.1" fill="#2d74a7" stroke="none"/>
+  <circle stroke="#2d74a7" cx="25" cy="12" r="2.3" fill="#e8f3fa"/>
+  <circle cx="25" cy="12" r="1.1" fill="#2d74a7" stroke="none"/>
+  <circle stroke="#2d74a7" cx="15" cy="25" r="2.3" fill="#e8f3fa"/>
+  <circle cx="15" cy="25" r="1.1" fill="#2d74a7" stroke="none"/>
+  </g>
 </svg>
