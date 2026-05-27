@@ -43,24 +43,30 @@ class CascadingEngine:
         parent = self._ws.cases[parent_case_id]
 
         new_id = f"case-{uuid.uuid4().hex[:8]}"
+        # Deepcopy poses then regenerate their IDs so they are independent of
+        # the parent (sibling cases must not share pose ids, otherwise lookups
+        # like "which case owns this pose" become ambiguous).
+        child_poses = copy.deepcopy(parent.poses)
+        for pose in child_poses:
+            pose.id = f"pose-{uuid.uuid4().hex[:8]}"
         child = Case(
             id=new_id,
             name=name,
             parent_case_id=parent_case_id,
             model=copy.deepcopy(parent.model),
-            poses=copy.deepcopy(parent.poses),
+            poses=child_poses,
             analyses=[],
             runs=[],
             sensor_outputs={},
             reaction_outputs={},
             tolerances=copy.deepcopy(parent.tolerances),
             metrics=copy.deepcopy(parent.metrics),
-            overlay=self._build_fork_overlay(parent),
+            overlay=self._build_fork_overlay(parent, child_poses),
         )
         self._ws.cases[new_id] = child
         return new_id
 
-    def _build_fork_overlay(self, parent: Case) -> CaseOverlay:
+    def _build_fork_overlay(self, parent: Case, child_poses=None) -> CaseOverlay:
         overlay = CaseOverlay()
         for ent_id, (_ent, cls) in _entity_lookup(parent).items():
             try:
@@ -71,7 +77,10 @@ class CascadingEngine:
                 origin="inherited",
                 linked_properties=props,
             )
-        for pose in parent.poses:
+        # Pose overlay keys must match the *child*'s pose ids (which are now
+        # regenerated to avoid collisions with the parent).
+        poses_for_overlay = child_poses if child_poses is not None else parent.poses
+        for pose in poses_for_overlay:
             overlay.poses[pose.id] = EntityOverlay(origin="inherited")
         # Control graph connections (if present)
         if parent.model.control_graph is not None:

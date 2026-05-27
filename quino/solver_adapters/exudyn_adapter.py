@@ -152,6 +152,7 @@ class ExudynAdapter(SolverAdapter):
         steps: int = 100,
         cancel_event: threading.Event | None = None,
         log_path: Path | None = None,
+        initial_pose=None,
     ) -> SimulationResult:
         try:
             assembled = self.assembler.assemble(project)
@@ -180,6 +181,7 @@ class ExudynAdapter(SolverAdapter):
                 project, assembled, exu,
                 solve_mode="dynamic", duration=duration, steps=steps,
                 cancel_event=cancel_event, log_path=log_path,
+                initial_pose=initial_pose,
             )
         except Exception as exc:  # pragma: no cover - depends on external package/runtime
             dynamic_error = exc
@@ -192,6 +194,7 @@ class ExudynAdapter(SolverAdapter):
                         solve_mode="dynamic", duration=duration, steps=steps,
                         translation_driver_mode="servo",
                         cancel_event=cancel_event, log_path=log_path,
+                        initial_pose=initial_pose,
                     )
                     fallback.warnings.append(
                         f"Translation driver constraint fallback used: {dynamic_error}"
@@ -215,6 +218,7 @@ class ExudynAdapter(SolverAdapter):
                         project, assembled, exu,
                         solve_mode="static", duration=duration, steps=steps,
                         cancel_event=cancel_event, log_path=log_path,
+                        initial_pose=initial_pose,
                     )
                     fallback.warnings.append(f"Dynamic solve fallback used: {exc}")
                     fallback.messages.append("Static fallback used after dynamic solve failure")
@@ -257,16 +261,20 @@ class ExudynAdapter(SolverAdapter):
         translation_driver_mode: str = "constraint",
         cancel_event: threading.Event | None = None,
         log_path: Path | None = None,
+        initial_pose=None,
     ) -> SimulationResult:
         item_interface = importlib.import_module("exudyn.itemInterface")
         sc = exu.SystemContainer()
         mbs = sc.AddSystem()
         ground_object = mbs.AddObject(item_interface.ObjectGround())
+        # Caller-provided pose wins; fall back to the legacy
+        # project.simulation_initial_pose_id resolution.
+        resolved_pose = initial_pose if initial_pose is not None else _simulation_initial_pose(project)
         body_objects, node_numbers, body_order = self._create_bodies(
             mbs,
             item_interface,
             assembled,
-            initial_pose=_simulation_initial_pose(project),
+            initial_pose=resolved_pose,
         )
         # Block diagram bridge (Fase 3)
         bridge = None

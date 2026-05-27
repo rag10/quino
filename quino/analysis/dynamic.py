@@ -33,11 +33,26 @@ class DynamicAnalysisRunner(AnalysisRunner):
 
             simulation_runner = SimulationRunner(ExudynAdapter(ExpressionService(UnitService())))
 
+            # Resolve the analysis's initial pose. Explicit argument wins; if
+            # the caller didn't provide one, fall back to ``analysis.pose_id``
+            # (the pose under which the analysis was created in the workspace
+            # tree). Reference (is_default + empty body_poses) poses are
+            # ignored — they carry no body coordinates.
+            resolved_initial_pose = initial_pose
+            if resolved_initial_pose is None and getattr(analysis, "pose_id", None):
+                candidate = next(
+                    (p for p in getattr(project, "poses", []) if p.id == analysis.pose_id),
+                    None,
+                )
+                if candidate is not None and getattr(candidate, "body_poses", None):
+                    resolved_initial_pose = candidate
+
             result: SimulationResult = simulation_runner.run(
                 project,
                 duration=analysis.config.duration,
                 steps=analysis.config.steps,
                 cancel_event=cancel_event,
+                initial_pose=resolved_initial_pose,
             )
 
             cancelled = (

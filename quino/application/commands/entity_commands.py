@@ -371,6 +371,7 @@ class EntityCommands:
         project = self._project
         if project.model is None or project.model.gravity is not None:
             return
+        self._ctx.discard_runs_for_active_case()
         self._ctx.snapshot()
         project.model.gravity = GravityLoad()
 
@@ -378,6 +379,7 @@ class EntityCommands:
         project = self._project
         if project.model is None or project.model.gravity is None:
             return
+        self._ctx.discard_runs_for_active_case()
         self._ctx.snapshot()
         project.model.gravity = None
 

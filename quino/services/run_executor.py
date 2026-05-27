@@ -123,10 +123,17 @@ class RunExecutor(QtCore.QObject):
                 raise ValueError(f"Analysis {job.analysis_id!r} not found")
             project = _CaseAsProject.from_case(case, ws)
             runner = get_runner_for_type(analysis.analysis_type)
+            # Resolve the pose attached to the analysis (set when the user
+            # added the analysis under a specific pose in the workspace tree).
+            initial_pose = None
+            if getattr(analysis, "pose_id", None):
+                candidate = next((p for p in case.poses if p.id == analysis.pose_id), None)
+                if candidate is not None and getattr(candidate, "body_poses", None):
+                    initial_pose = candidate
             result = runner.run(
                 project,
                 analysis,
-                initial_pose=None,
+                initial_pose=initial_pose,
                 cancel_event=job.cancel_event,
                 run=run,
                 project_dir=self.app_service.current_project_dir,

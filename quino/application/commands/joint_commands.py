@@ -520,6 +520,7 @@ class JointCommands:
         project = self._project
         effective = self._ctx.effective_project()
         self._ctx.validation.ensure_unique_name(effective.model.sliders, name)
+        self._ctx.discard_runs_for_active_case()
         slider_obj = Slider(
             id=self._ctx.ids.new("slider"),
             name=name,
@@ -598,6 +599,7 @@ class JointCommands:
         self._ctx.validation.ensure_unique_name(effective.model.joints, name)
         self._validate_endpoint_input(endpoint_a, effective)
         self._validate_endpoint_input(endpoint_b, effective)
+        self._ctx.discard_runs_for_active_case()
         joint = Joint(
             id=self._ctx.ids.new("joint"),
             name=name,
@@ -667,6 +669,7 @@ class JointCommands:
             raise ValueError("Rotation drivers require a revolute joint")
         if dtype is DriverType.TRANSLATION and not self._joint_has_slider(joint):
             raise ValueError("Translation drivers require a slider joint")
+        self._ctx.discard_runs_for_active_case()
         law = ScalarProperty(
             expression=expression,
             unit=unit,
@@ -701,6 +704,7 @@ class JointCommands:
             return
         if any(driver.target_joint_id == joint_id for driver in self._project.model.drivers):
             raise ValueError("Cannot change joint type while it has a driver attached")
+        self._ctx.discard_runs_for_active_case()
         self._ctx.snapshot()
         joint.type = new_type
         self._ctx.invalidate_pose_state()

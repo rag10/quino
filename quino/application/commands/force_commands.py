@@ -90,6 +90,7 @@ class ForceCommands:
     def create_load(self, name: str, marker_id: str, fx_expression: str, fy_expression: str) -> str:
         project = self._project
         self._ctx.validation.ensure_unique_name(project.model.loads, name)
+        self._ctx.discard_runs_for_active_case()
         load_id = self._ctx.ids.new("load")
         fx = ScalarProperty(expression=fx_expression, unit="N", expected_dimension=Dimension.FORCE)
         fy = ScalarProperty(expression=fy_expression, unit="N", expected_dimension=Dimension.FORCE)
@@ -119,6 +120,7 @@ class ForceCommands:
         if case is None:
             return
         engine = self._ctx.cascade_provider()
+        self._ctx.discard_runs_for_active_case()
         self._ctx.snapshot()
         if engine is not None:
             engine.remove_entity(case.id, load_id)
@@ -145,6 +147,7 @@ class ForceCommands:
             project.parameters,
             variables=self._ctx.load_expression_variables(project, time_value=0.0),
         )
+        self._ctx.discard_runs_for_active_case()
         self._ctx.snapshot()
         self._ctx.assign_scalar_property(load, property_path, scalar)
 
@@ -158,6 +161,7 @@ class ForceCommands:
         endpoint_b: SpringEndpoint,
     ) -> str:
         project = self._project
+        self._ctx.discard_runs_for_active_case()
         spring_id = self._ctx.ids.new("spring")
         is_rotational = spring_type in ("rotational_spring", "rotational_actuator")
         rest_value = ScalarProperty(
@@ -194,6 +198,7 @@ class ForceCommands:
 
     def delete_spring(self, spring_id: str) -> None:
         project = self._project
+        self._ctx.discard_runs_for_active_case()
         self._ctx.snapshot()
         project.model.springs = [sp for sp in project.model.springs if sp.id != spring_id]
 
@@ -227,6 +232,7 @@ class ForceCommands:
                 numeric = float(value.value.strip().replace(",", "."))
             except (TypeError, ValueError) as exc:
                 raise ValueError(f"{property_path} must be a plain number") from exc
+            self._ctx.discard_runs_for_active_case()
             self._ctx.snapshot()
             spring.metadata.values[property_path] = numeric
             return
@@ -238,6 +244,7 @@ class ForceCommands:
                 Dimension.ANGLE if is_rotational else Dimension.LENGTH,
             )
             self._ctx.expressions.evaluate_property(scalar, project.parameters)
+            self._ctx.discard_runs_for_active_case()
             self._ctx.snapshot()
             spring.rest_value = scalar
             return
@@ -253,6 +260,7 @@ class ForceCommands:
                 project.parameters,
                 variables={"t": self._ctx.units.quantity(0.0, "s")},
             )
+            self._ctx.discard_runs_for_active_case()
             self._ctx.snapshot()
             spring.law = scalar
             return

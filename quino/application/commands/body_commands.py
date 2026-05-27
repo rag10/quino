@@ -221,6 +221,7 @@ class BodyCommands:
         if not markers:
             raise ValueError("A body requires at least one structural marker")
         self._ctx.validation.ensure_unique_name(project.model.bodies, name)
+        self._ctx.discard_runs_for_active_case()
         body_id = self._ctx.ids.new("body")
         marker_names: set[str] = set()
         structural_markers = [
@@ -332,6 +333,7 @@ class BodyCommands:
         body = self._find_body_by_marker(marker_id)
         if len(body.structural_markers()) != 3:
             raise ValueError("delete_structural_marker_convert_to_bar requires exactly 3 structural markers")
+        self._ctx.discard_runs_for_active_case()
         self._ctx.snapshot()
         removed_joint_ids = {
             joint.id
@@ -363,6 +365,7 @@ class BodyCommands:
         body = self._find_body(body_id)
         marker_name = marker.name or f"M{len(body.structural_markers()) + 1}"
         self._ctx.validation.ensure_unique_marker_name(body, marker_name)
+        self._ctx.discard_runs_for_active_case()
         created = Marker(
             id=self._ctx.ids.new("marker"),
             name=marker_name,

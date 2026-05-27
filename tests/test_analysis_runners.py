@@ -47,7 +47,7 @@ def test_dynamic_runner_returns_partial_when_solver_crashes_with_frames(monkeypa
     )
 
     class _FakeRunner:
-        def run(self, project, duration=1.0, steps=100, cancel_event=None):
+        def run(self, project, duration=1.0, steps=100, cancel_event=None, initial_pose=None):
             return fake_result
 
     import quino.simulation.runner as runner_mod
@@ -57,6 +57,38 @@ def test_dynamic_runner_returns_partial_when_solver_crashes_with_frames(monkeypa
     assert result.status == "partial"
     assert result.frames == fake_result.frames
     assert "boom" in (result.error_message or "")
+
+
+def test_dynamic_runner_uses_analysis_pose_id_as_initial_pose(monkeypatch):
+    """The analysis's pose_id must be passed to the simulation runner as the
+    initial pose when the pose has body_poses data."""
+    from quino.analysis.dynamic import DynamicAnalysisRunner
+    from quino.application.service import ApplicationService
+    from quino.domain.model import SimulationResult, BodyPose
+    from quino.domain.workspace import Analysis, Pose
+
+    app = ApplicationService()
+    app.new_project("test")
+    case = app.current_case()
+    # Create a non-empty pose
+    pose = Pose(id="p1", name="P1", body_poses={"body-x": BodyPose(body_id="body-x", x=1.0, y=2.0, angle=0.3)})
+    case.poses.append(pose)
+    analysis = Analysis(id="a1", name="A1", analysis_type="dynamic", pose_id="p1")
+
+    received = {}
+
+    class _FakeRunner:
+        def run(self, project, duration=1.0, steps=100, cancel_event=None, initial_pose=None):
+            received["pose"] = initial_pose
+            return SimulationResult(success=True, backend="fake", time=[0.0], frames=[{}])
+
+    import quino.simulation.runner as runner_mod
+    monkeypatch.setattr(runner_mod, "SimulationRunner", lambda _adapter: _FakeRunner())
+
+    runner = DynamicAnalysisRunner()
+    runner.run(app.project, analysis)
+    assert received["pose"] is not None
+    assert received["pose"].id == "p1"
 
 
 def test_dynamic_runner_returns_failed_when_solver_crashes_with_no_frames(monkeypatch):
@@ -75,7 +107,7 @@ def test_dynamic_runner_returns_failed_when_solver_crashes_with_no_frames(monkey
     )
 
     class _FakeRunner:
-        def run(self, project, duration=1.0, steps=100, cancel_event=None):
+        def run(self, project, duration=1.0, steps=100, cancel_event=None, initial_pose=None):
             return fake_result
 
     import quino.simulation.runner as runner_mod

@@ -213,22 +213,78 @@ def test_backend_duplicate_analysis_creates_distinct_copy(app, qtbot):
     assert "copy" in dup.name.lower()
 
 
-def test_analyses_group_under_pose_carries_pose_id(app, qtbot):
-    """The Analyses group node under each pose must store the pose_id so its
-    context menu can offer 'Add analysis…'."""
+def test_analyses_hang_directly_off_pose(app, qtbot):
+    """Analyses are children of their parent pose node — no intermediate
+    'Analyses' group node exists in the tree."""
     from quino.gui.panels.workflow_tree_panel import ROLE_NODE_KIND, ROLE_ID
     service = ApplicationService()
     service.new_workspace("Test")
     pose = service.workspace.create_pose("P1")
+    analysis = service.workspace.create_analysis(
+        "A1", analysis_type="dynamic", workspace_pose_id=pose.id
+    )
     panel = WorkflowTreePanel(service)
     qtbot.addWidget(panel)
     panel.refresh()
     root = panel.top_level_items()[0]
-    analyses_groups = _collect_items(root, kind_filter="analyses_group")
-    # One for default pose, one for P1
-    assert len(analyses_groups) >= 2
-    pose_ids_on_groups = {g.data(0, ROLE_ID) for g in analyses_groups}
-    assert pose.id in pose_ids_on_groups
+    # No 'analyses_group' kind exists anymore.
+    assert _collect_items(root, kind_filter="analyses_group") == []
+    # The analysis node is a direct child of the pose node.
+    pose_nodes = [it for it in _collect_items(root, kind_filter="pose")
+                  if it.data(0, ROLE_ID) == pose.id]
+    assert pose_nodes, "pose node missing"
+    children_kinds = [
+        pose_nodes[0].child(i).data(0, ROLE_NODE_KIND)
+        for i in range(pose_nodes[0].childCount())
+    ]
+    assert "analysis" in children_kinds
+    analysis_child_ids = [
+        pose_nodes[0].child(i).data(0, ROLE_ID)
+        for i in range(pose_nodes[0].childCount())
+        if pose_nodes[0].child(i).data(0, ROLE_NODE_KIND) == "analysis"
+    ]
+    assert analysis.id in analysis_child_ids
+
+
+def test_fork_case_regenerates_pose_ids(app, qtbot):
+    """Forked subcases must have unique pose ids — sharing ids with the parent
+    makes 'which case owns this pose' lookups ambiguous."""
+    service = ApplicationService()
+    service.new_workspace("Test")
+    ws = service._workspace
+    root_id = ws.root_case_ids[0]
+    engine = CascadingEngine(ws)
+    child_id = engine.fork_case(root_id, "Child")
+
+    root_pose_ids = {p.id for p in ws.cases[root_id].poses}
+    child_pose_ids = {p.id for p in ws.cases[child_id].poses}
+    assert root_pose_ids.isdisjoint(child_pose_ids)
+
+
+def test_create_analysis_lands_on_correct_case_after_fork(app, qtbot):
+    """Adding an analysis under a subcase pose must attach it to that subcase,
+    not to the parent baseline case."""
+    service = ApplicationService()
+    service.new_workspace("Test")
+    ws = service._workspace
+    root_id = ws.root_case_ids[0]
+    engine = CascadingEngine(ws)
+    child_id = engine.fork_case(root_id, "Child")
+    ws.selected_case_id = child_id
+
+    panel = WorkflowTreePanel(service)
+    qtbot.addWidget(panel)
+    panel.refresh()
+
+    child_default_pose = next(p for p in ws.cases[child_id].poses if p.is_default)
+    service.workspace.create_analysis(
+        "A1",
+        analysis_type="dynamic",
+        case_id=panel._case_id_for_pose(child_default_pose.id),
+        workspace_pose_id=child_default_pose.id,
+    )
+    assert len(ws.cases[root_id].analyses) == 0
+    assert len(ws.cases[child_id].analyses) == 1
 
 
 def test_refresh_preserves_collapsed_state(app, qtbot):

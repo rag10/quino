@@ -216,18 +216,11 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             dp_item.setData(0, ROLE_ID, dp_pose_id)
         dp_item.setForeground(0, QtGui.QBrush(QtGui.QColor(INK_SUBTLE)))
         dp_item.setToolTip(0, "Reference pose — model in its reference configuration (read-only)")
+        # Analyses hang directly off their parent pose (no intermediate
+        # "Analyses" group node).
         dp_analyses = analyses_by_pose.get(dp_pose_id, []) if dp_pose_id else []
-        dp_analyses_group = _group_item(
-            f"Analyses  ({len(dp_analyses)})" if dp_analyses else "Analyses",
-            "workspace-analyses",
-        )
-        if dp_pose_id:
-            dp_analyses_group.setData(0, ROLE_NODE_KIND, "analyses_group")
-            dp_analyses_group.setData(0, ROLE_ID, dp_pose_id)
         for analysis in dp_analyses:
-            dp_analyses_group.addChild(self._build_analysis_item(analysis, runs_by_analysis, ws))
-        dp_analyses_group.setExpanded(bool(dp_analyses))
-        dp_item.addChild(dp_analyses_group)
+            dp_item.addChild(self._build_analysis_item(analysis, runs_by_analysis, ws))
         dp_item.setExpanded(True)
         poses_group.addChild(dp_item)
 
@@ -247,16 +240,8 @@ class WorkflowTreePanel(QtWidgets.QWidget):
                 pose_item.setFont(0, font)
                 pose_item.setBackground(0, QtGui.QBrush(QtGui.QColor(BLUE_SOFT)))
             pose_item.setToolTip(0, f"Pose: {pose.name}")
-            p_analyses_group = _group_item(
-                f"Analyses  ({len(pose_analyses)})" if pose_analyses else "Analyses",
-                "workspace-analyses",
-            )
-            p_analyses_group.setData(0, ROLE_NODE_KIND, "analyses_group")
-            p_analyses_group.setData(0, ROLE_ID, pose.id)
             for analysis in pose_analyses:
-                p_analyses_group.addChild(self._build_analysis_item(analysis, runs_by_analysis, ws))
-            p_analyses_group.setExpanded(bool(pose_analyses))
-            pose_item.addChild(p_analyses_group)
+                pose_item.addChild(self._build_analysis_item(analysis, runs_by_analysis, ws))
             pose_item.setExpanded(True)
             poses_group.addChild(pose_item)
         poses_group.setExpanded(True)
@@ -373,8 +358,6 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             self._show_poses_group_menu(global_pos, ent_id)
         elif kind == "subcases_group":
             self._show_subcases_group_menu(global_pos, ent_id)
-        elif kind == "analyses_group":
-            self._show_analyses_group_menu(global_pos, ent_id)
         elif kind == "default_pose":
             self._show_default_pose_menu(global_pos, ent_id)
         elif kind == "pose":
@@ -489,13 +472,6 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             if ok and name.strip():
                 self.fork_case(parent_case_id, name.strip())
                 self.refresh()
-
-    def _show_analyses_group_menu(self, global_pos: QtCore.QPoint, pose_id: str) -> None:
-        menu = QtWidgets.QMenu(self)
-        add_action = menu.addAction("Add analysis…")
-        action = menu.exec(global_pos)
-        if action == add_action:
-            self._open_add_analysis_dialog(pose_id)
 
     def _show_default_pose_menu(self, global_pos: QtCore.QPoint, pose_id: str) -> None:
         menu = QtWidgets.QMenu(self)
@@ -656,6 +632,12 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         ws = self._service._workspace
         if ws is None:
             return None
+        # Prefer the active case when the same pose id exists in multiple
+        # cases (defence-in-depth: ids should be unique, but legacy data
+        # forked before the id-regeneration fix may still collide).
+        active = ws.cases.get(ws.selected_case_id) if ws.selected_case_id else None
+        if active is not None and any(p.id == pose_id for p in active.poses):
+            return active.id
         for case in ws.cases.values():
             if any(p.id == pose_id for p in case.poses):
                 return case.id

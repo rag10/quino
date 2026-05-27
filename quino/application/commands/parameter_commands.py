@@ -38,6 +38,7 @@ class ParameterCommands:
         project = self._project
         self._ctx.validation.ensure_unique_name(project.parameters, name)
         self._validate_parameter_definition(expression, unit)
+        self._ctx.discard_runs_for_active_case()
         self._ctx.snapshot()
         parameter = Parameter(
             id=self._ctx.ids.new("param"),
@@ -63,6 +64,9 @@ class ParameterCommands:
         new_unit = unit if unit is not None else parameter.unit
         new_description = description if description is not None else parameter.description
         self._validate_parameter_definition(new_expression, new_unit, parameter_id=parameter_id)
+        # Only invalidate when the value-affecting fields actually change.
+        if new_expression != parameter.expression or new_unit != parameter.unit:
+            self._ctx.discard_runs_for_active_case()
         self._ctx.snapshot()
         parameter.expression = new_expression
         parameter.unit = new_unit
@@ -94,6 +98,14 @@ class ParameterCommands:
         )
         if not changed:
             return
+        # Name/description-only edits don't affect simulation results.
+        value_changed = (
+            parameter.expression != expression
+            or parameter.unit != unit
+            or parameter.name != name
+        )
+        if value_changed:
+            self._ctx.discard_runs_for_active_case()
         self._ctx.snapshot()
         parameter.name = name
         parameter.expression = expression
@@ -103,5 +115,6 @@ class ParameterCommands:
 
     def delete(self, parameter_id: str) -> None:
         project = self._project
+        self._ctx.discard_runs_for_active_case()
         self._ctx.snapshot()
         project.parameters = [parameter for parameter in project.parameters if parameter.id != parameter_id]

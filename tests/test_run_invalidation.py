@@ -166,3 +166,83 @@ def test_delete_run_returns_false_if_not_found():
     result = delete_run(ws, None, "nonexistent")
 
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: model edits invalidate ok/partial runs; style edits don't
+# ---------------------------------------------------------------------------
+
+
+def _setup_app_with_ok_run() -> tuple:
+    """Build a small workspace with an analysis + an 'ok' run, ready for edits."""
+    from quino.application.service import ApplicationService
+    from quino.domain.inputs import MarkerInput
+    from quino.domain.workspace import Analysis, Run
+
+    app = ApplicationService()
+    app.new_workspace("T")
+    body_id = app.create_bar("Bar", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    ws = app._workspace
+    case = ws.cases[ws.root_case_ids[0]]
+    analysis = Analysis(id="a1", name="A", analysis_type="dynamic")
+    case.analyses.append(analysis)
+    run = Run(id="r1", analysis_id="a1", created_at="2026-05-28T00:00:00", status="ok")
+    case.runs.append(run)
+    return app, body_id, run
+
+
+def test_add_gravity_invalidates_runs():
+    app, _, run = _setup_app_with_ok_run()
+    app.entities.add_gravity()
+    assert run.status == "stale"
+
+
+def test_delete_gravity_invalidates_runs():
+    app, _, run = _setup_app_with_ok_run()
+    app.entities.add_gravity()
+    run.status = "ok"  # reset for the second edit
+    app.entities.delete_gravity()
+    assert run.status == "stale"
+
+
+def test_create_body_invalidates_runs():
+    app, _, run = _setup_app_with_ok_run()
+    from quino.domain.inputs import MarkerInput
+    app.create_bar("Bar2", MarkerInput("0 mm", "10 mm", "A"), MarkerInput("100 mm", "10 mm", "B"))
+    assert run.status == "stale"
+
+
+def test_create_load_invalidates_runs():
+    app, body_id, run = _setup_app_with_ok_run()
+    body = app.get_body(body_id)
+    marker_id = next(m.id for m in body.markers if m.name == "A")
+    app.forces.create_load("L1", marker_id, "10 N", "0 N")
+    assert run.status == "stale"
+
+
+def test_style_edit_does_NOT_invalidate_runs():
+    from quino.domain.inputs import PropertyValueInput
+    app, body_id, run = _setup_app_with_ok_run()
+    app.update_property(body_id, "style.color", PropertyValueInput("expression", "#ff0000"))
+    assert run.status == "ok"
+
+
+def test_style_line_width_does_NOT_invalidate_runs():
+    from quino.domain.inputs import PropertyValueInput
+    app, body_id, run = _setup_app_with_ok_run()
+    app.update_property(body_id, "style.line_width", PropertyValueInput("expression", "3"))
+    assert run.status == "ok"
+
+
+def test_parameter_create_invalidates_runs():
+    app, _, run = _setup_app_with_ok_run()
+    app.parameters.create("p1", "1 kg", "kg")
+    assert run.status == "stale"
+
+
+def test_parameter_description_only_does_NOT_invalidate_runs():
+    app, _, run = _setup_app_with_ok_run()
+    pid = app.parameters.create("p1", "1 kg", "kg")
+    run.status = "ok"  # reset
+    app.parameters.update(pid, description="just a comment")
+    assert run.status == "ok"

@@ -1249,6 +1249,23 @@ class MechanismCanvas(QtWidgets.QWidget):
             super().mousePressEvent(event)
             return
         self.setFocus()
+        # Defensive reset: a fresh left-press cannot have an active drag from
+        # a previous gesture. Modal dialogs (run confirmations, error popups,
+        # CoM input prompts, etc.) sometimes swallow the matching release
+        # event, leaving stale drag state. Clearing here recovers cleanly.
+        if self._dragging_marker is not None or self._drag_preview is not None:
+            self._dragging_marker = None
+            self._drag_preview = None
+        if self._dragging_ground is not None or self._dragging_ground_preview is not None:
+            self._dragging_ground = None
+            self._dragging_ground_preview = None
+        if self._dragging_slider is not None:
+            self._dragging_slider = None
+            self._dragging_slider_preview = None
+        if self._dragging_pose_marker is not None:
+            self._dragging_pose_marker = None
+            self._dragging_pose_marker_start = None
+            self._dragging_pose_marker_active = False
         clicked = event.position()
         clicked_sketch_point = self._sketch_point_at(clicked)
         clicked_sketch_entity = self._sketch_entity_at(clicked)
@@ -1759,20 +1776,25 @@ class MechanismCanvas(QtWidgets.QWidget):
             self.update()
             return
         if event.button() == QtCore.Qt.MouseButton.LeftButton and self._dragging_marker is not None:
-            if not self._require_editing():
+            try:
+                if not self._require_editing():
+                    return
+                if self._drag_preview is None:
+                    x, y = self._to_world(event.position(), self._current_transform())
+                    self._drag_preview = (self._dragging_marker.entity_id, x, y)
+                marker_id, x, y = self._drag_preview
+                try:
+                    self.app_service.move_marker(marker_id, self._mm_expression(x), self._mm_expression(y))
+                except Exception as exc:
+                    # Surface the failure but always release the drag below.
+                    self.modelChanged.emit(f"Move marker failed: {exc}")
+                    return
+                marker_label = self._marker_label(marker_id)
+                self.modelChanged.emit(f"Moved marker {marker_label} to ({x:.2f}, {y:.2f}) mm")
+            finally:
                 self._dragging_marker = None
                 self._drag_preview = None
-                return
-            if self._drag_preview is None:
-                x, y = self._to_world(event.position(), self._current_transform())
-                self._drag_preview = (self._dragging_marker.entity_id, x, y)
-            marker_id, x, y = self._drag_preview
-            self.app_service.move_marker(marker_id, self._mm_expression(x), self._mm_expression(y))
-            marker_label = self._marker_label(marker_id)
-            self._dragging_marker = None
-            self._drag_preview = None
-            self.modelChanged.emit(f"Moved marker {marker_label} to ({x:.2f}, {y:.2f}) mm")
-            self.update()
+                self.update()
             return
         if event.button() == QtCore.Qt.MouseButton.LeftButton and self._dragging_ground is not None:
             if not self._require_editing():

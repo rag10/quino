@@ -23,6 +23,7 @@ class BlockCommands:
         position: tuple[float, float],
         parameters: dict | None = None,
     ) -> str:
+        self._ctx.discard_runs_for_active_case()
         with self._ctx.operation():
             block_id = self._ctx.ids.new("blk")
             input_ports = []
@@ -51,6 +52,7 @@ class BlockCommands:
         dst_instance: str,
         dst_port: str,
     ) -> None:
+        self._ctx.discard_runs_for_active_case()
         with self._ctx.operation():
             conn = Connection(
                 src_instance=src_instance,
@@ -75,6 +77,7 @@ class BlockCommands:
 
     def remove_block(self, instance_id: str) -> None:
         """Remove a block instance and any connections that reference it."""
+        self._ctx.discard_runs_for_active_case()
         with self._ctx.operation():
             diagram = self._ensure_diagram()
             diagram.instances.pop(instance_id, None)
@@ -95,6 +98,7 @@ class BlockCommands:
         dst_instance: str,
         dst_port: str,
     ) -> None:
+        self._ctx.discard_runs_for_active_case()
         with self._ctx.operation():
             key = (src_instance, src_port, dst_instance, dst_port)
             diagram = self._ensure_diagram()
