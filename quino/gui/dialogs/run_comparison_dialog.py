@@ -5,6 +5,8 @@ from collections import defaultdict
 from PySide6 import QtCore, QtWidgets
 
 from quino.domain.plotting import PlotDef, YSeries
+from quino.gui.icons import get_icon
+from quino.gui.theme import VIOLET
 from quino.services.plot_renderer import load_artifact, render_plot
 
 
@@ -26,7 +28,7 @@ class RunComparisonDialog(QtWidgets.QDialog):
         split.setSizes([520, 280])
         layout.addWidget(split)
 
-        plot_btn = QtWidgets.QPushButton("Plot", self)
+        plot_btn = QtWidgets.QPushButton(get_icon("new-graph", VIOLET, size=16), "Plot", self)
         plot_btn.clicked.connect(self._plot_selected)
         layout.addWidget(plot_btn)
 

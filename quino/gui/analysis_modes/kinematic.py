@@ -6,6 +6,7 @@ from quino.gui.analysis_modes import register_mode
 from quino.gui.analysis_modes._base import AnalysisModeController
 from quino.gui.dialogs.add_sweep_dialog import AddSweepDialog
 from quino.gui.dialogs.sweep_editor_dialog import SweepEditorDialog
+from quino.gui.theme import BLUE, GREEN, INK_MUTED, VIOLET
 from quino.gui.widgets.report_panel import ReportPanelWidget
 from quino.gui.widgets.sweep_slider_row import SweepSliderRow
 from quino.services.kinematic_cache import KinematicCache
@@ -26,21 +27,47 @@ class KinematicModeController(AnalysisModeController):
     def build_toolbar(self, parent):
         bar = self.main_window._analysis_toolbar
         bar.clear()
-        add_action = bar.addAction("Add sweep")
-        add_action.triggered.connect(self._on_add_sweep)
-        run_action = bar.addAction("Run")
-        run_action.setToolTip("Run (or re-run) the sweep on the current model")
-        run_action.triggered.connect(self._on_recompute)
-        bar.addSeparator()
-        self.action_show_traj = bar.addAction("Show trajectories")
-        self.action_show_traj.setCheckable(True)
-        self.action_show_traj.setChecked(True)
-        self.action_show_traj.toggled.connect(self._on_toggle_trajectories)
-        bar.addSeparator()
-        plot_action = bar.addAction("New plot")
-        plot_action.triggered.connect(lambda: self.main_window._open_plot_editor_for_analysis(self._current_analysis))
-        compare_action = bar.addAction("Compare")
-        compare_action.triggered.connect(self.main_window._open_compare_runs_dialog)
+        add_action = self._toolbar_action(
+            "Sweep",
+            "add",
+            BLUE,
+            self._on_add_sweep,
+            tooltip="Add a sweep variable to this kinematic analysis.",
+        )
+        run_action = self._toolbar_action(
+            "Run",
+            "run-simulation",
+            GREEN,
+            self._on_recompute,
+            tooltip="Run or re-run the sweep on the current model.",
+        )
+        self.main_window._add_toolbar_block(bar, [[add_action, run_action]], "Sweep")
+        self.main_window._add_toolbar_sep(bar)
+
+        self.action_show_traj = self._toolbar_action(
+            "Tracks",
+            "trajectories",
+            BLUE,
+            self._on_toggle_trajectories,
+            tooltip="Show or hide the selected sweep trajectory.",
+            checkable=True,
+            checked=True,
+        )
+        plot_action = self._toolbar_action(
+            "Plot",
+            "new-graph",
+            VIOLET,
+            lambda: self.main_window._open_plot_editor_for_analysis(self._current_analysis),
+            tooltip="Create a plot from the latest kinematic run.",
+        )
+        compare_action = self._toolbar_action(
+            "Compare",
+            "new-graph",
+            INK_MUTED,
+            self.main_window._open_compare_runs_dialog,
+            tooltip="Compare persisted runs for this analysis.",
+        )
+        self.main_window._add_toolbar_block(bar, [[self.action_show_traj, plot_action, compare_action]], "View")
         self.toolbar = bar
         return bar
 

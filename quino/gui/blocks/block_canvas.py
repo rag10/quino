@@ -10,6 +10,8 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from quino.blocks.compiler import compile_diagram
 from quino.blocks.library import BLOCK_REGISTRY, get_block_def
 from quino.domain.blocks import BlockDiagram, BlockInstance, Connection, PortSpec
+from quino.gui.icons import get_icon
+from quino.gui.theme import INK_MUTED
 
 from .block_items import BlockItem, ConnectionItem, PortItem, CONNECTION_COLOR, CONNECTION_SELECTED_COLOR
 
@@ -845,7 +847,7 @@ class BlockEditorCanvas(QtWidgets.QGraphicsView):
         editor = BlockEditorWidget(dialog)
         editor.set_diagram(inst.internal_diagram)
         layout.addWidget(editor)
-        btn = QtWidgets.QPushButton("Close")
+        btn = QtWidgets.QPushButton(get_icon("remove", INK_MUTED, size=16), "Close")
         btn.clicked.connect(dialog.accept)
         layout.addWidget(btn)
         dialog.exec()

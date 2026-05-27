@@ -5,6 +5,8 @@ from uuid import uuid4
 from PySide6 import QtWidgets
 
 from quino.domain.plotting import PlotDef, YSeries
+from quino.gui.icons import get_icon
+from quino.gui.theme import VIOLET
 from quino.simulation.sensor_expressions import sensor_channel_keys
 
 
@@ -74,7 +76,7 @@ class PlotEditorDialog(QtWidgets.QDialog):
         self.rows_layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.rows_container)
 
-        add_btn = QtWidgets.QPushButton("Add series", self)
+        add_btn = QtWidgets.QPushButton(get_icon("add", VIOLET, size=16), "Add series", self)
         add_btn.clicked.connect(self._add_row)
         layout.addWidget(add_btn)
 

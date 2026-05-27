@@ -3,6 +3,8 @@ from __future__ import annotations
 from PySide6 import QtCore, QtWidgets
 
 from quino.domain.workspace import SweepDef
+from quino.gui.icons import get_icon
+from quino.gui.theme import BLUE, RED
 
 
 class SweepSliderRow(QtWidgets.QWidget):
@@ -34,11 +36,17 @@ class SweepSliderRow(QtWidgets.QWidget):
 
         self._edit_btn = QtWidgets.QToolButton(self)
         self._edit_btn.setText("Edit")
+        self._edit_btn.setIcon(get_icon("preferences", BLUE, size=16))
+        self._edit_btn.setIconSize(QtCore.QSize(16, 16))
+        self._edit_btn.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._edit_btn.clicked.connect(lambda: self.edit_requested.emit(self._sweep.id))
         layout.addWidget(self._edit_btn)
 
         self._del_btn = QtWidgets.QToolButton(self)
-        self._del_btn.setText("X")
+        self._del_btn.setText("Delete")
+        self._del_btn.setIcon(get_icon("delete", RED, size=16))
+        self._del_btn.setIconSize(QtCore.QSize(16, 16))
+        self._del_btn.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._del_btn.clicked.connect(lambda: self.delete_requested.emit(self._sweep.id))
         layout.addWidget(self._del_btn)
 

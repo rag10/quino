@@ -7,6 +7,7 @@ from PySide6 import QtCore, QtWidgets
 from quino.analysis.equilibrium_runner import EquilibriumAnalysisRunner
 from quino.gui.analysis_modes import register_mode
 from quino.gui.analysis_modes._base import AnalysisModeController
+from quino.gui.theme import BLUE, GREEN, INK_MUTED, VIOLET
 from quino.gui.widgets.report_panel import ReportPanelWidget
 from quino.gui.widgets.validation_banner import ValidationBanner
 
@@ -25,14 +26,38 @@ class EquilibriumModeController(AnalysisModeController):
     def build_toolbar(self, parent):
         bar = self.main_window._analysis_toolbar
         bar.clear()
-        validate_action = bar.addAction("Validate")
-        validate_action.triggered.connect(self._on_validate)
-        run_action = bar.addAction("Run")
-        run_action.triggered.connect(self.on_run_clicked)
-        plot_action = bar.addAction("New plot")
-        plot_action.triggered.connect(lambda: self.main_window._open_plot_editor_for_analysis(self._current_analysis))
-        compare_action = bar.addAction("Compare")
-        compare_action.triggered.connect(self.main_window._open_compare_runs_dialog)
+        validate_action = self._toolbar_action(
+            "Validate",
+            "check-circle",
+            BLUE,
+            self._on_validate,
+            tooltip="Validate the equilibrium setup before running.",
+        )
+        run_action = self._toolbar_action(
+            "Run",
+            "run-simulation",
+            GREEN,
+            self.on_run_clicked,
+            tooltip="Run the equilibrium search on the current model.",
+        )
+        self.main_window._add_toolbar_block(bar, [[validate_action, run_action]], "Solve")
+        self.main_window._add_toolbar_sep(bar)
+
+        plot_action = self._toolbar_action(
+            "Plot",
+            "new-graph",
+            VIOLET,
+            lambda: self.main_window._open_plot_editor_for_analysis(self._current_analysis),
+            tooltip="Create a plot from the latest equilibrium run.",
+        )
+        compare_action = self._toolbar_action(
+            "Compare",
+            "new-graph",
+            INK_MUTED,
+            self.main_window._open_compare_runs_dialog,
+            tooltip="Compare persisted runs for this analysis.",
+        )
+        self.main_window._add_toolbar_block(bar, [[plot_action, compare_action]], "View")
         self.toolbar = bar
         return bar
 

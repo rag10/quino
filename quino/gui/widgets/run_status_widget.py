@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from PySide6 import QtCore, QtWidgets
 
+from quino.gui.icons import get_icon
+from quino.gui.theme import RED
+
 
 class RunStatusWidget(QtWidgets.QWidget):
     cancel_requested = QtCore.Signal(str)
@@ -19,6 +22,9 @@ class RunStatusWidget(QtWidgets.QWidget):
         self._label.setObjectName("runStatusLabel")
         self._cancel_btn = QtWidgets.QToolButton()
         self._cancel_btn.setText("Cancel")
+        self._cancel_btn.setIcon(get_icon("stop", RED, size=16))
+        self._cancel_btn.setIconSize(QtCore.QSize(16, 16))
+        self._cancel_btn.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._cancel_btn.setEnabled(False)
         self._cancel_btn.clicked.connect(self._on_cancel)
 

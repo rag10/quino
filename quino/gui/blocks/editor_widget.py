@@ -5,6 +5,8 @@ from __future__ import annotations
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from quino.domain.blocks import BlockDiagram
+from quino.gui.icons import get_icon
+from quino.gui.theme import BLUE, GREEN, INK_MUTED, RED
 
 from .block_canvas import BlockDiagramScene, BlockEditorCanvas
 from .palette import BlockPalette
@@ -69,21 +71,42 @@ class BlockEditorWidget(QtWidgets.QWidget):
         bar.setIconSize(QtCore.QSize(16, 16))
         bar.setMovable(False)
 
-        def _add(name: str, tip: str, slot) -> QtWidgets.QToolButton:
+        def _add(name: str, icon_name: str, color: str, tip: str, slot) -> QtWidgets.QToolButton:
             btn = QtWidgets.QToolButton(bar)
             btn.setText(name)
+            btn.setIcon(get_icon(icon_name, color, size=16))
+            btn.setIconSize(QtCore.QSize(16, 16))
+            btn.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             btn.setToolTip(tip)
             btn.clicked.connect(slot)
             bar.addWidget(btn)
             return btn
 
-        self._btn_delete = _add("Delete", "Delete selected block(s) or connection(s) (Del)", self._delete_selected)
+        self._btn_delete = _add(
+            "Delete",
+            "delete",
+            RED,
+            "Delete selected block(s) or connection(s) (Del)",
+            self._delete_selected,
+        )
         bar.addSeparator()
-        self._btn_fit = _add("Fit", "Fit diagram to view", lambda: self._canvas.fit_blocks())
-        self._btn_layout = _add("Auto layout", "Topologically lay out blocks left to right", lambda: self._scene.auto_layout())
+        self._btn_fit = _add("Fit", "fit-view", BLUE, "Fit diagram to view", lambda: self._canvas.fit_blocks())
+        self._btn_layout = _add(
+            "Auto layout",
+            "workspace-blocks",
+            INK_MUTED,
+            "Topologically lay out blocks left to right",
+            lambda: self._scene.auto_layout(),
+        )
         bar.addSeparator()
-        self._btn_validate = _add("Validate", "Re-run validation (highlights cycles and unconnected inputs)", lambda: self._scene.validate_and_highlight())
-        self._btn_clear = _add("Clear", "Remove all blocks from the diagram", self._clear_with_confirm)
+        self._btn_validate = _add(
+            "Validate",
+            "check-circle",
+            GREEN,
+            "Re-run validation (highlights cycles and unconnected inputs)",
+            lambda: self._scene.validate_and_highlight(),
+        )
+        self._btn_clear = _add("Clear", "remove", RED, "Remove all blocks from the diagram", self._clear_with_confirm)
         return bar
 
     def _delete_selected(self) -> None:

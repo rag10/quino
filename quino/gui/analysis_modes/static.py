@@ -8,6 +8,7 @@ from quino.analysis.static_runner import StaticAnalysisRunner
 from quino.domain.model import ReactionOutput
 from quino.gui.analysis_modes import register_mode
 from quino.gui.analysis_modes._base import AnalysisModeController
+from quino.gui.theme import BLUE, GREEN, INK_MUTED, ORANGE, VIOLET
 from quino.gui.widgets.report_panel import ReportPanelWidget
 from quino.gui.widgets.validation_banner import ValidationBanner
 
@@ -34,24 +35,45 @@ class StaticModeController(AnalysisModeController):
     def build_toolbar(self, parent):
         bar = self.main_window._analysis_toolbar
         bar.clear()
-        validate_action = bar.addAction("Validate")
-        validate_action.setToolTip(
-            "Check whether DoF=0 and force sources exist before running."
+        validate_action = self._toolbar_action(
+            "Validate",
+            "check-circle",
+            BLUE,
+            self._on_validate,
+            tooltip="Check whether DoF=0 and force sources exist before running.",
         )
-        validate_action.triggered.connect(self._on_validate)
-        run_action = bar.addAction("Run")
-        run_action.setToolTip("Run the static analysis on the current model.")
-        run_action.triggered.connect(self.on_run_clicked)
-        bar.addSeparator()
-        reactions_action = bar.addAction("Show reactions")
-        reactions_action.setToolTip("Focus the Reactions tab in the report.")
-        reactions_action.triggered.connect(self._on_show_reactions)
-        plot_action = bar.addAction("New plot")
-        plot_action.triggered.connect(
-            lambda: self.main_window._open_plot_editor_for_analysis(self._current_analysis)
+        run_action = self._toolbar_action(
+            "Run",
+            "run-simulation",
+            GREEN,
+            self.on_run_clicked,
+            tooltip="Run the static analysis on the current model.",
         )
-        compare_action = bar.addAction("Compare")
-        compare_action.triggered.connect(self.main_window._open_compare_runs_dialog)
+        self.main_window._add_toolbar_block(bar, [[validate_action, run_action]], "Solve")
+        self.main_window._add_toolbar_sep(bar)
+
+        reactions_action = self._toolbar_action(
+            "Reactions",
+            "section-reactions",
+            ORANGE,
+            self._on_show_reactions,
+            tooltip="Focus the Reactions tab in the report.",
+        )
+        plot_action = self._toolbar_action(
+            "Plot",
+            "new-graph",
+            VIOLET,
+            lambda: self.main_window._open_plot_editor_for_analysis(self._current_analysis),
+            tooltip="Create a plot from the latest static run.",
+        )
+        compare_action = self._toolbar_action(
+            "Compare",
+            "new-graph",
+            INK_MUTED,
+            self.main_window._open_compare_runs_dialog,
+            tooltip="Compare persisted runs for this analysis.",
+        )
+        self.main_window._add_toolbar_block(bar, [[reactions_action, plot_action, compare_action]], "View")
         self.toolbar = bar
         return bar
 

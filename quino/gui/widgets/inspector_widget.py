@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from quino.gui.icons import get_icon
+from quino.gui.theme import BLUE
+
 
 _PROPERTY_DIMENSION_HINTS: dict[str, str] = {
     "x": "length (e.g. 50 mm)",
@@ -270,6 +273,9 @@ class InspectorPropertyWidget(QtWidgets.QWidget):
         if resettable:
             reset_btn = QtWidgets.QToolButton()
             reset_btn.setText("Reset")
+            reset_btn.setIcon(get_icon("refresh", BLUE, size=14))
+            reset_btn.setIconSize(QtCore.QSize(14, 14))
+            reset_btn.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             reset_btn.setAutoRaise(True)
             reset_btn.setToolTip(
                 "Clear this local override so the inherited (or baseline) value applies again"

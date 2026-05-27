@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from PySide6 import QtWidgets
+from collections.abc import Callable
+
+from PySide6 import QtGui, QtWidgets
+
+from quino.gui.icons import get_icon
 
 
 class AnalysisModeController(ABC):
@@ -11,6 +15,28 @@ class AnalysisModeController(ABC):
         self.toolbar: QtWidgets.QToolBar | None = None
         self.config_widget: QtWidgets.QWidget | None = None
         self.bottom_panel: QtWidgets.QWidget | None = None
+
+    def _toolbar_action(
+        self,
+        text: str,
+        icon_name: str,
+        color: str,
+        slot: Callable | None = None,
+        *,
+        tooltip: str = "",
+        checkable: bool = False,
+        checked: bool = False,
+    ) -> QtGui.QAction:
+        action = QtGui.QAction(get_icon(icon_name, color), text, self.main_window)
+        if tooltip:
+            action.setToolTip(tooltip)
+            action.setStatusTip(tooltip)
+        action.setCheckable(checkable)
+        if checkable:
+            action.setChecked(checked)
+        if slot is not None:
+            action.triggered.connect(slot)
+        return action
 
     @abstractmethod
     def build_toolbar(self, parent: QtWidgets.QWidget) -> QtWidgets.QToolBar:

@@ -3,6 +3,8 @@ from __future__ import annotations
 from PySide6 import QtCore, QtWidgets
 
 from quino.application.service import ApplicationService
+from quino.gui.icons import get_icon
+from quino.gui.theme import BLUE
 
 
 class DivergencesDock(QtWidgets.QWidget):
@@ -40,7 +42,7 @@ class DivergencesDock(QtWidgets.QWidget):
             self._table.setItem(i, 0, QtWidgets.QTableWidgetItem(str(w.get("path", ""))))
             self._table.setItem(i, 1, QtWidgets.QTableWidgetItem(str(w.get("parent_value", ""))))
             self._table.setItem(i, 2, QtWidgets.QTableWidgetItem(str(w.get("child_value", ""))))
-            btn = QtWidgets.QPushButton("Keep override")
+            btn = QtWidgets.QPushButton(get_icon("check-circle", BLUE, size=16), "Keep override")
             btn.clicked.connect(lambda _=False, idx=i: self.keep_override(idx))
             self._table.setCellWidget(i, 3, btn)
 

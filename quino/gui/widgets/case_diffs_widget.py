@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from quino.application.service import ApplicationService
+from quino.gui.icons import get_icon
 from quino.gui.theme import BLUE_DARK, INK_MUTED, INK_SUBTLE
 
 
@@ -130,7 +131,7 @@ class CaseDiffsWidget(QtWidgets.QWidget):
         # Refresh button
         toolbar = QtWidgets.QHBoxLayout()
         toolbar.setContentsMargins(8, 4, 8, 0)
-        self._refresh_btn = QtWidgets.QPushButton("Refresh")
+        self._refresh_btn = QtWidgets.QPushButton(get_icon("refresh", BLUE_DARK, size=16), "Refresh")
         self._refresh_btn.setFixedHeight(24)
         self._refresh_btn.clicked.connect(self.refresh)
         toolbar.addWidget(self._refresh_btn)

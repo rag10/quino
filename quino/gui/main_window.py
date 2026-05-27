@@ -449,7 +449,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_fit_view = QtGui.QAction(get_icon("fit-view", color_base), "Fit View", self)
         self.action_fit_view.setToolTip("Fit mechanism to view")
 
-        self.action_show_parent_diff = QtGui.QAction("Show parent diff", self)
+        self.action_show_parent_diff = QtGui.QAction(
+            get_icon("workspace-diffs", color_base),
+            "Show parent diff",
+            self,
+        )
         self.action_show_parent_diff.setCheckable(True)
         self.action_show_parent_diff.setToolTip("Overlay differences from parent case (rendering deferred)")
         self.action_show_parent_diff.toggled.connect(lambda on: self.canvas.set_show_parent_diff(on))
@@ -523,19 +527,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_preferences.triggered.connect(self._show_preferences_dialog)
         self.action_preferences.setToolTip("Open preferences dialog")
 
-        self.action_mode_sketch = QtGui.QAction("Sketch", self)
+        self.action_mode_sketch = QtGui.QAction(get_icon("section-sketch", color_sketch), "Sketch", self)
         self.action_mode_sketch.triggered.connect(lambda: self._set_app_mode("sketch"))
         self.action_mode_sketch.setCheckable(True)
 
-        self.action_mode_model = QtGui.QAction("Model", self)
+        self.action_mode_model = QtGui.QAction(get_icon("body", color_kinematic), "Model", self)
         self.action_mode_model.triggered.connect(lambda: self._set_app_mode("model"))
         self.action_mode_model.setCheckable(True)
 
-        self.action_mode_pose = QtGui.QAction("Pose", self)
+        self.action_mode_pose = QtGui.QAction(get_icon("workspace-pose", color_pose), "Pose", self)
         self.action_mode_pose.triggered.connect(lambda: self._set_app_mode("pose"))
         self.action_mode_pose.setCheckable(True)
 
-        self.action_mode_analysis = QtGui.QAction("Analysis", self)
+        self.action_mode_analysis = QtGui.QAction(get_icon("workspace-analysis", color_dynamic), "Analysis", self)
         self.action_mode_analysis.triggered.connect(lambda: self._set_app_mode("analysis"))
         self.action_mode_analysis.setCheckable(True)
 
@@ -816,11 +820,14 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.setSpacing(0)
         container.setStyleSheet(MODE_INDICATOR_QSS)
 
-        def _pill(text: str, role: str, *, position: str) -> QtWidgets.QToolButton:
+        def _pill(text: str, role: str, icon_name: str, *, position: str) -> QtWidgets.QToolButton:
             btn = QtWidgets.QToolButton()
             btn.setText(text)
+            btn.setIcon(get_icon(icon_name, INK_MUTED, size=14))
+            btn.setIconSize(QtCore.QSize(14, 14))
+            btn.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             btn.setCheckable(True)
-            btn.setFixedSize(70, 28)
+            btn.setFixedSize(82, 28)
             radii = {
                 "left": "border-top-left-radius: 14px; border-bottom-left-radius: 14px;",
                 "right": "border-top-right-radius: 14px; border-bottom-right-radius: 14px;",
@@ -857,10 +864,10 @@ class MainWindow(QtWidgets.QMainWindow):
             btn.setProperty("mode_role", role)
             return btn
 
-        self._mode_sketch_btn = _pill("Sketch", "sketch", position="left")
-        self._mode_model_btn = _pill("Model", "model", position="middle")
-        self._mode_pose_btn = _pill("Pose", "pose", position="middle")
-        self._mode_analysis_btn = _pill("Analysis", "analysis", position="right")
+        self._mode_sketch_btn = _pill("Sketch", "sketch", "section-sketch", position="left")
+        self._mode_model_btn = _pill("Model", "model", "body", position="middle")
+        self._mode_pose_btn = _pill("Pose", "pose", "workspace-pose", position="middle")
+        self._mode_analysis_btn = _pill("Analysis", "analysis", "workspace-analysis", position="right")
 
         # Model/Sketch are interactive (user toggles); Pose/Analysis are
         # informational only — they reflect what was selected in the tree.
@@ -2151,7 +2158,7 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addRow(grid_checkbox)
 
         color_layout = QtWidgets.QHBoxLayout()
-        color_button = QtWidgets.QPushButton("Choose…")
+        color_button = QtWidgets.QPushButton(get_icon("preferences", INK_MUTED, size=16), "Choose...")
         color_preview = QtWidgets.QLabel(self.canvas.background_color())
         color_preview.setStyleSheet(
             f"background-color: {self.canvas.background_color()}; border: 1px solid #888; min-width: 60px;"

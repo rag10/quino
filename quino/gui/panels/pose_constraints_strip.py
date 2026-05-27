@@ -5,6 +5,8 @@ import math
 from PySide6 import QtCore, QtWidgets
 
 from quino.application.service import ApplicationService
+from quino.gui.icons import get_icon
+from quino.gui.theme import RED
 
 
 class PoseConstraintsStrip(QtWidgets.QWidget):
@@ -24,7 +26,7 @@ class PoseConstraintsStrip(QtWidgets.QWidget):
         self._list = QtWidgets.QListWidget()
         self._list.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self._list, stretch=1)
-        del_btn = QtWidgets.QPushButton("Delete selected")
+        del_btn = QtWidgets.QPushButton(get_icon("delete", RED, size=16), "Delete selected")
         del_btn.clicked.connect(self._on_delete_clicked)
         layout.addWidget(del_btn)
         self.setMaximumWidth(220)
