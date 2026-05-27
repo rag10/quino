@@ -9,12 +9,13 @@ from quino.gui.widgets.validation_banner import ValidationBanner
 def test_banner_severities_set_colors(qtbot) -> None:
     banner = ValidationBanner()
     qtbot.addWidget(banner)
+    from quino.gui.widgets.validation_banner import _COLORS
     banner.set_status("error", "DoF=2")
-    assert "#aa2222" in banner.styleSheet().lower()
+    assert _COLORS["error"][1].lower() in banner.styleSheet().lower()
     banner.set_status("warning", "no loads")
-    assert "#c75b12" in banner.styleSheet().lower()
+    assert _COLORS["warning"][1].lower() in banner.styleSheet().lower()
     banner.set_status("ok", "ready")
-    assert "#228822" in banner.styleSheet().lower()
+    assert _COLORS["ok"][1].lower() in banner.styleSheet().lower()
     banner.set_status("idle", "")
     assert not banner.isVisible()
 

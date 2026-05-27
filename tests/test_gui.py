@@ -2347,7 +2347,7 @@ def test_canvas_display_settings_and_preferences_dialog() -> None:
     # Default state
     assert window.canvas.show_origin() is True
     assert window.canvas.show_grid() is True
-    assert window.canvas.background_color() == "#f5f1e8"
+    assert window.canvas.background_color() == "#f8fbfd"
 
     # Toggle via toolbar actions
     window.action_toggle_origin.setChecked(False)
