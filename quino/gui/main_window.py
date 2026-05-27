@@ -1222,26 +1222,24 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Run Study Failed", str(exc))
 
     def _on_analysis_selected(self, analysis_id: str) -> None:
-        project = self.app_service.project
-        if project is None or project.workspace is None:
+        case = self.app_service.current_case()
+        if case is None:
             return
-        analysis = next((item for item in project.workspace.analyses if item.id == analysis_id), None)
+        analysis = next((item for item in case.analyses if item.id == analysis_id), None)
         if analysis is None:
             return
-        project.workspace.selected_analysis_id = analysis_id
         self._set_app_mode("analysis")
         self._set_app_mode_analysis(analysis)
 
     def _on_run_selected(self, run_id: str) -> None:
-        project = self.app_service.project
-        if project is None or project.workspace is None:
+        case = self.app_service.current_case()
+        if case is None:
             return
-        run = next((r for r in project.workspace.runs if r.id == run_id), None)
+        run = next((r for r in case.runs if r.id == run_id), None)
         if run is None:
             return
-        analysis = next((a for a in project.workspace.analyses if a.id == run.analysis_id), None)
+        analysis = next((a for a in case.analyses if a.id == run.analysis_id), None)
         if analysis is not None:
-            project.workspace.selected_analysis_id = analysis.id
             self._set_app_mode("analysis")
             self._set_app_mode_analysis(analysis)
             if self._active_mode_controller is not None:
@@ -1340,13 +1338,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self.workflow_panel.refresh()
 
     def _on_executor_run_started(self, run_id: str) -> None:
-        project = self.app_service.project
-        if project is None or project.workspace is None:
+        case = self.app_service.current_case()
+        if case is None:
             return
-        run = next((r for r in project.workspace.runs if r.id == run_id), None)
+        run = next((r for r in case.runs if r.id == run_id), None)
         if run is None:
             return
-        analysis = next((a for a in project.workspace.analyses if a.id == run.analysis_id), None)
+        analysis = next((a for a in case.analyses if a.id == run.analysis_id), None)
         label = analysis.name if analysis is not None else run_id
         pending = self.app_service.executor.pending_count() if self.app_service.executor is not None else 0
         self.run_status.show_running(run_id, label, pending=pending)
@@ -1356,14 +1354,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self.workflow_panel.refresh()
 
     def _on_executor_run_finished(self, run_id: str, status: str) -> None:
-        project = self.app_service.project
         run = None
         analysis_label = run_id
-        if project is not None and project.workspace is not None:
-            run = next((r for r in project.workspace.runs if r.id == run_id), None)
+        case = self.app_service.current_case()
+        if case is not None:
+            run = next((r for r in case.runs if r.id == run_id), None)
             if run is not None:
                 analysis = next(
-                    (a for a in project.workspace.analyses if a.id == run.analysis_id), None
+                    (a for a in case.analyses if a.id == run.analysis_id), None
                 )
                 if analysis is not None:
                     analysis_label = analysis.name
@@ -1712,11 +1710,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._render_plot_for_analysis(analysis, dialog.result_plot)
 
     def _render_plot_for_analysis(self, analysis, plot_def) -> None:
-        project = self.app_service.project
-        if project is None or project.workspace is None:
+        case = self.app_service.current_case()
+        if case is None:
             return
         runs = [
-            run for run in project.workspace.runs
+            run for run in case.runs
             if run.analysis_id == analysis.id and run.result_ref is not None and run.status in {"ok", "partial"}
         ]
         if not runs:
@@ -2256,14 +2254,13 @@ class MainWindow(QtWidgets.QMainWindow):
         """Installed as `ServiceContext.confirm_run_invalidation`. Command-
         services call this just before a non-cosmetic edit flips persisted
         runs to 'stale'. Returns True to proceed, False to abort the edit."""
-        project = self.app_service.project
-        if project is None or project.workspace is None:
+        case = self.app_service.current_case()
+        if case is None:
             return True
-        ws = project.workspace
         ctx = self.app_service._service_context
         analysis_ids = ctx._affected_analysis_ids_for_active_scope()
         affected_runs = [
-            r for r in ws.runs
+            r for r in case.runs
             if r.analysis_id in analysis_ids and r.status in {"ok", "partial"}
         ]
         if not affected_runs:
@@ -2446,7 +2443,7 @@ class MainWindow(QtWidgets.QMainWindow):
         "Springs": "#2a9d8f",
     }
 
-    def _populate_tree(self, project, Project) -> None:
+    def _populate_tree(self, project) -> None:
         self.tree.blockSignals(True)
         self._expanded_tree_keys = self._collect_expanded_tree_keys()
         self.tree.clear()
@@ -3008,7 +3005,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tree_items[entity_id] = item
         return item
 
-    def _populate_parameters(self, project, Project) -> None:
+    def _populate_parameters(self, project) -> None:
         self._suspend_parameter_updates = True
         try:
             self.parameters_table.setRowCount(len(project.parameters))
@@ -3022,7 +3019,7 @@ class MainWindow(QtWidgets.QMainWindow):
         finally:
             self._suspend_parameter_updates = False
 
-    def _populate_canvas_summary(self, project, Project) -> None:
+    def _populate_canvas_summary(self, project) -> None:
         lines = [
             f"Project: {project.name}",
             f"Backend: {self.app_service.simulation_runner.describe_backend()}",

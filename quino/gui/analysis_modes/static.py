@@ -195,11 +195,11 @@ class StaticModeController(AnalysisModeController):
         return True
 
     def _latest_report_run(self):
-        project = self.main_window.app_service.project
-        if project is None or project.workspace is None or self._current_analysis is None:
+        case = self.main_window.app_service.current_case()
+        if case is None or self._current_analysis is None:
             return None
         runs = [
-            run for run in project.workspace.runs
+            run for run in case.runs
             if run.analysis_id == self._current_analysis.id and run.status in {"ok", "partial"} and run.result_ref is not None
         ]
         return runs[-1] if runs else None

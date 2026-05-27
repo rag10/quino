@@ -34,16 +34,17 @@ class RunComparisonDialog(QtWidgets.QDialog):
         self._populate_runs()
 
     def _populate_runs(self) -> None:
-        project = self.app_service.project
-        if project is None or project.workspace is None:
+        ws = self.app_service._workspace
+        if ws is None:
             return
         by_name: dict[str, list] = defaultdict(list)
-        analyses = {analysis.id: analysis for analysis in project.workspace.analyses}
-        for run in project.workspace.runs:
-            analysis = analyses.get(run.analysis_id)
-            if analysis is None:
-                continue
-            by_name[analysis.name].append((analysis, run))
+        for case in ws.cases.values():
+            analyses = {a.id: a for a in case.analyses}
+            for run in case.runs:
+                analysis = analyses.get(run.analysis_id)
+                if analysis is None:
+                    continue
+                by_name[analysis.name].append((analysis, run))
         for analysis_name, items in by_name.items():
             root = QtWidgets.QTreeWidgetItem([analysis_name])
             self.run_tree.addTopLevelItem(root)
@@ -92,10 +93,10 @@ class RunComparisonDialog(QtWidgets.QDialog):
             self.channel_list.addItem(item)
 
     def _selected_runs(self) -> list[tuple[str, dict]]:
-        project = self.app_service.project
-        if project is None or project.workspace is None:
+        ws = self.app_service._workspace
+        if ws is None:
             return []
-        runs = {run.id: run for run in project.workspace.runs}
+        runs = {run.id: run for case in ws.cases.values() for run in case.runs}
         out: list[tuple[str, dict]] = []
         for (analysis_name, run_id), item in self._run_items.items():
             if item.checkState(0) != QtCore.Qt.CheckState.Checked:

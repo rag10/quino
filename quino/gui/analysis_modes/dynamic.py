@@ -142,10 +142,10 @@ class DynamicModeController(AnalysisModeController):
     def on_run_finished(self, run_id: str, status: str) -> None:
         if self._current_analysis is None or status not in {"ok", "partial"}:
             return
-        project = self.main_window.app_service.project
-        if project is None or project.workspace is None:
+        case = self.main_window.app_service.current_case()
+        if case is None:
             return
-        run = next((item for item in project.workspace.runs if item.id == run_id), None)
+        run = next((item for item in case.runs if item.id == run_id), None)
         if run is None or run.analysis_id != self._current_analysis.id:
             return
         self.on_run_selected(run)
@@ -159,11 +159,11 @@ class DynamicModeController(AnalysisModeController):
         self._metrics_panel.replace_table_tab("Metrics", ["Key", "Value"], rows)
 
     def _latest_run(self):
-        project = self.main_window.app_service.project
-        if project is None or project.workspace is None or self._current_analysis is None:
+        case = self.main_window.app_service.current_case()
+        if case is None or self._current_analysis is None:
             return None
         runs = [
-            run for run in project.workspace.runs
+            run for run in case.runs
             if run.analysis_id == self._current_analysis.id
             and run.status in {"ok", "partial"}
             and run.result_ref is not None

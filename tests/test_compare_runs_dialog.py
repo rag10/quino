@@ -6,23 +6,23 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6 import QtCore
 
 from quino.application.service import ApplicationService
-from quino.domain.workspace import ResultRef, Run
+from quino.domain.workspace import Analysis, ResultRef, Run
 from quino.gui.dialogs.run_comparison_dialog import RunComparisonDialog
 
 
-def test_compare_dialog_disables_runs_of_other_analysis_names(qtbot, tmp_path) -> None:
+def test_compare_dialog_lists_runs_from_all_cases(qtbot, tmp_path) -> None:
     svc = ApplicationService()
-    svc.new_project("t")
-    svc.create_punctual_mass("M", x="0 mm", y="0 mm")
-    case = svc.workspace.create_case("C")
-    pose = svc.workspace.create_pose("P", case_id=case.id)
-    analysis_bump = svc.workspace.create_analysis("Bump", analysis_type="dynamic", case_id=case.id, workspace_pose_id=pose.id)
-    analysis_smooth = svc.workspace.create_analysis("Smooth road", analysis_type="dynamic", case_id=case.id, workspace_pose_id=pose.id)
-    svc.current_project_path = tmp_path
+    svc.new_workspace("t")
+    ws = svc._workspace
+    case = ws.cases[ws.root_case_ids[0]]
+    analysis_bump = Analysis(id="a1", name="Bump", analysis_type="dynamic")
+    analysis_smooth = Analysis(id="a2", name="Smooth road", analysis_type="dynamic")
+    case.analyses.extend([analysis_bump, analysis_smooth])
+    svc.current_workspace_path = tmp_path
 
     def add_run(run_id: str, analysis_id: str) -> None:
         run = Run(id=run_id, analysis_id=analysis_id, created_at="now", status="ok")
-        svc.project.workspace.runs.append(run)
+        case.runs.append(run)
         artifact_dir = tmp_path / "artifacts" / f"run_{run.id}"
         artifact_dir.mkdir(parents=True, exist_ok=True)
         artifact_path = artifact_dir / "result.json"
