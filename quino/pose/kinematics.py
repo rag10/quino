@@ -4,7 +4,7 @@ import math
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-        from quino.pose.geometry import Pose
+    from quino.pose.geometry import Pose
     from quino.pose.model import PoseConstraint
     from quino.simulation.assembler import AssembledMechanism
 

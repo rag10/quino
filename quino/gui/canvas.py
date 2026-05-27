@@ -11,7 +11,6 @@ from quino.application.service import ApplicationService
 from quino.domain.inputs import JointEndpointInput, MarkerInput, PropertyValueInput
 from quino.domain.model import (
     Body,
-    Project,
     SketchConstraint,
     SketchArc,
     SketchCircle,
@@ -27,6 +26,7 @@ from quino.domain.types import BodyType, DriverType, JointEndpointKind, JointTyp
 from quino.services.mechanism_dof import compute_mechanism_dof
 from quino.simulation.assembler import AssembledMechanism
 from quino.simulation.sensor_expressions import sensor_channel_keys
+from quino.application._context import _WorkspaceProjectProxy as Project  # back-compat alias
 
 
 @dataclass(slots=True)

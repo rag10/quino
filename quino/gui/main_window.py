@@ -24,8 +24,6 @@ from quino.domain.model import (
     Load,
     Marker,
     Parameter,
-    Pose,
-    Project,
     ReactionOutput,
     Sensor,
     SimulationResult,
@@ -40,6 +38,8 @@ from quino.domain.model import (
     Slider,
     Spring,
 )
+from quino.domain.workspace import Pose
+from quino.application._context import _WorkspaceProjectProxy as Project  # back-compat alias
 from quino.gui.canvas import CanvasMode, MechanismCanvas
 
 from quino.gui.panels.pose_constraints_strip import PoseConstraintsStrip
@@ -54,6 +54,7 @@ from quino.simulation.sensor_expressions import safe_sensor_var, sensor_channel_
 from quino.viewer.plot_window import PlotWindow
 from quino.gui.widgets.inspector_widget import InspectorPropertyWidget
 from quino.gui.blocks import BlockEditorWidget
+from quino.gui.widgets.divergences_dock import DivergencesDock
 
 
 def _changed_entity_ids_for_case(case) -> set[str]:
@@ -175,12 +176,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.left_column = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.left_column.setChildrenCollapsible(False)
         self.workflow_panel = WorkflowTreePanel(self.app_service)
-        self.workflow_panel.working_context_changed.connect(self._on_working_context_changed)
-        self.workflow_panel.run_analysis_requested.connect(self._on_run_analysis_requested)
+        self.workflow_panel.case_selected.connect(self._on_case_selected)
         self.workflow_panel.pose_selected.connect(self._on_workflow_pose_selected)
         self.workflow_panel.analysis_selected.connect(self._on_analysis_selected)
         self.workflow_panel.run_selected.connect(self._on_run_selected)
-        self.workflow_panel.selection_changed.connect(self._on_workflow_selection_changed)
         self.run_status = RunStatusWidget()
         self.run_status.cancel_requested.connect(self._on_cancel_run_requested)
         self.left_column.addWidget(self.workflow_panel)
@@ -193,6 +192,12 @@ class MainWindow(QtWidgets.QMainWindow):
         executor.run_queued.connect(self._on_executor_run_queued)
         executor.run_started.connect(self._on_executor_run_started)
         executor.run_finished.connect(self._on_executor_run_finished)
+
+        self._divergences_dock_widget = DivergencesDock(self.app_service)
+        self._divergences_dock = QtWidgets.QDockWidget("Divergences", self)
+        self._divergences_dock.setWidget(self._divergences_dock_widget)
+        self.addDockWidget(QtCore.Qt.DockWidgetArea.BottomDockWidgetArea, self._divergences_dock)
+        self._divergences_dock.hide()
 
         center_panel = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.canvas = MechanismCanvas(self.app_service)
@@ -393,6 +398,8 @@ class MainWindow(QtWidgets.QMainWindow):
         color_kinematic = "#2f6f9f"
         color_dynamic = "#c7781d"
         color_dynamic_dark = "#a85f14"
+        color_sensor = "#21815e"
+        color_pose = "#7b5aa6"
         color_danger = "#8b2500"
 
         self.action_new = QtGui.QAction(get_icon("file-new", color_base), "New", self)
@@ -448,11 +455,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_add_rotation_driver = self._tool_action("RotDrv", CanvasMode.CREATE_ROTATION_DRIVER, get_icon("rotate-driver", color_dynamic), "Add a rotation driver to a joint (select a joint on canvas)")
         self.action_add_translation_driver = self._tool_action("LinDrv", CanvasMode.CREATE_TRANSLATION_DRIVER, get_icon("translate-driver", color_dynamic), "Add a translation driver to a slider (select a slider joint on canvas)")
 
-        self.action_point_sensor = self._tool_action("Point", CanvasMode.CREATE_POINT_SENSOR, get_icon("sensor-point", color_dynamic), "Create a point sensor (select a marker on canvas)")
-        self.action_distance_sensor = self._tool_action("Dist", CanvasMode.CREATE_DISTANCE_SENSOR, get_icon("sensor-distance", color_dynamic), "Create a distance sensor (select 2 markers on canvas)")
-        self.action_angle_h_sensor = self._tool_action("Ang H", CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR, get_icon("sensor-angle-h", color_dynamic), "Create an angle (horizontal) sensor (select 2 markers on canvas)")
-        self.action_angle_v_sensor = self._tool_action("Ang V", CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR, get_icon("sensor-angle-v", color_dynamic), "Create an angle (vertical) sensor (select 2 markers on canvas)")
-        self.action_angle_vector_sensor = self._tool_action("Vec", CanvasMode.CREATE_ANGLE_VECTOR_SENSOR, get_icon("sensor-angle-vec", color_dynamic), "Create an angle (vector) sensor (select 4 markers on canvas)")
+        self.action_point_sensor = self._tool_action("Point", CanvasMode.CREATE_POINT_SENSOR, get_icon("sensor-point", color_sensor), "Create a point sensor (select a marker on canvas)")
+        self.action_distance_sensor = self._tool_action("Dist", CanvasMode.CREATE_DISTANCE_SENSOR, get_icon("sensor-distance", color_sensor), "Create a distance sensor (select 2 markers on canvas)")
+        self.action_angle_h_sensor = self._tool_action("Ang H", CanvasMode.CREATE_ANGLE_HORIZONTAL_SENSOR, get_icon("sensor-angle-h", color_sensor), "Create an angle (horizontal) sensor (select 2 markers on canvas)")
+        self.action_angle_v_sensor = self._tool_action("Ang V", CanvasMode.CREATE_ANGLE_VERTICAL_SENSOR, get_icon("sensor-angle-v", color_sensor), "Create an angle (vertical) sensor (select 2 markers on canvas)")
+        self.action_angle_vector_sensor = self._tool_action("Vec", CanvasMode.CREATE_ANGLE_VECTOR_SENSOR, get_icon("sensor-angle-vec", color_sensor), "Create an angle (vector) sensor (select 4 markers on canvas)")
 
         self.action_add_load = self._tool_action("Load", CanvasMode.CREATE_LOAD, get_icon("load-gravity", color_dynamic), "Add a point load to a marker (select a marker on canvas)")
 
@@ -465,11 +472,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_add_linear_actuator = self._tool_action("Actuator", CanvasMode.CREATE_LINEAR_ACTUATOR, get_icon("actuator", color_dynamic), "Add a linear force actuator between two markers (click 2 markers; second click on empty canvas attaches to ground)")
         self.action_add_rotational_actuator = self._tool_action("RotActuator", CanvasMode.CREATE_ROTATIONAL_ACTUATOR, get_icon("rot-actuator", color_dynamic), "Add a rotational torque actuator at a revolute joint (click the joint)")
 
-        self.action_new_plot = QtGui.QAction(get_icon("new-graph", color_dynamic), "Plot", self)
+        self.action_new_plot = QtGui.QAction(get_icon("new-graph", color_sensor), "Plot", self)
         self.action_new_plot.triggered.connect(self._on_new_plot_triggered)
         self.action_new_plot.setToolTip("Create a new plot from sensor data")
 
-        self.action_compare_runs = QtGui.QAction(get_icon("new-graph", color_dynamic), "Compare", self)
+        self.action_compare_runs = QtGui.QAction(get_icon("new-graph", color_sensor), "Compare", self)
         self.action_compare_runs.triggered.connect(self._open_compare_runs_dialog)
         self.action_compare_runs.setToolTip("Compare persisted runs")
 
@@ -481,7 +488,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_refresh.triggered.connect(self.refresh_all)
         self.action_refresh.setToolTip("Force a full UI refresh (use if display seems out of sync)")
 
-        self.action_show_trajectories = QtGui.QAction(get_icon("trajectories", color_dynamic), "Tracks", self)
+        self.action_show_trajectories = QtGui.QAction(get_icon("trajectories", color_sensor), "Tracks", self)
         self.action_show_trajectories.setCheckable(True)
         self.action_show_trajectories.setChecked(True)
         self.action_show_trajectories.setEnabled(False)
@@ -500,7 +507,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_toggle_grid.triggered.connect(self._on_toggle_grid)
         self.action_toggle_grid.setToolTip("Show/hide grid")
 
-        self.action_toggle_sensors = QtGui.QAction(get_icon("sensor-point", color_base), "Sensors", self)
+        self.action_toggle_sensors = QtGui.QAction(get_icon("sensor-point", color_sensor), "Sensors", self)
         self.action_toggle_sensors.setCheckable(True)
         self.action_toggle_sensors.setChecked(True)
         self.action_toggle_sensors.triggered.connect(self._on_toggle_sensors)
@@ -593,43 +600,43 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_toggle_sketch_visible.toggled.connect(self._toggle_sketch_visible)
         self.action_toggle_sketch_visible.setToolTip("Show/hide sketch")
 
-        self.action_pose_reset = QtGui.QAction(get_icon("refresh", color_dynamic), "Reset Pose", self)
+        self.action_pose_reset = QtGui.QAction(get_icon("refresh", color_pose), "Reset Pose", self)
         self.action_pose_reset.triggered.connect(self._reset_pose)
         self.action_pose_reset.setToolTip("Reset the current pose to the reference configuration")
 
-        self.action_pose_solve = QtGui.QAction(get_icon("sketch-solve", color_dynamic), "Solve Pose", self)
+        self.action_pose_solve = QtGui.QAction(get_icon("sketch-solve", color_pose), "Solve Pose", self)
         self.action_pose_solve.triggered.connect(self._solve_pose)
         self.action_pose_solve.setToolTip("Solve the current pose with the active temporary constraints")
 
-        self.action_pose_set_initial = QtGui.QAction(get_icon("content-save", color_dynamic), "Set as Initial", self)
+        self.action_pose_set_initial = QtGui.QAction(get_icon("content-save", color_pose), "Set as Initial", self)
         self.action_pose_set_initial.triggered.connect(self._set_current_pose_as_initial)
         self.action_pose_set_initial.setToolTip("Persist the current pose as the project's initial pose")
 
-        self.action_pose_clear_initial = QtGui.QAction(get_icon("remove", color_dynamic_dark), "Clear Initial", self)
+        self.action_pose_clear_initial = QtGui.QAction(get_icon("remove", color_pose), "Clear Initial", self)
         self.action_pose_clear_initial.triggered.connect(self._clear_initial_pose)
         self.action_pose_clear_initial.setToolTip("Remove the persisted initial pose")
 
-        self.action_pose_prescribe_x = QtGui.QAction(get_icon("constraint-horizontal", color_dynamic), "Prescribe X", self)
+        self.action_pose_prescribe_x = QtGui.QAction(get_icon("constraint-horizontal", color_pose), "Prescribe X", self)
         self.action_pose_prescribe_x.setCheckable(True)
         self.action_pose_prescribe_x.triggered.connect(lambda checked: self._prescribe_pose_coordinate("x") if checked else self._cancel_pose_pick())
         self.action_pose_prescribe_x.setToolTip("Prescribe the global X coordinate of the selected structural marker")
 
-        self.action_pose_prescribe_y = QtGui.QAction(get_icon("constraint-vertical", color_dynamic), "Prescribe Y", self)
+        self.action_pose_prescribe_y = QtGui.QAction(get_icon("constraint-vertical", color_pose), "Prescribe Y", self)
         self.action_pose_prescribe_y.setCheckable(True)
         self.action_pose_prescribe_y.triggered.connect(lambda checked: self._prescribe_pose_coordinate("y") if checked else self._cancel_pose_pick())
         self.action_pose_prescribe_y.setToolTip("Prescribe the global Y coordinate of the selected structural marker")
 
-        self.action_pose_prescribe_horizontal = QtGui.QAction(get_icon("sensor-angle-h", color_dynamic), "Horiz. Angle", self)
+        self.action_pose_prescribe_horizontal = QtGui.QAction(get_icon("sensor-angle-h", color_pose), "Horiz. Angle", self)
         self.action_pose_prescribe_horizontal.setCheckable(True)
         self.action_pose_prescribe_horizontal.triggered.connect(lambda checked: self._prescribe_horizontal_angle() if checked else self._cancel_pose_pick())
         self.action_pose_prescribe_horizontal.setToolTip("Prescribe the selected body's angle to horizontal (0°)")
 
-        self.action_pose_prescribe_vertical = QtGui.QAction(get_icon("sensor-angle-v", color_dynamic), "Vert. Angle", self)
+        self.action_pose_prescribe_vertical = QtGui.QAction(get_icon("sensor-angle-v", color_pose), "Vert. Angle", self)
         self.action_pose_prescribe_vertical.setCheckable(True)
         self.action_pose_prescribe_vertical.triggered.connect(lambda checked: self._prescribe_vertical_angle() if checked else self._cancel_pose_pick())
         self.action_pose_prescribe_vertical.setToolTip("Prescribe the selected body's angle to vertical (90°)")
 
-        self.action_pose_prescribe_angle = QtGui.QAction(get_icon("angle-constraint", color_dynamic), "Rel. Angle", self)
+        self.action_pose_prescribe_angle = QtGui.QAction(get_icon("angle-constraint", color_pose), "Rel. Angle", self)
         self.action_pose_prescribe_angle.setCheckable(True)
         self.action_pose_prescribe_angle.triggered.connect(lambda checked: self._prescribe_relative_angle() if checked else self._cancel_pose_pick())
         self.action_pose_prescribe_angle.setToolTip("Prescribe the angle between two marker pairs on different bodies")
@@ -1381,6 +1388,17 @@ class MainWindow(QtWidgets.QMainWindow):
         handle = self.app_service.pending_run_handles.get(run_id)
         if handle is not None:
             handle.cancel()
+
+    def _on_case_selected(self, case_id: str) -> None:
+        ws = self.app_service._workspace
+        if ws is None:
+            return
+        ws.selected_case_id = case_id
+        self._divergences_dock_widget.show_case(case_id)
+        case = ws.cases.get(case_id)
+        if case and case.metadata.get("divergence_warnings"):
+            self._divergences_dock.show()
+        self.canvas.update()
 
     def _on_working_context_changed(self) -> None:
         project = self.app_service.display_project
