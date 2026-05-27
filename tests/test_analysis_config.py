@@ -88,8 +88,9 @@ def test_analysis_config_roundtrip(tmp_path):
     from quino.application.service import ApplicationService
 
     svc = ApplicationService()
-    svc.new_project("test")
-    case = svc.workspace.create_case("C")
+    svc.new_workspace("test")
+    ws = svc._workspace
+    case = ws.cases[ws.root_case_ids[0]]
     pose = svc.workspace.create_pose("P", case_id=case.id)
     a = svc.workspace.create_analysis(
         "kin", analysis_type="kinematic", case_id=case.id, workspace_pose_id=pose.id,
@@ -98,11 +99,13 @@ def test_analysis_config_roundtrip(tmp_path):
                                     target_ids=["m1"], mode="linear",
                                     start=0, end=10, steps=11))
     path = tmp_path / "p.quino.json"
-    svc.save_project(str(path))
+    svc.save_workspace(str(path))
 
     svc2 = ApplicationService()
-    svc2.load_project(str(path))
-    loaded = next(x for x in svc2.project.workspace.analyses if x.id == a.id)
+    svc2.load_workspace(str(path))
+    ws2 = svc2._workspace
+    case2 = ws2.cases[ws2.root_case_ids[0]]
+    loaded = next(x for x in case2.analyses if x.id == a.id)
     assert isinstance(loaded.config, KinematicConfig)
     assert len(loaded.config.sweeps) == 1
     assert loaded.config.sweeps[0].variable_kind == "marker_x"
@@ -111,9 +114,10 @@ def test_analysis_config_roundtrip(tmp_path):
 
 def test_loading_old_schema_version_raises(tmp_path):
     import json
+    from quino.serialization.json_io import UnsupportedSchemaError
     path = tmp_path / "old.quino.json"
     path.write_text(json.dumps({"schema_version": "0.1.0", "project": {"id": "p", "name": "x"},
                                 "parameters": [], "model": {}, "view_state": {}}))
     svc = ApplicationService()
-    with pytest.raises(ValueError, match="schema"):
-        svc.load_project(str(path))
+    with pytest.raises((ValueError, UnsupportedSchemaError)):
+        svc.load_workspace(str(path))

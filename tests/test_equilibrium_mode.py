@@ -12,12 +12,13 @@ def test_equilibrium_mode_lists_found_equilibria(qtbot, tmp_path) -> None:
     svc = ApplicationService()
     svc.new_project("t")
     svc.create_punctual_mass("M", x="0 mm", y="0 mm")
-    case = svc.workspace.create_case("C")
+    ws = svc._workspace
+    case = ws.cases[ws.root_case_ids[0]]
     pose = svc.workspace.create_pose("P", case_id=case.id)
     analysis = svc.workspace.create_analysis("Eq", analysis_type="equilibrium", case_id=case.id, workspace_pose_id=pose.id)
     svc.current_project_path = tmp_path
     run = Run(id="run_001", analysis_id=analysis.id, created_at="now", status="ok", metrics={"stable_count": 1.0})
-    svc.project.workspace.runs.append(run)
+    case.runs.append(run)
     artifact_dir = tmp_path / "artifacts" / f"run_{run.id}"
     artifact_dir.mkdir(parents=True)
     artifact_path = artifact_dir / "result.json"

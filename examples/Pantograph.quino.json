@@ -1,11 +1,7 @@
 {
   "schema_version": "0.3.0",
-  "project": {
-    "id": "proj_001",
-    "name": "Pantograph",
-    "metadata": {}
-  },
-  "parameters": [],
+  "id": "ws_001",
+  "name": "Pantograph",
   "sketch": {
     "id": "sketch_001",
     "name": "Main Sketch",
@@ -55,11 +51,11 @@
         },
         "metadata": {},
         "x": {
-          "text": "59.9966 mm",
+          "text": "59.9799 mm",
           "unit": "mm"
         },
         "y": {
-          "text": "-0.63995 mm",
+          "text": "-1.55108 mm",
           "unit": "mm"
         }
       },
@@ -78,11 +74,11 @@
         },
         "metadata": {},
         "x": {
-          "text": "-13.4362 mm",
+          "text": "-19.0457 mm",
           "unit": "mm"
         },
         "y": {
-          "text": "-58.4762 mm",
+          "text": "-56.8969 mm",
           "unit": "mm"
         }
       },
@@ -101,11 +97,11 @@
         },
         "metadata": {},
         "x": {
-          "text": "46.5603 mm",
+          "text": "40.9343 mm",
           "unit": "mm"
         },
         "y": {
-          "text": "-59.1162 mm",
+          "text": "-58.448 mm",
           "unit": "mm"
         }
       },
@@ -124,11 +120,11 @@
         },
         "metadata": {},
         "x": {
-          "text": "-26.8725 mm",
+          "text": "-40.1518 mm",
           "unit": "mm"
         },
         "y": {
-          "text": "-116.952 mm",
+          "text": "-119.949 mm",
           "unit": "mm"
         }
       },
@@ -307,9 +303,10 @@
       "skcon_006": {
         "id": "skcon_006",
         "name": "QonOB",
-        "type": "collinear",
+        "type": "parallel",
         "references": [
           "skpt_001",
+          "skpt_003",
           "skpt_003",
           "skpt_005"
         ],
@@ -373,517 +370,503 @@
     "variables": {},
     "metadata": {}
   },
-  "model": {
-    "bodies": [
-      {
-        "id": "body_001",
-        "name": "OA",
-        "type": "bar",
-        "markers": [
-          {
-            "id": "marker_001",
-            "name": "O",
-            "type": "structural",
-            "x": {
-              "expression": "0.000 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "0.000 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          },
-          {
-            "id": "marker_002",
-            "name": "A",
-            "type": "structural",
-            "x": {
-              "expression": "60.000 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "0.000 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          }
-        ],
-        "edge_order": [
-          "marker_001",
-          "marker_002"
-        ],
-        "closed_shape": false,
-        "mass": null,
-        "inertia": null,
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 2.0,
-          "marker_size": 6.0
-        },
-        "metadata": {},
-        "com": {
-          "kind": "bar_percent",
-          "data": {
-            "percent": 50.0
-          }
-        }
-      },
-      {
-        "id": "body_002",
-        "name": "AP",
-        "type": "bar",
-        "markers": [
-          {
-            "id": "marker_004",
-            "name": "A",
-            "type": "structural",
-            "x": {
-              "expression": "60.000 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "0.000 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          },
-          {
-            "id": "marker_005",
-            "name": "P",
-            "type": "structural",
-            "x": {
-              "expression": "60.000 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "-60.000 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          }
-        ],
-        "edge_order": [
-          "marker_004",
-          "marker_005"
-        ],
-        "closed_shape": false,
-        "mass": null,
-        "inertia": null,
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 2.0,
-          "marker_size": 6.0
-        },
-        "metadata": {},
-        "com": {
-          "kind": "bar_percent",
-          "data": {
-            "percent": 50.0
-          }
-        }
-      },
-      {
-        "id": "body_003",
-        "name": "OBQ",
-        "type": "body",
-        "markers": [
-          {
-            "id": "marker_007",
-            "name": "O",
-            "type": "structural",
-            "x": {
-              "expression": "0.000 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "0.000 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          },
-          {
-            "id": "marker_008",
-            "name": "B",
-            "type": "structural",
-            "x": {
-              "expression": "0.000 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "-60.000 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          },
-          {
-            "id": "marker_010",
-            "name": "Q",
-            "type": "structural",
-            "x": {
-              "expression": "-60.000 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "-120.000 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          }
-        ],
-        "edge_order": [
-          "marker_007",
-          "marker_008",
-          "marker_010"
-        ],
-        "closed_shape": true,
-        "mass": null,
-        "inertia": null,
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {},
-        "com": {
-          "kind": "barycentric",
-          "data": {
-            "weights": {
-              "marker_007": 1.0,
-              "marker_008": 1.0,
-              "marker_010": 1.0
-            }
-          }
-        }
-      },
-      {
-        "id": "body_004",
-        "name": "BP",
-        "type": "bar",
-        "markers": [
-          {
-            "id": "marker_011",
-            "name": "B",
-            "type": "structural",
-            "x": {
-              "expression": "0.000 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "-60.000 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          },
-          {
-            "id": "marker_012",
-            "name": "P",
-            "type": "structural",
-            "x": {
-              "expression": "60.000 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "-60.000 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          }
-        ],
-        "edge_order": [
-          "marker_011",
-          "marker_012"
-        ],
-        "closed_shape": false,
-        "mass": null,
-        "inertia": null,
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 2.0,
-          "marker_size": 6.0
-        },
-        "metadata": {},
-        "com": {
-          "kind": "bar_percent",
-          "data": {
-            "percent": 50.0
-          }
-        }
-      }
-    ],
-    "sliders": [],
-    "joints": [
-      {
-        "id": "joint_001",
-        "name": "Ground_O",
-        "type": "revolute",
-        "endpoint_a": {
-          "kind": "marker",
-          "body_id": "body_001",
-          "marker_id": "marker_001"
-        },
-        "endpoint_b": {
-          "kind": "ground"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {}
-      },
-      {
-        "id": "joint_002",
-        "name": "Joint_O_OAOB",
-        "type": "revolute",
-        "endpoint_a": {
-          "kind": "marker",
-          "body_id": "body_001",
-          "marker_id": "marker_001"
-        },
-        "endpoint_b": {
-          "kind": "marker",
-          "body_id": "body_003",
-          "marker_id": "marker_007"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {}
-      },
-      {
-        "id": "joint_003",
-        "name": "Joint_A",
-        "type": "revolute",
-        "endpoint_a": {
-          "kind": "marker",
-          "body_id": "body_001",
-          "marker_id": "marker_002"
-        },
-        "endpoint_b": {
-          "kind": "marker",
-          "body_id": "body_002",
-          "marker_id": "marker_004"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {}
-      },
-      {
-        "id": "joint_004",
-        "name": "Joint_B",
-        "type": "revolute",
-        "endpoint_a": {
-          "kind": "marker",
-          "body_id": "body_003",
-          "marker_id": "marker_008"
-        },
-        "endpoint_b": {
-          "kind": "marker",
-          "body_id": "body_004",
-          "marker_id": "marker_011"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {}
-      },
-      {
-        "id": "joint_005",
-        "name": "Joint_P",
-        "type": "revolute",
-        "endpoint_a": {
-          "kind": "marker",
-          "body_id": "body_002",
-          "marker_id": "marker_005"
-        },
-        "endpoint_b": {
-          "kind": "marker",
-          "body_id": "body_004",
-          "marker_id": "marker_012"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {}
-      }
-    ],
-    "drivers": [
-      {
-        "id": "driver_001",
-        "name": "InputDrive",
-        "type": "rotation",
-        "target_joint_id": "joint_001",
-        "law": {
-          "expression": "45 deg * sin(360 deg * t / 2 s)",
-          "unit": "deg",
-          "expected_dimension": "angle"
-        },
-        "metadata": {}
-      }
-    ],
-    "sensors": [
-      {
-        "id": "sensor_001",
-        "name": "PenSensor",
-        "type": "point",
-        "marker_ids": [
-          "marker_005"
-        ],
-        "metadata": {}
-      },
-      {
-        "id": "sensor_002",
-        "name": "OutputSensor",
-        "type": "point",
-        "marker_ids": [
-          "marker_010"
-        ],
-        "metadata": {}
-      }
-    ],
-    "loads": [],
-    "springs": []
-  },
+  "parameters": [],
+  "parameter_catalog": {},
   "view_state": {
     "zoom": 1.0,
     "pan_x": 0.0,
     "pan_y": 0.0,
     "show_grid": true,
+    "show_sensors": true,
     "show_markers": true,
     "show_com": false,
-    "show_sliders": true,
-    "show_sensors": true
+    "show_sliders": true
   },
-  "workspace": {
-    "baselines": [
-      {
-        "id": "baseline_001",
-        "name": "Baseline",
-        "description": "",
-        "source_run_id": null,
-        "model_snapshot_id": null,
-        "model_hash": null,
-        "invariant_parameter_keys": [],
-        "approval_status": null,
-        "approved_run_id": null,
-        "tolerances": {},
-        "metrics": {},
-        "metadata": {}
-      }
-    ],
-    "active_baseline_id": "baseline_001",
-    "active_case_id": null,
-    "selected_pose_id": null,
-    "selected_analysis_id": null,
-    "cases": [],
-    "poses": [],
-    "analyses": [],
-    "case_groups": [],
-    "studies": [],
-    "runs": [],
-    "parameter_catalog": {},
-    "model_snapshots": {},
-    "promotion_history": [],
-    "next_sequence": 2
-  }
+  "gravity_default": null,
+  "root_case_ids": [
+    "case_001"
+  ],
+  "cases": {
+    "case_001": {
+      "id": "case_001",
+      "name": "Root",
+      "description": "",
+      "parent_case_id": null,
+      "model": {
+        "bodies": [
+          {
+            "id": "body_001",
+            "name": "OA",
+            "type": "bar",
+            "markers": [
+              {
+                "id": "marker_001",
+                "name": "O",
+                "type": "structural",
+                "x": {
+                  "expression": "0.000 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "0.000 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              },
+              {
+                "id": "marker_002",
+                "name": "A",
+                "type": "structural",
+                "x": {
+                  "expression": "60.000 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "0.000 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              }
+            ],
+            "edge_order": [
+              "marker_001",
+              "marker_002"
+            ],
+            "closed_shape": false,
+            "mass": null,
+            "com": {
+              "kind": "bar_percent",
+              "data": {
+                "percent": 50.0
+              }
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "body_002",
+            "name": "AP",
+            "type": "bar",
+            "markers": [
+              {
+                "id": "marker_004",
+                "name": "A",
+                "type": "structural",
+                "x": {
+                  "expression": "60.000 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "0.000 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              },
+              {
+                "id": "marker_005",
+                "name": "P",
+                "type": "structural",
+                "x": {
+                  "expression": "60.000 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "-60.000 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              }
+            ],
+            "edge_order": [
+              "marker_004",
+              "marker_005"
+            ],
+            "closed_shape": false,
+            "mass": null,
+            "com": {
+              "kind": "bar_percent",
+              "data": {
+                "percent": 50.0
+              }
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "body_003",
+            "name": "OBQ",
+            "type": "body",
+            "markers": [
+              {
+                "id": "marker_007",
+                "name": "O",
+                "type": "structural",
+                "x": {
+                  "expression": "0.000 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "0.000 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              },
+              {
+                "id": "marker_008",
+                "name": "B",
+                "type": "structural",
+                "x": {
+                  "expression": "0.000 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "-60.000 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              },
+              {
+                "id": "marker_010",
+                "name": "Q",
+                "type": "structural",
+                "x": {
+                  "expression": "-60.000 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "-120.000 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              }
+            ],
+            "edge_order": [
+              "marker_007",
+              "marker_008",
+              "marker_010"
+            ],
+            "closed_shape": true,
+            "mass": null,
+            "com": {
+              "kind": "bar_percent",
+              "data": {
+                "percent": 50.0
+              }
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "body_004",
+            "name": "BP",
+            "type": "bar",
+            "markers": [
+              {
+                "id": "marker_011",
+                "name": "B",
+                "type": "structural",
+                "x": {
+                  "expression": "0.000 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "-60.000 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              },
+              {
+                "id": "marker_012",
+                "name": "P",
+                "type": "structural",
+                "x": {
+                  "expression": "60.000 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "-60.000 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              }
+            ],
+            "edge_order": [
+              "marker_011",
+              "marker_012"
+            ],
+            "closed_shape": false,
+            "mass": null,
+            "com": {
+              "kind": "bar_percent",
+              "data": {
+                "percent": 50.0
+              }
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          }
+        ],
+        "sliders": [],
+        "joints": [
+          {
+            "id": "joint_001",
+            "name": "Ground_O",
+            "type": "revolute",
+            "endpoint_a": {
+              "kind": "marker",
+              "body_id": "body_001",
+              "marker_id": "marker_001"
+            },
+            "endpoint_b": {
+              "kind": "ground"
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "joint_002",
+            "name": "Joint_O_OAOB",
+            "type": "revolute",
+            "endpoint_a": {
+              "kind": "marker",
+              "body_id": "body_001",
+              "marker_id": "marker_001"
+            },
+            "endpoint_b": {
+              "kind": "marker",
+              "body_id": "body_003",
+              "marker_id": "marker_007"
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "joint_003",
+            "name": "Joint_A",
+            "type": "revolute",
+            "endpoint_a": {
+              "kind": "marker",
+              "body_id": "body_001",
+              "marker_id": "marker_002"
+            },
+            "endpoint_b": {
+              "kind": "marker",
+              "body_id": "body_002",
+              "marker_id": "marker_004"
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "joint_004",
+            "name": "Joint_B",
+            "type": "revolute",
+            "endpoint_a": {
+              "kind": "marker",
+              "body_id": "body_003",
+              "marker_id": "marker_008"
+            },
+            "endpoint_b": {
+              "kind": "marker",
+              "body_id": "body_004",
+              "marker_id": "marker_011"
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "joint_005",
+            "name": "Joint_P",
+            "type": "revolute",
+            "endpoint_a": {
+              "kind": "marker",
+              "body_id": "body_002",
+              "marker_id": "marker_005"
+            },
+            "endpoint_b": {
+              "kind": "marker",
+              "body_id": "body_004",
+              "marker_id": "marker_012"
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          }
+        ],
+        "drivers": [
+          {
+            "id": "driver_001",
+            "name": "InputDrive",
+            "type": "rotation",
+            "target_joint_id": "joint_001",
+            "law": {
+              "expression": "45 deg * sin(360 deg * t / 2 s)",
+              "unit": "deg",
+              "expected_dimension": "angle"
+            },
+            "metadata": {}
+          }
+        ],
+        "loads": [],
+        "sensors": [
+          {
+            "id": "sensor_001",
+            "name": "PenSensor",
+            "type": "point",
+            "marker_ids": [
+              "marker_005"
+            ],
+            "metadata": {}
+          },
+          {
+            "id": "sensor_002",
+            "name": "OutputSensor",
+            "type": "point",
+            "marker_ids": [
+              "marker_010"
+            ],
+            "metadata": {}
+          }
+        ],
+        "springs": [],
+        "gravity": null
+      },
+      "poses": [],
+      "analyses": [],
+      "runs": [],
+      "overlay": null,
+      "tolerances": {},
+      "metrics": {},
+      "metadata": {}
+    }
+  },
+  "selected_case_id": "case_001",
+  "selected_pose_id": null,
+  "selected_analysis_id": null,
+  "metadata": {}
 }

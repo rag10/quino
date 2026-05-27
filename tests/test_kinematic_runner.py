@@ -6,14 +6,15 @@ from quino.analysis.kinematic_runner import KinematicAnalysisRunner
 from quino.analysis.runner import AnalysisResult
 from quino.application.service import ApplicationService
 from quino.domain.inputs import MarkerInput
-from quino.domain.model import BodyPose, Pose
+from quino.domain.model import BodyPose
+from quino.domain.workspace import Pose
 from quino.domain.workspace import SweepDef
 from quino.services.sensor_extraction_kinematic import extract_sensors_from_pose
 
 
 def _bar_project():
     svc = ApplicationService()
-    svc.new_project("k")
+    svc.new_workspace("k")
     body_id = svc.create_bar("Bar", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
     body = svc.get_body(body_id)
     marker_a = next(marker for marker in body.markers if marker.name == "A")

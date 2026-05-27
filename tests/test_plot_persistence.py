@@ -36,10 +36,12 @@ def test_config_plots_persisted_roundtrip(tmp_path) -> None:
         MetricDef(id="m1", key="max_hub_y", name="max y", kind="max", target=f"{sensor_id}:y", tags=["comfort"])
     )
     path = tmp_path / "p.quino.json"
-    svc.save_project(str(path))
+    svc.save_workspace(str(path))
     svc2 = ApplicationService()
-    svc2.load_project(str(path))
-    analysis2 = next(item for item in svc2.project.workspace.analyses if item.id == analysis.id)
+    svc2.load_workspace(str(path))
+    ws2 = svc2._workspace
+    case2 = ws2.cases.get(case.id) or ws2.cases[ws2.root_case_ids[0]]
+    analysis2 = next(item for item in case2.analyses if item.id == analysis.id)
     assert len(analysis2.config.plots) == 1
     assert analysis2.config.plots[0].title == "hub.y vs time"
     assert analysis2.config.metrics[0].tags == ["comfort"]

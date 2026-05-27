@@ -17,7 +17,7 @@ from quino import (
     SliderInput,
 )
 from quino.application.examples import build_slider_crank_example
-from quino.domain.model import Project
+from types import SimpleNamespace as _SN
 from quino.domain.types import Dimension
 from quino.simulation.assembler import AssembledDriver, AssembledSpring, AssembledSpringEndpoint
 from quino.solver_adapters.exudyn_adapter import ExudynAdapter
@@ -214,7 +214,7 @@ def test_simulation_returns_structured_result_even_without_exudyn() -> None:
 def test_driver_value_can_come_from_control_graph_command() -> None:
     app = ApplicationService()
     adapter = app.simulation_runner.adapter
-    project = Project(id="p1", name="P1", schema_version="test")
+    project = _SN(parameters=[])
     driver = AssembledDriver(
         driver_id="driver_001",
         name="Drive",
@@ -239,7 +239,7 @@ def test_driver_value_can_come_from_control_graph_command() -> None:
 def test_spring_law_can_come_from_control_graph_command() -> None:
     app = ApplicationService()
     adapter = app.simulation_runner.adapter
-    project = Project(id="p1", name="P1", schema_version="test")
+    project = _SN(parameters=[])
     spring = AssembledSpring(
         spring_id="spring_001",
         name="Actuator",

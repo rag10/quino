@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import math
 
-from quino.domain.model import Body, Pose
+from quino.domain.model import Body
+from quino.domain.workspace import Pose
 from quino.services.expressions import ExpressionService
 from quino.services.units import UnitService
 
@@ -44,11 +45,11 @@ def com_local_position(project, body: Body) -> tuple[float, float]:
     data = anchor.data
     if kind == "bar_percent":
         markers = _structural_xy(project, body)
-        if len(markers) != 2:
+        if len(markers) < 2:
             raise ValueError(
-                f"bar_percent anchor requires exactly 2 structural markers (body {body.id!r})"
+                f"bar_percent anchor requires at least 2 structural markers (body {body.id!r})"
             )
-        (_, x1, y1), (_, x2, y2) = markers
+        (_, x1, y1), (_, x2, y2) = markers[0], markers[-1]
         percent = float(data.get("percent", 50.0))
         t = max(0.0, min(100.0, percent)) / 100.0
         return (x1 + t * (x2 - x1), y1 + t * (y2 - y1))

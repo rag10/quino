@@ -281,8 +281,8 @@ def build_pantograph(app: ApplicationService) -> None:
     app.create_sketch_constraint("distance", [p_a, p_p], value=f"{L:.1f} mm", name="LenAP")
     app.create_sketch_constraint("distance", [p_o, p_b], value=f"{L:.1f} mm", name="LenOB")
     app.create_sketch_constraint("distance", [p_b, p_p], value=f"{L:.1f} mm", name="LenBP")
-    # Q collinear with O and B, on the far side of B → use collinear + distance
-    app.create_sketch_constraint("collinear", [p_o, p_b, p_q], name="QonOB")
+    # Q collinear with O and B, on the far side of B → parallel OB // BQ
+    app.create_sketch_constraint("parallel", [p_o, p_b, p_b, p_q], name="QonOB")
     app.create_sketch_constraint("distance", [p_b, p_q], value=f"{L:.1f} mm", name="LenBQ")
     app.create_sketch_constraint("parallel", [p_o, p_a, p_b, p_p], name="OAparBP")
     app.create_sketch_constraint("parallel", [p_o, p_b, p_a, p_p], name="OBparAP")

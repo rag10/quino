@@ -44,13 +44,26 @@ Notas:
 - Solvespace mantiene radios de circles/arcs locked vía `sys.diameter()` salvo cuando hay constraint RADIUS o TANGENT que los gobierna.
 - TANGENT line+curve y curve+curve se reducen a equivalencias con `PT_ON_CIRCLE` + punto auxiliar, no usa `sys.tangent()` (que no acepta circles en python-solvespace 3.0.8).
 
+## Dominio: Workspace / Case
+
+**Case-as-Model (schema 0.3.0)**: Cada `Case` contiene un `Model` completo (bodies, joints, drivers…). No hay composición diferencial. Las lecturas son O(1).
+
+- `app_service._workspace` → `Workspace` (dominio)
+- `app_service.workspace` → `WorkspaceCommands` (command-service)
+- `app_service.project` → `_WorkspaceProjectProxy` (shim back-compat, `.workspace` devuelve `None`)
+- `ws.cases[ws.root_case_ids[0]]` → caso raíz de la workspace activa
+- `Case.poses` / `Case.analyses` / `Case.runs` → listas propias del caso
+- `Pose` vive en `quino.domain.workspace`, **no** en `quino.domain.model`
+- `simulation_initial_pose_id` se persiste mediante `pose.is_default = True`
+- Después de `new_workspace()` y `load_workspace()` hay que actualizar `_service_context.ids = self.id_service`
+
 ## Glosario de dominio
 - **Body**: rígido (bar, point_mass, ground_anchor).
 - **Marker**: punto material anclado a un body (incluye COM y end-effectors).
 - **Joint**: revolute/translational entre dos endpoints (marker/marker, marker/ground, marker/slider).
 - **Slider**: prismatic guide (eje).
 - **Driver**: ley temporal sobre un joint.
-- **Pose**: configuración estática del mecanismo; se resuelve con IK.
+- **Pose**: configuración estática del mecanismo; se resuelve con IK. Vive en `Case.poses`.
 - **Sketch**: capa 2D paramétrica con constraints, se "compila" a markers/bodies.
 
 ## Convenciones

@@ -14,7 +14,8 @@ from quino.services.run_executor import RunExecutor, RunHandle
 def _bootstrap() -> tuple[ApplicationService, object]:
     svc = ApplicationService()
     svc.new_project("t")
-    case = svc.workspace.create_case("C")
+    ws = svc._workspace
+    case = ws.cases[ws.root_case_ids[0]]
     pose = svc.workspace.create_pose("P", case_id=case.id)
     analysis = svc.workspace.create_analysis("D", case_id=case.id, workspace_pose_id=pose.id)
     return svc, analysis
@@ -34,7 +35,7 @@ def test_enqueue_returns_handle_with_run_id(monkeypatch) -> None:
     try:
         assert isinstance(handle, RunHandle)
         assert handle.run_id is not None
-        run = next(r for r in svc.project.workspace.runs if r.id == handle.run_id)
+        run = next(r for r in svc.current_case().runs if r.id == handle.run_id)
         assert run.status in {"queued", "running", "ok", "failed"}
     finally:
         ex.shutdown()
@@ -68,7 +69,7 @@ def test_cancel_during_run_returns_to_be_run(monkeypatch) -> None:
         handle.cancel()
         deadline = time.time() + 3.0
         while time.time() < deadline:
-            run = next(r for r in svc.project.workspace.runs if r.id == handle.run_id)
+            run = next(r for r in svc.current_case().runs if r.id == handle.run_id)
             if run.status not in {"queued", "running"}:
                 break
             time.sleep(0.02)

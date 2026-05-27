@@ -179,10 +179,6 @@ class JsonMapper:
             "metrics": {k: self._metric_definition_to_dict(v) for k, v in c.metrics.items()},
             "metadata": dict(c.metadata),
         }
-        if c.sensor_outputs:
-            result["sensor_outputs"] = {
-                k: self._sensor_output_to_dict(v) for k, v in c.sensor_outputs.items()
-            }
         if c.reaction_outputs:
             result["reaction_outputs"] = {
                 k: self._reaction_output_to_dict(v) for k, v in c.reaction_outputs.items()

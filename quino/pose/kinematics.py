@@ -243,7 +243,8 @@ def _pose_at_angle(
     dependent bodies propagated via kinematic joint constraints.
     """
     import copy
-    from quino.domain.model import BodyPose, Pose
+    from quino.domain.workspace import Pose
+    from quino.domain.model import BodyPose
 
     new_pose = Pose(
         id=base_pose.id,

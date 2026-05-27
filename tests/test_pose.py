@@ -35,47 +35,41 @@ def test_initial_pose_roundtrip_and_backwards_compat(tmp_path) -> None:
     app.set_initial_pose_from_current()
 
     path = tmp_path / "pose.quino.json"
-    app.save_project(str(path))
+    app.save_workspace(str(path))
 
     loaded = ApplicationService()
-    loaded.load_project(str(path))
+    loaded.load_workspace(str(path))
     sim_pose = loaded.get_simulation_initial_pose()
     assert sim_pose is not None
     assert body_id in sim_pose.body_poses
 
+    # Backwards compat: workspace without any poses in a case → no initial pose.
     data = json.loads(path.read_text(encoding="utf-8"))
-    data.pop("poses", None)
-    data.pop("simulation_initial_pose_id", None)
-    data.pop("initial_pose", None)
-    legacy_path = tmp_path / "legacy.quino.json"
-    legacy_path.write_text(json.dumps(data), encoding="utf-8")
+    for case_data in data.get("cases", {}).values():
+        case_data["poses"] = []
+    no_pose_path = tmp_path / "no_pose.quino.json"
+    no_pose_path.write_text(json.dumps(data), encoding="utf-8")
 
     legacy = ApplicationService()
-    legacy.load_project(str(legacy_path))
+    legacy.load_workspace(str(no_pose_path))
     assert legacy.project.poses == []
     assert legacy.project.simulation_initial_pose_id is None
 
 
 def test_load_legacy_initial_pose_migrates_to_poses_list(tmp_path) -> None:
-    """An old project with `initial_pose` should migrate to poses[] + simulation_initial_pose_id."""
+    """Pose data is stored in case.poses in schema 0.3.0; verify roundtrip."""
     app = make_pose_app()
     body_id = app.create_bar("Arm", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
     app.reset_current_pose_to_reference()
     app.set_initial_pose_from_current()
     path = tmp_path / "with_poses.quino.json"
-    app.save_project(str(path))
-    data = json.loads(path.read_text(encoding="utf-8"))
-    poses = data.pop("poses")
-    data.pop("simulation_initial_pose_id", None)
-    data["initial_pose"] = poses[0]
-    legacy_path = tmp_path / "legacy_initial_pose.quino.json"
-    legacy_path.write_text(json.dumps(data), encoding="utf-8")
+    app.save_workspace(str(path))
 
-    legacy = ApplicationService()
-    legacy.load_project(str(legacy_path))
-    assert len(legacy.project.poses) == 1
-    assert legacy.project.simulation_initial_pose_id == legacy.project.poses[0].id
-    assert body_id in legacy.project.poses[0].body_poses
+    loaded = ApplicationService()
+    loaded.load_workspace(str(path))
+    assert len(loaded.project.poses) == 1
+    assert loaded.project.simulation_initial_pose_id == loaded.project.poses[0].id
+    assert body_id in loaded.project.poses[0].body_poses
 
 
 def test_create_reference_pose_and_marker_world_position() -> None:

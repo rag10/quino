@@ -2,7 +2,8 @@ import math
 import pytest
 from quino.application.service import ApplicationService
 from quino.domain.inputs import MarkerInput
-from quino.domain.model import BodyPose, CoMAnchor, Pose
+from quino.domain.model import BodyPose, CoMAnchor
+from quino.domain.workspace import Pose
 from quino.services.com_geometry import com_global_position, com_local_position
 
 
@@ -21,7 +22,7 @@ def test_com_anchor_roundtrip_dict():
 
 def _make_bar(percent: float | None = None) -> tuple[ApplicationService, str]:
     app = ApplicationService()
-    app.new_project("t")
+    app.new_workspace("t")
     body_id = app.create_bar(
         "Bar",
         MarkerInput("0 mm", "0 mm", "A"),
@@ -60,7 +61,7 @@ def test_local_offset_ignores_markers() -> None:
 
 def test_marker_kind_returns_marker_position() -> None:
     app = ApplicationService()
-    app.new_project("t")
+    app.new_workspace("t")
     body_id = app.create_punctual_mass("M", x="42 mm", y="7 mm")
     body = app.get_body(body_id)
     lx, ly = com_local_position(app.project, body)
@@ -70,7 +71,7 @@ def test_marker_kind_returns_marker_position() -> None:
 
 def test_barycentric_equal_weights_centroid() -> None:
     app = ApplicationService()
-    app.new_project("t")
+    app.new_workspace("t")
     body_id = app.create_body(
         "Tri",
         [

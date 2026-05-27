@@ -20,7 +20,8 @@ def test_dynamic_controller_install_unmount(qtbot) -> None:
     svc = ApplicationService()
     svc.new_project("t")
     svc.create_punctual_mass("M", x="0 mm", y="0 mm")
-    case = svc.workspace.create_case("C")
+    ws = svc._workspace
+    case = ws.cases[ws.root_case_ids[0]]
     pose = svc.workspace.create_pose("P", case_id=case.id)
     analysis = svc.workspace.create_analysis("D", analysis_type="dynamic", case_id=case.id, workspace_pose_id=pose.id)
 
@@ -37,12 +38,13 @@ def test_dynamic_metrics_tab_populates_from_selected_run(qtbot, tmp_path) -> Non
     svc = ApplicationService()
     svc.new_project("t")
     svc.create_punctual_mass("M", x="0 mm", y="0 mm")
-    case = svc.workspace.create_case("C")
+    ws = svc._workspace
+    case = ws.cases[ws.root_case_ids[0]]
     pose = svc.workspace.create_pose("P", case_id=case.id)
     analysis = svc.workspace.create_analysis("D", analysis_type="dynamic", case_id=case.id, workspace_pose_id=pose.id)
     svc.current_project_path = tmp_path
     run = Run(id="run_001", analysis_id=analysis.id, created_at="now", status="ok", metrics={"max_y": 1.25})
-    svc.project.workspace.runs.append(run)
+    case.runs.append(run)
     artifact_dir = tmp_path / "artifacts" / f"run_{run.id}"
     artifact_dir.mkdir(parents=True)
     artifact_path = artifact_dir / "result.json"
@@ -67,12 +69,13 @@ def test_selecting_dynamic_analysis_loads_latest_persisted_run(qtbot, tmp_path) 
     svc = ApplicationService()
     svc.new_project("t")
     svc.create_punctual_mass("M", x="0 mm", y="0 mm")
-    case = svc.workspace.create_case("C")
+    ws = svc._workspace
+    case = ws.cases[ws.root_case_ids[0]]
     pose = svc.workspace.create_pose("P", case_id=case.id)
     analysis = svc.workspace.create_analysis("D", analysis_type="dynamic", case_id=case.id, workspace_pose_id=pose.id)
     svc.current_project_path = tmp_path
     run = Run(id="run_001", analysis_id=analysis.id, created_at="now", status="ok")
-    svc.project.workspace.runs.append(run)
+    case.runs.append(run)
     artifact_dir = tmp_path / "artifacts" / f"run_{run.id}"
     artifact_dir.mkdir(parents=True)
     artifact_path = artifact_dir / "result.json"
@@ -106,7 +109,8 @@ def test_dynamic_controller_widgets_survive_unmount_and_remount(qtbot) -> None:
     svc = ApplicationService()
     svc.new_project("t")
     svc.create_punctual_mass("M", x="0 mm", y="0 mm")
-    case = svc.workspace.create_case("C")
+    ws = svc._workspace
+    case = ws.cases[ws.root_case_ids[0]]
     pose = svc.workspace.create_pose("P", case_id=case.id)
     analysis = svc.workspace.create_analysis("D", analysis_type="dynamic", case_id=case.id, workspace_pose_id=pose.id)
 

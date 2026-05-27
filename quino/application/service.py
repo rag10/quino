@@ -206,6 +206,7 @@ class ApplicationService:
 
     def new_workspace(self, name: str = "Untitled") -> Workspace:
         self.id_service = IdService()
+        self._service_context.ids = self.id_service
         root_id = self.id_service.new("case")
         ws_id = self.id_service.new("ws")
         root = Case(id=root_id, name="Root", model=Model())
@@ -226,7 +227,7 @@ class ApplicationService:
 
     def load_workspace(self, path) -> Workspace:
         from pathlib import Path as _Path
-        self._workspace = self.json_mapper.load_file(path)
+        self._workspace = self.json_mapper.load(path)
         if self._workspace is not None:
             version = getattr(self._workspace, "schema_version", "0.0.0")
             if version != self.schema_version:
@@ -239,6 +240,9 @@ class ApplicationService:
         self._redo_stack.clear()
         self.poses.clear_current()
         self._structural_case_warning_acknowledged = False
+        self.id_service = IdService()
+        self._service_context.ids = self.id_service
+        self._sync_id_service()
         self._sync_all_special_com_markers()
         case = self.current_case()
         if case is not None and self._workspace is not None and self._workspace.sketch is not None:
@@ -252,7 +256,7 @@ class ApplicationService:
         target = path or self.current_workspace_path
         if target is None:
             raise RuntimeError("No save path specified")
-        self.json_mapper.save_file(self._workspace, target)
+        self.json_mapper.save(self._workspace, target)
         self.current_workspace_path = Path(target)
 
     # ------------------------------------------------------------------ back-compat aliases

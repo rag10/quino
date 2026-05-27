@@ -16,8 +16,7 @@ from quino.analysis.kinematic_sweeps import (
     strategy_for,
 )
 from quino.analysis.runner import AnalysisResult, AnalysisRunner
-from quino.domain.model import Pose
-from quino.domain.workspace import KinematicConfig, ResultRef, Run
+from quino.domain.workspace import KinematicConfig, Pose, ResultRef, Run
 from quino.pose.geometry import create_reference_pose, marker_world_position
 from quino.pose.model import PoseSolveSettings
 from quino.services.sensor_extraction_kinematic import extract_sensors_from_pose

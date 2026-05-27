@@ -5,17 +5,23 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from quino.application.service import ApplicationService
 from quino.domain.inputs import MarkerInput
-from quino.domain.workspace import ResultRef, Run
+from quino.domain.workspace import Analysis, ResultRef, Run
 from quino.gui.main_window import MainWindow
 
 
-def test_static_mode_shows_dof_banner(qtbot) -> None:
+def _setup_svc():
     svc = ApplicationService()
-    svc.new_project("t")
+    svc.new_workspace("t")
+    ws = svc._workspace
+    case = ws.cases[ws.root_case_ids[0]]
+    analysis = Analysis(id="a1", name="S", analysis_type="static")
+    case.analyses.append(analysis)
+    return svc, case, analysis
+
+
+def test_static_mode_shows_dof_banner(qtbot) -> None:
+    svc, case, analysis = _setup_svc()
     svc.create_bar("Bar", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
-    case = svc.workspace.create_case("C")
-    pose = svc.workspace.create_pose("P", case_id=case.id)
-    analysis = svc.workspace.create_analysis("S", analysis_type="static", case_id=case.id, workspace_pose_id=pose.id)
     window = MainWindow(svc)
     qtbot.addWidget(window)
     window._set_app_mode("analysis")
@@ -26,15 +32,11 @@ def test_static_mode_shows_dof_banner(qtbot) -> None:
 
 
 def test_static_mode_metrics_tab_populates(qtbot, tmp_path) -> None:
-    svc = ApplicationService()
-    svc.new_project("t")
+    svc, case, analysis = _setup_svc()
     svc.create_punctual_mass("M", x="0 mm", y="0 mm")
-    case = svc.workspace.create_case("C")
-    pose = svc.workspace.create_pose("P", case_id=case.id)
-    analysis = svc.workspace.create_analysis("S", analysis_type="static", case_id=case.id, workspace_pose_id=pose.id)
-    svc.current_project_path = tmp_path
+    svc.current_workspace_path = tmp_path
     run = Run(id="run_001", analysis_id=analysis.id, created_at="now", status="ok", metrics={"spring_energy": 0.75})
-    svc.project.workspace.runs.append(run)
+    case.runs.append(run)
     artifact_dir = tmp_path / "artifacts" / f"run_{run.id}"
     artifact_dir.mkdir(parents=True)
     artifact_path = artifact_dir / "result.json"

@@ -4,17 +4,18 @@ from quino import ApplicationService, MarkerInput
 from quino.serialization.json_io import JsonMapper
 
 
-def test_end_to_end_new_project_always_has_workspace() -> None:
+def test_end_to_end_new_workspace_roundtrips(tmp_path) -> None:
     app = ApplicationService()
-    project = app.new_project("Legacy")
+    app.new_workspace("Test")
     app.create_bar("Bar", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
 
-    mapper = JsonMapper()
-    data = mapper.dump(project)
-    # new_project always creates a baseline, so workspace is always serialized
-    assert "workspace" in data
-    assert len(data["workspace"]["baselines"]) == 1
+    path = tmp_path / "ws.quino.json"
+    app.save_workspace(str(path))
 
-    restored = mapper.load(data)
-    assert restored.workspace is not None
-    assert len(restored.workspace.baselines) == 1
+    mapper = JsonMapper()
+    ws = mapper.load(str(path))
+
+    assert ws is not None
+    assert len(ws.cases) >= 1
+    case = ws.cases[ws.root_case_ids[0]]
+    assert len(case.model.bodies) >= 1

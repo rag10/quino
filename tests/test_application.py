@@ -897,34 +897,38 @@ def test_update_gravity_rejects_non_numeric() -> None:
         app.update_property("__gravity__", "magnitude", PropertyValueInput("expression", "abc"))
 
 
-def test_gravity_serialization_roundtrip() -> None:
-    from quino.serialization.json_io import JsonMapper
-
+def test_gravity_serialization_roundtrip(tmp_path) -> None:
     app = make_app()
     app.add_gravity()
     app.project.model.gravity.magnitude = 5.0
     app.project.model.gravity.direction_y = -0.5
 
-    mapper = JsonMapper()
-    loaded = mapper.load(mapper.dump(app.project))
-    assert loaded.model.gravity is not None
-    assert loaded.model.gravity.magnitude == 5.0
-    assert loaded.model.gravity.direction_y == -0.5
+    path = str(tmp_path / "ws.quino.json")
+    app.save_workspace(path)
+    app2 = ApplicationService()
+    app2.load_workspace(path)
+    case = app2._workspace.cases[app2._workspace.root_case_ids[0]]
+    assert case.model.gravity is not None
+    assert case.model.gravity.magnitude == 5.0
+    assert case.model.gravity.direction_y == -0.5
 
 
-def test_gravity_none_serialization_roundtrip() -> None:
-    from quino.serialization.json_io import JsonMapper
-
+def test_gravity_none_serialization_roundtrip(tmp_path) -> None:
     app = make_app()
     assert app.project.model.gravity is None
-    mapper = JsonMapper()
-    loaded = mapper.load(mapper.dump(app.project))
-    assert loaded.model.gravity is None
+
+    path = str(tmp_path / "ws.quino.json")
+    app.save_workspace(path)
+    app2 = ApplicationService()
+    app2.load_workspace(path)
+    case = app2._workspace.cases[app2._workspace.root_case_ids[0]]
+    assert case.model.gravity is None
 
 
-def test_backward_compat_old_project_without_gravity() -> None:
-    from quino.serialization.json_io import JsonMapper
-
+def test_backward_compat_old_project_without_gravity(tmp_path) -> None:
+    # Old schema (1.0) is rejected by the new loader.
+    from quino.serialization.json_io import UnsupportedSchemaError
+    import json
     data = {
         "schema_version": "1.0",
         "project": {"id": "test-project", "name": "TestModel", "metadata": {}},
@@ -933,13 +937,17 @@ def test_backward_compat_old_project_without_gravity() -> None:
         "sketch": None,
         "view_state": {},
     }
-    project = JsonMapper().load(data)
-    assert project.model.gravity is None
+    path = str(tmp_path / "old.quino.json")
+    with open(path, "w") as f:
+        json.dump(data, f)
+    with pytest.raises(UnsupportedSchemaError):
+        ApplicationService().load_workspace(path)
 
 
-def test_backward_compat_old_gravity_enabled_true() -> None:
-    from quino.serialization.json_io import JsonMapper
-
+def test_backward_compat_old_gravity_enabled_true(tmp_path) -> None:
+    # Old schema (1.0) is rejected.
+    from quino.serialization.json_io import UnsupportedSchemaError
+    import json
     data = {
         "schema_version": "1.0",
         "project": {"id": "p", "name": "N", "metadata": {}},
@@ -951,14 +959,17 @@ def test_backward_compat_old_gravity_enabled_true() -> None:
         "sketch": None,
         "view_state": {},
     }
-    project = JsonMapper().load(data)
-    assert project.model.gravity is not None
-    assert project.model.gravity.magnitude == 5.0
+    path = str(tmp_path / "old.quino.json")
+    with open(path, "w") as f:
+        json.dump(data, f)
+    with pytest.raises(UnsupportedSchemaError):
+        ApplicationService().load_workspace(path)
 
 
-def test_backward_compat_old_gravity_enabled_false() -> None:
-    from quino.serialization.json_io import JsonMapper
-
+def test_backward_compat_old_gravity_enabled_false(tmp_path) -> None:
+    # Old schema (1.0) is rejected.
+    from quino.serialization.json_io import UnsupportedSchemaError
+    import json
     data = {
         "schema_version": "1.0",
         "project": {"id": "p", "name": "N", "metadata": {}},
@@ -970,8 +981,11 @@ def test_backward_compat_old_gravity_enabled_false() -> None:
         "sketch": None,
         "view_state": {},
     }
-    project = JsonMapper().load(data)
-    assert project.model.gravity is None
+    path = str(tmp_path / "old.quino.json")
+    with open(path, "w") as f:
+        json.dump(data, f)
+    with pytest.raises(UnsupportedSchemaError):
+        ApplicationService().load_workspace(path)
 
 
 def test_gravity_add_undoable() -> None:
@@ -1293,24 +1307,25 @@ def test_delete_circle_cascade_removes_on_circle_constraints() -> None:
 
 
 
-def test_sensor_outputs_not_persisted() -> None:
-    import tempfile, os, json
+def test_sensor_outputs_not_persisted(tmp_path) -> None:
+    import json
     app = make_app()
     body = app.create_body("Link", [MarkerInput("0 mm", "0 mm", "A")])
     marker_a = next(m.id for m in app._find_body(body).markers if m.name == "A")
     sensor_id = app.create_sensor("S1", "point", [marker_a])
-    app.project.sensor_outputs[sensor_id] = app.project.sensor_outputs.get("dummy", type("obj", (), {"data": []})())
-    app.project.sensor_outputs[sensor_id].data = [(0.0, 1.0, 2.0)]
+    from quino.domain.workspace import SensorOutput
+    app.project.sensor_outputs[sensor_id] = SensorOutput(sensor_id=sensor_id, time=[], columns=["x"], data=[])
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = os.path.join(tmpdir, "test.quino.json")
-        app.save_project(path)
-        with open(path) as f:
-            data = json.load(f)
-        assert "sensor_outputs" not in data
-        app2 = ApplicationService()
-        app2.load_project(path)
-        assert sensor_id not in app2.project.sensor_outputs
+    path = str(tmp_path / "test.quino.json")
+    app.save_project(path)
+    with open(path) as f:
+        data = json.load(f)
+    # sensor_outputs must not appear anywhere in persisted JSON
+    for case_data in data.get("cases", {}).values():
+        assert "sensor_outputs" not in case_data
+    app2 = ApplicationService()
+    app2.load_project(path)
+    assert sensor_id not in app2.project.sensor_outputs
 
 
 

@@ -86,17 +86,16 @@ def build_double_pendulum_kinematic(app: ApplicationService) -> None:
 
     app.add_gravity()
 
-    # Workspace: baseline + pose + kinematic analysis with two sweeps.
-    ws = app.project.workspace
-    baseline = ws.baselines[0]
-    app.workspace.rename_baseline(baseline.id, "Reference")
+    # Workspace: case + pose + kinematic analysis with two sweeps.
+    ws = app._workspace
+    case = ws.cases[ws.root_case_ids[0]]
     pose = app.workspace.create_pose(
-        "Pendulum reference pose", baseline_id=baseline.id,
+        "Pendulum reference pose", case_id=case.id,
     )
     analysis = app.workspace.create_analysis(
         "Sweep shoulder + elbow",
         analysis_type="kinematic",
-        baseline_id=baseline.id,
+        case_id=case.id,
         workspace_pose_id=pose.id,
     )
 
@@ -132,12 +131,9 @@ def build_double_pendulum_kinematic(app: ApplicationService) -> None:
         )
     )
 
-    app.set_working_context(baseline_id=baseline.id)
-
-    # Save first, then run the kinematic analysis (the runner writes its
-    # artefact under <project_dir>/artifacts/).
+    # Save first, then run the kinematic analysis.
     EXAMPLES_DIR.mkdir(parents=True, exist_ok=True)
-    app.save_project(str(EXAMPLE_PATH))
+    app.save_workspace(str(EXAMPLE_PATH))
 
     runner = KinematicAnalysisRunner()
     errors = runner.validate(app.project, analysis)

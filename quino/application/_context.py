@@ -214,8 +214,11 @@ class _WorkspaceProjectProxy:
 
     @simulation_initial_pose_id.setter
     def simulation_initial_pose_id(self, value):
-        # No direct equivalent in new model; silently ignore for compat
-        pass
+        # Mark the target pose as is_default; clear all others.
+        if self._case is None:
+            return
+        for p in self._case.poses:
+            p.is_default = (p.id == value)
 
     @property
     def id(self) -> str:

@@ -1,68 +1,7 @@
 {
   "schema_version": "0.3.0",
-  "project": {
-    "id": "proj_001",
-    "name": "Active Suspension Validation Rig",
-    "metadata": {}
-  },
-  "parameters": [
-    {
-      "id": "param_001",
-      "name": "ArmLength",
-      "expression": "300 mm",
-      "unit": "mm",
-      "description": "Lower control arm length, hinge to ball-joint.",
-      "metadata": {}
-    },
-    {
-      "id": "param_002",
-      "name": "ChassisMountX",
-      "expression": "0 mm",
-      "unit": "mm",
-      "description": "",
-      "metadata": {}
-    },
-    {
-      "id": "param_003",
-      "name": "ChassisMountY",
-      "expression": "0 mm",
-      "unit": "mm",
-      "description": "",
-      "metadata": {}
-    },
-    {
-      "id": "param_004",
-      "name": "SpringRest",
-      "expression": "320 mm",
-      "unit": "mm",
-      "description": "Free length of the strut spring.",
-      "metadata": {}
-    },
-    {
-      "id": "param_005",
-      "name": "RoadAmp",
-      "expression": "1500 N",
-      "unit": "N",
-      "description": "Peak vertical force the road profile applies to the wheel.",
-      "metadata": {}
-    },
-    {
-      "id": "param_006",
-      "name": "RoadFreq",
-      "expression": "2.5 unitless",
-      "unit": "unitless",
-      "description": "Excitation frequency of the rolling-road profile, in Hz.",
-      "metadata": {}
-    },
-    {
-      "id": "param_007",
-      "name": "QuarterCarLoad",
-      "expression": "4000 N",
-      "unit": "N",
-      "description": "Static load representing the quarter-car weight on this corner.",
-      "metadata": {}
-    }
-  ],
+  "id": "ws_001",
+  "name": "Active Suspension Validation Rig",
   "sketch": {
     "id": "sketch_001",
     "name": "Main Sketch",
@@ -278,714 +217,65 @@
     "variables": {},
     "metadata": {}
   },
-  "model": {
-    "bodies": [
-      {
-        "id": "body_001",
-        "name": "ChassisMount",
-        "type": "point_mass",
-        "markers": [
-          {
-            "id": "marker_001",
-            "name": "P",
-            "type": "structural",
-            "x": {
-              "expression": "ChassisMountX",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "ChassisMountY",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          }
-        ],
-        "edge_order": [
-          "marker_001"
-        ],
-        "closed_shape": true,
-        "mass": null,
-        "com": {
-          "kind": "marker",
-          "data": {
-            "marker_id": "marker_001"
-          }
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {
-          "ground_anchor": true,
-          "ground_marker_id": "marker_001"
-        }
-      },
-      {
-        "id": "body_002",
-        "name": "StrutTopMount",
-        "type": "point_mass",
-        "markers": [
-          {
-            "id": "marker_003",
-            "name": "P",
-            "type": "structural",
-            "x": {
-              "expression": "ArmLength",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "320 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          }
-        ],
-        "edge_order": [
-          "marker_003"
-        ],
-        "closed_shape": true,
-        "mass": null,
-        "com": {
-          "kind": "marker",
-          "data": {
-            "marker_id": "marker_003"
-          }
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {
-          "ground_anchor": true,
-          "ground_marker_id": "marker_003"
-        }
-      },
-      {
-        "id": "body_003",
-        "name": "LowerArm",
-        "type": "bar",
-        "markers": [
-          {
-            "id": "marker_005",
-            "name": "Hinge",
-            "type": "structural",
-            "x": {
-              "expression": "ChassisMountX",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "ChassisMountY",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          },
-          {
-            "id": "marker_006",
-            "name": "BallJoint",
-            "type": "structural",
-            "x": {
-              "expression": "ArmLength",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          }
-        ],
-        "edge_order": [
-          "marker_005",
-          "marker_006"
-        ],
-        "closed_shape": false,
-        "mass": {
-          "expression": "3 kg",
-          "unit": "kg",
-          "expected_dimension": "mass"
-        },
-        "com": {
-          "kind": "bar_percent",
-          "data": {
-            "percent": 50.0
-          }
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {}
-      },
-      {
-        "id": "body_004",
-        "name": "WheelHub",
-        "type": "body",
-        "markers": [
-          {
-            "id": "marker_008",
-            "name": "Center",
-            "type": "structural",
-            "x": {
-              "expression": "ArmLength",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          },
-          {
-            "id": "marker_009",
-            "name": "StrutAttach",
-            "type": "structural",
-            "x": {
-              "expression": "ArmLength",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "320 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          },
-          {
-            "id": "marker_010",
-            "name": "ContactPatch",
-            "type": "structural",
-            "x": {
-              "expression": "ArmLength",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "-50 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          }
-        ],
-        "edge_order": [
-          "marker_008",
-          "marker_009",
-          "marker_010"
-        ],
-        "closed_shape": true,
-        "mass": {
-          "expression": "40 kg",
-          "unit": "kg",
-          "expected_dimension": "mass"
-        },
-        "com": {
-          "kind": "barycentric",
-          "data": {
-            "weights": {
-              "marker_008": 1.0,
-              "marker_009": 1.0,
-              "marker_010": 1.0
-            }
-          }
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {}
-      }
-    ],
-    "sliders": [
-      {
-        "id": "slider_001",
-        "name": "StrutGuide",
-        "origin_x": {
-          "expression": "ArmLength",
-          "unit": "mm",
-          "expected_dimension": "length"
-        },
-        "origin_y": {
-          "expression": "320 mm",
-          "unit": "mm",
-          "expected_dimension": "length"
-        },
-        "angle": {
-          "expression": "270 deg",
-          "unit": "deg",
-          "expected_dimension": "angle"
-        },
-        "travel_min": {
-          "expression": "-60 mm",
-          "unit": "mm",
-          "expected_dimension": "length"
-        },
-        "travel_max": {
-          "expression": "60 mm",
-          "unit": "mm",
-          "expected_dimension": "length"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {}
-      }
-    ],
-    "joints": [
-      {
-        "id": "joint_001",
-        "name": "Ground_ChassisMount",
-        "type": "rigid",
-        "endpoint_a": {
-          "kind": "marker",
-          "body_id": "body_001",
-          "marker_id": "marker_001"
-        },
-        "endpoint_b": {
-          "kind": "ground"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {
-          "internal_ground_anchor": true
-        }
-      },
-      {
-        "id": "joint_002",
-        "name": "Ground_StrutTopMount",
-        "type": "rigid",
-        "endpoint_a": {
-          "kind": "marker",
-          "body_id": "body_002",
-          "marker_id": "marker_003"
-        },
-        "endpoint_b": {
-          "kind": "ground"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {
-          "internal_ground_anchor": true
-        }
-      },
-      {
-        "id": "joint_003",
-        "name": "Pivot_Chassis",
-        "type": "revolute",
-        "endpoint_a": {
-          "kind": "marker",
-          "body_id": "body_001",
-          "marker_id": "marker_001"
-        },
-        "endpoint_b": {
-          "kind": "marker",
-          "body_id": "body_003",
-          "marker_id": "marker_005"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {
-          "angle_limit_reference_body_id": "body_001",
-          "angle_limit_moving_body_id": "body_003"
-        }
-      },
-      {
-        "id": "joint_004",
-        "name": "BallJoint",
-        "type": "revolute",
-        "endpoint_a": {
-          "kind": "marker",
-          "body_id": "body_003",
-          "marker_id": "marker_006"
-        },
-        "endpoint_b": {
-          "kind": "marker",
-          "body_id": "body_004",
-          "marker_id": "marker_008"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {}
-      },
-      {
-        "id": "joint_005",
-        "name": "StrutSlide",
-        "type": "revolute",
-        "endpoint_a": {
-          "kind": "marker",
-          "body_id": "body_004",
-          "marker_id": "marker_009"
-        },
-        "endpoint_b": {
-          "kind": "slider",
-          "slider_id": "slider_001"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {}
-      }
-    ],
-    "drivers": [],
-    "loads": [
-      {
-        "id": "load_001",
-        "name": "RoadProfile",
-        "target_marker_id": "marker_010",
-        "fx": {
-          "expression": "0 N",
-          "unit": "N",
-          "expected_dimension": "force"
-        },
-        "fy": {
-          "expression": "RoadAmp * sin(360 deg * RoadFreq * t / 1 s)",
-          "unit": "N",
-          "expected_dimension": "force"
-        },
-        "metadata": {}
-      },
-      {
-        "id": "load_002",
-        "name": "QuarterCarLoad",
-        "target_marker_id": "marker_009",
-        "fx": {
-          "expression": "0 N",
-          "unit": "N",
-          "expected_dimension": "force"
-        },
-        "fy": {
-          "expression": "-QuarterCarLoad",
-          "unit": "N",
-          "expected_dimension": "force"
-        },
-        "metadata": {}
-      },
-      {
-        "id": "load_003",
-        "name": "ActuatorForce",
-        "target_marker_id": "marker_009",
-        "fx": {
-          "expression": "0 N",
-          "unit": "N",
-          "expected_dimension": "force"
-        },
-        "fy": {
-          "expression": "0 N",
-          "unit": "N",
-          "expected_dimension": "force"
-        },
-        "metadata": {}
-      }
-    ],
-    "sensors": [
-      {
-        "id": "sensor_001",
-        "name": "HubVerticalPos",
-        "type": "point",
-        "marker_ids": [
-          "marker_008"
-        ],
-        "metadata": {}
-      },
-      {
-        "id": "sensor_002",
-        "name": "SpringLength",
-        "type": "distance",
-        "marker_ids": [
-          "marker_003",
-          "marker_009"
-        ],
-        "metadata": {}
-      },
-      {
-        "id": "sensor_003",
-        "name": "ArmAngle",
-        "type": "angle_horizontal",
-        "marker_ids": [
-          "marker_005",
-          "marker_006"
-        ],
-        "metadata": {}
-      },
-      {
-        "id": "sensor_004",
-        "name": "RideAccelerometer",
-        "type": "point",
-        "marker_ids": [
-          "marker_008"
-        ],
-        "metadata": {}
-      },
-      {
-        "id": "sensor_005",
-        "name": "ContactPatchPos",
-        "type": "point",
-        "marker_ids": [
-          "marker_010"
-        ],
-        "metadata": {}
-      }
-    ],
-    "springs": [
-      {
-        "id": "spring_001",
-        "name": "StrutSpring",
-        "spring_type": "linear_spring",
-        "endpoint_a": {
-          "kind": "marker",
-          "body_id": "body_002",
-          "marker_id": "marker_003"
-        },
-        "endpoint_b": {
-          "kind": "marker",
-          "body_id": "body_004",
-          "marker_id": "marker_009"
-        },
-        "rest_value": {
-          "expression": "SpringRest",
-          "unit": "mm",
-          "expected_dimension": "length"
-        },
-        "law": null,
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {
-          "stiffness": 35000.0,
-          "damping": 1500.0
-        }
-      }
-    ],
-    "gravity": {
-      "magnitude": 9.81,
-      "direction_x": 0.0,
-      "direction_y": -1.0
+  "parameters": [
+    {
+      "id": "param_001",
+      "name": "ArmLength",
+      "expression": "300 mm",
+      "unit": "mm",
+      "description": "Lower control arm length, hinge to ball-joint.",
+      "metadata": {}
     },
-    "control_graph": {
-      "instances": {
-        "blk_001": {
-          "id": "blk_001",
-          "block_type": "ModelSensor",
-          "parameters": {
-            "sensor_id": "sensor_001",
-            "channel": "y"
-          },
-          "input_ports": [],
-          "output_ports": [
-            {
-              "name": "out",
-              "shape": [
-                1
-              ]
-            }
-          ],
-          "position": [
-            -380.0,
-            -120.0
-          ]
-        },
-        "blk_002": {
-          "id": "blk_002",
-          "block_type": "Gain",
-          "parameters": {
-            "k": 0.0
-          },
-          "input_ports": [
-            {
-              "name": "in",
-              "shape": [
-                1
-              ]
-            }
-          ],
-          "output_ports": [
-            {
-              "name": "out",
-              "shape": [
-                1
-              ]
-            }
-          ],
-          "position": [
-            -200.0,
-            -120.0
-          ]
-        },
-        "blk_003": {
-          "id": "blk_003",
-          "block_type": "PID",
-          "parameters": {
-            "kp": 0.0,
-            "ki": 0.0,
-            "kd": 0.0,
-            "lower": -2000.0,
-            "upper": 2000.0,
-            "anti_windup": true
-          },
-          "input_ports": [
-            {
-              "name": "error",
-              "shape": [
-                1
-              ]
-            }
-          ],
-          "output_ports": [
-            {
-              "name": "out",
-              "shape": [
-                1
-              ]
-            }
-          ],
-          "position": [
-            -20.0,
-            -120.0
-          ]
-        },
-        "blk_004": {
-          "id": "blk_004",
-          "block_type": "LoadCommand",
-          "parameters": {
-            "load_id": "load_003",
-            "component": "fy"
-          },
-          "input_ports": [
-            {
-              "name": "in",
-              "shape": [
-                1
-              ]
-            }
-          ],
-          "output_ports": [
-            {
-              "name": "out",
-              "shape": [
-                1
-              ]
-            }
-          ],
-          "position": [
-            180.0,
-            -120.0
-          ]
-        }
-      },
-      "connections": [
-        {
-          "src_instance": "blk_001",
-          "src_port": "out",
-          "dst_instance": "blk_002",
-          "dst_port": "in"
-        },
-        {
-          "src_instance": "blk_002",
-          "src_port": "out",
-          "dst_instance": "blk_003",
-          "dst_port": "error"
-        },
-        {
-          "src_instance": "blk_003",
-          "src_port": "out",
-          "dst_instance": "blk_004",
-          "dst_port": "in"
-        }
-      ]
+    {
+      "id": "param_002",
+      "name": "ChassisMountX",
+      "expression": "0 mm",
+      "unit": "mm",
+      "description": "",
+      "metadata": {}
+    },
+    {
+      "id": "param_003",
+      "name": "ChassisMountY",
+      "expression": "0 mm",
+      "unit": "mm",
+      "description": "",
+      "metadata": {}
+    },
+    {
+      "id": "param_004",
+      "name": "SpringRest",
+      "expression": "320 mm",
+      "unit": "mm",
+      "description": "Free length of the strut spring.",
+      "metadata": {}
+    },
+    {
+      "id": "param_005",
+      "name": "RoadAmp",
+      "expression": "1500 N",
+      "unit": "N",
+      "description": "Peak vertical force the road profile applies to the wheel.",
+      "metadata": {}
+    },
+    {
+      "id": "param_006",
+      "name": "RoadFreq",
+      "expression": "2.5 unitless",
+      "unit": "unitless",
+      "description": "Excitation frequency of the rolling-road profile, in Hz.",
+      "metadata": {}
+    },
+    {
+      "id": "param_007",
+      "name": "QuarterCarLoad",
+      "expression": "4000 N",
+      "unit": "N",
+      "description": "Static load representing the quarter-car weight on this corner.",
+      "metadata": {}
     }
-  },
+  ],
+  "parameter_catalog": {},
   "view_state": {
     "zoom": 1.0,
     "pan_x": 0.0,
@@ -996,1094 +286,779 @@
     "show_com": false,
     "show_sliders": true
   },
-  "poses": [
-    {
-      "id": "pose_001",
-      "name": "Static load",
-      "body_poses": {},
-      "metadata": {}
-    },
-    {
-      "id": "pose_002",
-      "name": "Static load - stiff",
-      "body_poses": {},
-      "metadata": {}
-    },
-    {
-      "id": "pose_003",
-      "name": "Static load - pothole",
-      "body_poses": {},
-      "metadata": {}
-    },
-    {
-      "id": "pose_004",
-      "name": "Static load - resonance",
-      "body_poses": {},
-      "metadata": {}
-    },
-    {
-      "id": "pose_005",
-      "name": "Settled (active)",
-      "body_poses": {},
-      "metadata": {}
-    },
-    {
-      "id": "pose_006",
-      "name": "Static load - heavy",
-      "body_poses": {},
-      "metadata": {}
-    },
-    {
-      "id": "pose_007",
-      "name": "Static load - failure",
-      "body_poses": {},
-      "metadata": {}
-    },
-    {
-      "id": "pose_008",
-      "name": "Locked pose",
-      "body_poses": {},
-      "metadata": {}
-    },
-    {
-      "id": "pose_009",
-      "name": "Free settle",
-      "body_poses": {},
-      "metadata": {}
-    }
+  "gravity_default": null,
+  "root_case_ids": [
+    "case_001"
   ],
-  "workspace": {
-    "baselines": [
-      {
-        "id": "baseline_001",
-        "name": "Reference (passive)",
-        "description": "",
-        "source_run_id": null,
-        "model_snapshot_id": null,
-        "model_hash": null,
-        "invariant_parameter_keys": [
-          "model/control_graph/instances/blk_002/parameters/k",
-          "model/control_graph/instances/blk_003/parameters/kp",
-          "model/control_graph/instances/blk_003/parameters/ki",
-          "model/control_graph/instances/blk_003/parameters/kd"
-        ],
-        "approval_status": null,
-        "approved_run_id": null,
-        "tolerances": {},
-        "metrics": {},
-        "metadata": {}
-      }
-    ],
-    "active_baseline_id": "baseline_001",
-    "active_case_id": null,
-    "selected_pose_id": null,
-    "selected_analysis_id": null,
-    "cases": [
-      {
-        "id": "case_006",
-        "name": "Rally setup (stiffer spring)",
-        "baseline_id": "baseline_001",
-        "parent_case_id": null,
-        "model_snapshot_id": null,
-        "invariant_values": {
-          "springs_meta/spring_001/stiffness": {
-            "value": 55000.0,
-            "unit": ""
+  "cases": {
+    "case_001": {
+      "id": "case_001",
+      "name": "Root",
+      "description": "",
+      "parent_case_id": null,
+      "model": {
+        "bodies": [
+          {
+            "id": "body_001",
+            "name": "ChassisMount",
+            "type": "point_mass",
+            "markers": [
+              {
+                "id": "marker_001",
+                "name": "P",
+                "type": "structural",
+                "x": {
+                  "expression": "ChassisMountX",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "ChassisMountY",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              }
+            ],
+            "edge_order": [
+              "marker_001"
+            ],
+            "closed_shape": true,
+            "mass": null,
+            "com": {
+              "kind": "marker",
+              "data": {
+                "marker_id": "marker_001"
+              }
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {
+              "ground_anchor": true,
+              "ground_marker_id": "marker_001"
+            }
           },
-          "springs_meta/spring_001/damping": {
-            "value": 1900.0,
-            "unit": ""
+          {
+            "id": "body_002",
+            "name": "StrutTopMount",
+            "type": "point_mass",
+            "markers": [
+              {
+                "id": "marker_003",
+                "name": "P",
+                "type": "structural",
+                "x": {
+                  "expression": "ArmLength",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "320 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              }
+            ],
+            "edge_order": [
+              "marker_003"
+            ],
+            "closed_shape": true,
+            "mass": null,
+            "com": {
+              "kind": "marker",
+              "data": {
+                "marker_id": "marker_003"
+              }
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {
+              "ground_anchor": true,
+              "ground_marker_id": "marker_003"
+            }
           },
-          "parameters/param_005": {
-            "value": 1200.0,
-            "unit": "N"
-          },
-          "parameters/param_006": {
-            "value": 4.0,
-            "unit": ""
-          }
-        },
-        "metadata": {}
-      },
-      {
-        "id": "case_010",
-        "name": "Pothole strike",
-        "baseline_id": "baseline_001",
-        "parent_case_id": null,
-        "model_snapshot_id": null,
-        "invariant_values": {
-          "parameters/param_005": {
-            "value": 4000.0,
-            "unit": "N"
-          },
-          "parameters/param_006": {
-            "value": 6.0,
-            "unit": ""
-          }
-        },
-        "metadata": {}
-      },
-      {
-        "id": "case_014",
-        "name": "Resonance sweep",
-        "baseline_id": "baseline_001",
-        "parent_case_id": null,
-        "model_snapshot_id": null,
-        "invariant_values": {
-          "parameters/param_005": {
-            "value": 800.0,
-            "unit": "N"
-          },
-          "parameters/param_006": {
-            "value": 4.7,
-            "unit": ""
-          },
-          "springs_meta/spring_001/damping": {
-            "value": 300.0,
-            "unit": ""
-          }
-        },
-        "metadata": {}
-      },
-      {
-        "id": "case_018",
-        "name": "Active suspension",
-        "baseline_id": "baseline_001",
-        "parent_case_id": null,
-        "model_snapshot_id": null,
-        "invariant_values": {
-          "springs_meta/spring_001/stiffness": {
-            "value": 20000.0,
-            "unit": ""
-          },
-          "springs_meta/spring_001/damping": {
-            "value": 800.0,
-            "unit": ""
-          },
-          "model/control_graph/instances/blk_002/parameters/k": {
-            "value": -1.0,
-            "unit": ""
-          },
-          "model/control_graph/instances/blk_003/parameters/kp": {
-            "value": 1800.0,
-            "unit": ""
-          },
-          "model/control_graph/instances/blk_003/parameters/ki": {
-            "value": 60.0,
-            "unit": ""
-          },
-          "model/control_graph/instances/blk_003/parameters/kd": {
-            "value": 120.0,
-            "unit": ""
-          },
-          "parameters/param_005": {
-            "value": 2200.0,
-            "unit": "N"
-          },
-          "parameters/param_006": {
-            "value": 3.0,
-            "unit": ""
-          }
-        },
-        "metadata": {}
-      },
-      {
-        "id": "case_022",
-        "name": "Heavy passenger",
-        "baseline_id": "baseline_001",
-        "parent_case_id": "case_018",
-        "model_snapshot_id": null,
-        "invariant_values": {
-          "bodies/body_004/mass": {
-            "value": 70.0,
-            "unit": "kg"
-          },
-          "parameters/param_007": {
-            "value": 6500.0,
-            "unit": "N"
-          }
-        },
-        "metadata": {}
-      },
-      {
-        "id": "case_027",
-        "name": "Actuator failure",
-        "baseline_id": "baseline_001",
-        "parent_case_id": "case_018",
-        "model_snapshot_id": null,
-        "invariant_values": {
-          "model/control_graph/instances/blk_002/parameters/k": {
-            "value": 0.0,
-            "unit": ""
-          },
-          "model/control_graph/instances/blk_003/parameters/kp": {
-            "value": 0.0,
-            "unit": ""
-          },
-          "model/control_graph/instances/blk_003/parameters/ki": {
-            "value": 0.0,
-            "unit": ""
-          },
-          "model/control_graph/instances/blk_003/parameters/kd": {
-            "value": 0.0,
-            "unit": ""
-          }
-        },
-        "metadata": {}
-      },
-      {
-        "id": "case_031",
-        "name": "Locked strut (static)",
-        "baseline_id": "baseline_001",
-        "parent_case_id": null,
-        "model_snapshot_id": null,
-        "invariant_values": {},
-        "metadata": {},
-        "added_entities": {
-          "drivers": [
-            {
-              "id": "driver_001",
-              "name": "LockStrut",
-              "type": "translation",
-              "target_joint_id": "joint_005",
-              "law": {
-                "expression": "0 mm",
-                "unit": "mm",
-                "expected_dimension": "length"
+          {
+            "id": "body_003",
+            "name": "LowerArm",
+            "type": "bar",
+            "markers": [
+              {
+                "id": "marker_005",
+                "name": "Hinge",
+                "type": "structural",
+                "x": {
+                  "expression": "ChassisMountX",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "ChassisMountY",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
               },
-              "metadata": {}
+              {
+                "id": "marker_006",
+                "name": "BallJoint",
+                "type": "structural",
+                "x": {
+                  "expression": "ArmLength",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "0 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              }
+            ],
+            "edge_order": [
+              "marker_005",
+              "marker_006"
+            ],
+            "closed_shape": false,
+            "mass": {
+              "expression": "3 kg",
+              "unit": "kg",
+              "expected_dimension": "mass"
+            },
+            "com": {
+              "kind": "bar_percent",
+              "data": {
+                "percent": 50.0
+              }
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "body_004",
+            "name": "WheelHub",
+            "type": "body",
+            "markers": [
+              {
+                "id": "marker_008",
+                "name": "Center",
+                "type": "structural",
+                "x": {
+                  "expression": "ArmLength",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "0 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              },
+              {
+                "id": "marker_009",
+                "name": "StrutAttach",
+                "type": "structural",
+                "x": {
+                  "expression": "ArmLength",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "320 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              },
+              {
+                "id": "marker_010",
+                "name": "ContactPatch",
+                "type": "structural",
+                "x": {
+                  "expression": "ArmLength",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "-50 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              }
+            ],
+            "edge_order": [
+              "marker_008",
+              "marker_009",
+              "marker_010"
+            ],
+            "closed_shape": true,
+            "mass": {
+              "expression": "40 kg",
+              "unit": "kg",
+              "expected_dimension": "mass"
+            },
+            "com": {
+              "kind": "barycentric",
+              "data": {
+                "weights": {
+                  "marker_008": 1.0,
+                  "marker_009": 1.0,
+                  "marker_010": 1.0
+                }
+              }
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          }
+        ],
+        "sliders": [
+          {
+            "id": "slider_001",
+            "name": "StrutGuide",
+            "origin_x": {
+              "expression": "ArmLength",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "origin_y": {
+              "expression": "320 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "angle": {
+              "expression": "270 deg",
+              "unit": "deg",
+              "expected_dimension": "angle"
+            },
+            "travel_min": {
+              "expression": "-60 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "travel_max": {
+              "expression": "60 mm",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          }
+        ],
+        "joints": [
+          {
+            "id": "joint_001",
+            "name": "Ground_ChassisMount",
+            "type": "rigid",
+            "endpoint_a": {
+              "kind": "marker",
+              "body_id": "body_001",
+              "marker_id": "marker_001"
+            },
+            "endpoint_b": {
+              "kind": "ground"
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {
+              "internal_ground_anchor": true
+            }
+          },
+          {
+            "id": "joint_002",
+            "name": "Ground_StrutTopMount",
+            "type": "rigid",
+            "endpoint_a": {
+              "kind": "marker",
+              "body_id": "body_002",
+              "marker_id": "marker_003"
+            },
+            "endpoint_b": {
+              "kind": "ground"
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {
+              "internal_ground_anchor": true
+            }
+          },
+          {
+            "id": "joint_003",
+            "name": "Pivot_Chassis",
+            "type": "revolute",
+            "endpoint_a": {
+              "kind": "marker",
+              "body_id": "body_001",
+              "marker_id": "marker_001"
+            },
+            "endpoint_b": {
+              "kind": "marker",
+              "body_id": "body_003",
+              "marker_id": "marker_005"
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {
+              "angle_limit_reference_body_id": "body_001",
+              "angle_limit_moving_body_id": "body_003"
+            }
+          },
+          {
+            "id": "joint_004",
+            "name": "BallJoint",
+            "type": "revolute",
+            "endpoint_a": {
+              "kind": "marker",
+              "body_id": "body_003",
+              "marker_id": "marker_006"
+            },
+            "endpoint_b": {
+              "kind": "marker",
+              "body_id": "body_004",
+              "marker_id": "marker_008"
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "joint_005",
+            "name": "StrutSlide",
+            "type": "revolute",
+            "endpoint_a": {
+              "kind": "marker",
+              "body_id": "body_004",
+              "marker_id": "marker_009"
+            },
+            "endpoint_b": {
+              "kind": "slider",
+              "slider_id": "slider_001"
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          }
+        ],
+        "drivers": [],
+        "loads": [
+          {
+            "id": "load_001",
+            "name": "RoadProfile",
+            "target_marker_id": "marker_010",
+            "fx": {
+              "expression": "0 N",
+              "unit": "N",
+              "expected_dimension": "force"
+            },
+            "fy": {
+              "expression": "RoadAmp * sin(360 deg * RoadFreq * t / 1 s)",
+              "unit": "N",
+              "expected_dimension": "force"
+            },
+            "metadata": {}
+          },
+          {
+            "id": "load_002",
+            "name": "QuarterCarLoad",
+            "target_marker_id": "marker_009",
+            "fx": {
+              "expression": "0 N",
+              "unit": "N",
+              "expected_dimension": "force"
+            },
+            "fy": {
+              "expression": "-QuarterCarLoad",
+              "unit": "N",
+              "expected_dimension": "force"
+            },
+            "metadata": {}
+          },
+          {
+            "id": "load_003",
+            "name": "ActuatorForce",
+            "target_marker_id": "marker_009",
+            "fx": {
+              "expression": "0 N",
+              "unit": "N",
+              "expected_dimension": "force"
+            },
+            "fy": {
+              "expression": "0 N",
+              "unit": "N",
+              "expected_dimension": "force"
+            },
+            "metadata": {}
+          }
+        ],
+        "sensors": [
+          {
+            "id": "sensor_001",
+            "name": "HubVerticalPos",
+            "type": "point",
+            "marker_ids": [
+              "marker_008"
+            ],
+            "metadata": {}
+          },
+          {
+            "id": "sensor_002",
+            "name": "SpringLength",
+            "type": "distance",
+            "marker_ids": [
+              "marker_003",
+              "marker_009"
+            ],
+            "metadata": {}
+          },
+          {
+            "id": "sensor_003",
+            "name": "ArmAngle",
+            "type": "angle_horizontal",
+            "marker_ids": [
+              "marker_005",
+              "marker_006"
+            ],
+            "metadata": {}
+          },
+          {
+            "id": "sensor_004",
+            "name": "RideAccelerometer",
+            "type": "point",
+            "marker_ids": [
+              "marker_008"
+            ],
+            "metadata": {}
+          },
+          {
+            "id": "sensor_005",
+            "name": "ContactPatchPos",
+            "type": "point",
+            "marker_ids": [
+              "marker_010"
+            ],
+            "metadata": {}
+          }
+        ],
+        "springs": [
+          {
+            "id": "spring_001",
+            "name": "StrutSpring",
+            "spring_type": "linear_spring",
+            "endpoint_a": {
+              "kind": "marker",
+              "body_id": "body_002",
+              "marker_id": "marker_003"
+            },
+            "endpoint_b": {
+              "kind": "marker",
+              "body_id": "body_004",
+              "marker_id": "marker_009"
+            },
+            "rest_value": {
+              "expression": "SpringRest",
+              "unit": "mm",
+              "expected_dimension": "length"
+            },
+            "law": null,
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {
+              "stiffness": 35000.0,
+              "damping": 1500.0
+            }
+          }
+        ],
+        "gravity": {
+          "magnitude": 9.81,
+          "direction_x": 0.0,
+          "direction_y": -1.0
+        },
+        "control_graph": {
+          "instances": {
+            "blk_001": {
+              "id": "blk_001",
+              "block_type": "ModelSensor",
+              "parameters": {
+                "sensor_id": "sensor_001",
+                "channel": "y"
+              },
+              "input_ports": [],
+              "output_ports": [
+                {
+                  "name": "out",
+                  "shape": [
+                    1
+                  ]
+                }
+              ],
+              "position": [
+                -380.0,
+                -120.0
+              ]
+            },
+            "blk_002": {
+              "id": "blk_002",
+              "block_type": "Gain",
+              "parameters": {
+                "k": 0.0
+              },
+              "input_ports": [
+                {
+                  "name": "in",
+                  "shape": [
+                    1
+                  ]
+                }
+              ],
+              "output_ports": [
+                {
+                  "name": "out",
+                  "shape": [
+                    1
+                  ]
+                }
+              ],
+              "position": [
+                -200.0,
+                -120.0
+              ]
+            },
+            "blk_003": {
+              "id": "blk_003",
+              "block_type": "PID",
+              "parameters": {
+                "kp": 0.0,
+                "ki": 0.0,
+                "kd": 0.0,
+                "lower": -2000.0,
+                "upper": 2000.0,
+                "anti_windup": true
+              },
+              "input_ports": [
+                {
+                  "name": "error",
+                  "shape": [
+                    1
+                  ]
+                }
+              ],
+              "output_ports": [
+                {
+                  "name": "out",
+                  "shape": [
+                    1
+                  ]
+                }
+              ],
+              "position": [
+                -20.0,
+                -120.0
+              ]
+            },
+            "blk_004": {
+              "id": "blk_004",
+              "block_type": "LoadCommand",
+              "parameters": {
+                "load_id": "load_003",
+                "component": "fy"
+              },
+              "input_ports": [
+                {
+                  "name": "in",
+                  "shape": [
+                    1
+                  ]
+                }
+              ],
+              "output_ports": [
+                {
+                  "name": "out",
+                  "shape": [
+                    1
+                  ]
+                }
+              ],
+              "position": [
+                180.0,
+                -120.0
+              ]
+            }
+          },
+          "connections": [
+            {
+              "src_instance": "blk_001",
+              "src_port": "out",
+              "dst_instance": "blk_002",
+              "dst_port": "in"
+            },
+            {
+              "src_instance": "blk_002",
+              "src_port": "out",
+              "dst_instance": "blk_003",
+              "dst_port": "error"
+            },
+            {
+              "src_instance": "blk_003",
+              "src_port": "out",
+              "dst_instance": "blk_004",
+              "dst_port": "in"
             }
           ]
         }
-      }
-    ],
-    "poses": [
-      {
-        "id": "wpose_002",
-        "name": "Pose default",
-        "baseline_id": "baseline_001",
-        "case_id": null,
-        "project_pose_id": null,
-        "is_default": true,
-        "parent_pose_id": null,
-        "requires_recompute": true,
-        "solve_failed": false,
-        "metadata": {}
       },
-      {
-        "id": "wpose_003",
-        "name": "Static load",
-        "baseline_id": "baseline_001",
-        "case_id": null,
-        "project_pose_id": "pose_001",
-        "is_default": false,
-        "parent_pose_id": null,
-        "requires_recompute": true,
-        "solve_failed": false,
-        "metadata": {}
-      },
-      {
-        "id": "wpose_007",
-        "name": "Pose default",
-        "baseline_id": null,
-        "case_id": "case_006",
-        "project_pose_id": null,
-        "is_default": true,
-        "parent_pose_id": "wpose_002",
-        "requires_recompute": false,
-        "solve_failed": false,
-        "metadata": {
-          "solved_state": {}
+      "poses": [
+        {
+          "id": "pose_001",
+          "name": "Static load",
+          "body_poses": {},
+          "parent_pose_id": null,
+          "is_default": false,
+          "requires_recompute": true,
+          "solve_failed": false,
+          "metadata": {}
         }
-      },
-      {
-        "id": "wpose_008",
-        "name": "Static load - stiff",
-        "baseline_id": null,
-        "case_id": "case_006",
-        "project_pose_id": "pose_002",
-        "is_default": false,
-        "parent_pose_id": null,
-        "requires_recompute": true,
-        "solve_failed": false,
-        "metadata": {}
-      },
-      {
-        "id": "wpose_011",
-        "name": "Pose default",
-        "baseline_id": null,
-        "case_id": "case_010",
-        "project_pose_id": null,
-        "is_default": true,
-        "parent_pose_id": "wpose_002",
-        "requires_recompute": false,
-        "solve_failed": false,
-        "metadata": {
-          "solved_state": {}
+      ],
+      "analyses": [
+        {
+          "id": "analysis_001",
+          "name": "Smooth road @ 2.5 Hz",
+          "analysis_type": "dynamic",
+          "pose_id": "pose_001",
+          "config": {
+            "duration": 1.0,
+            "steps": 100,
+            "dt": 0.01,
+            "integrator": "implicit",
+            "solver_settings": {},
+            "plots": [],
+            "metrics": []
+          },
+          "metadata": {}
+        },
+        {
+          "id": "analysis_002",
+          "name": "Smooth road under load",
+          "analysis_type": "dynamic",
+          "pose_id": "pose_001",
+          "config": {
+            "duration": 1.0,
+            "steps": 100,
+            "dt": 0.01,
+            "integrator": "implicit",
+            "solver_settings": {},
+            "plots": [],
+            "metrics": []
+          },
+          "metadata": {}
         }
-      },
-      {
-        "id": "wpose_012",
-        "name": "Static load - pothole",
-        "baseline_id": null,
-        "case_id": "case_010",
-        "project_pose_id": "pose_003",
-        "is_default": false,
-        "parent_pose_id": null,
-        "requires_recompute": true,
-        "solve_failed": false,
-        "metadata": {}
-      },
-      {
-        "id": "wpose_015",
-        "name": "Pose default",
-        "baseline_id": null,
-        "case_id": "case_014",
-        "project_pose_id": null,
-        "is_default": true,
-        "parent_pose_id": "wpose_002",
-        "requires_recompute": false,
-        "solve_failed": false,
-        "metadata": {
-          "solved_state": {}
-        }
-      },
-      {
-        "id": "wpose_016",
-        "name": "Static load - resonance",
-        "baseline_id": null,
-        "case_id": "case_014",
-        "project_pose_id": "pose_004",
-        "is_default": false,
-        "parent_pose_id": null,
-        "requires_recompute": true,
-        "solve_failed": false,
-        "metadata": {}
-      },
-      {
-        "id": "wpose_019",
-        "name": "Pose default",
-        "baseline_id": null,
-        "case_id": "case_018",
-        "project_pose_id": null,
-        "is_default": true,
-        "parent_pose_id": "wpose_002",
-        "requires_recompute": false,
-        "solve_failed": false,
-        "metadata": {
-          "solved_state": {}
-        }
-      },
-      {
-        "id": "wpose_020",
-        "name": "Settled (active)",
-        "baseline_id": null,
-        "case_id": "case_018",
-        "project_pose_id": "pose_005",
-        "is_default": false,
-        "parent_pose_id": null,
-        "requires_recompute": true,
-        "solve_failed": false,
-        "metadata": {}
-      },
-      {
-        "id": "wpose_023",
-        "name": "Pose default",
-        "baseline_id": null,
-        "case_id": "case_022",
-        "project_pose_id": null,
-        "is_default": true,
-        "parent_pose_id": "wpose_019",
-        "requires_recompute": false,
-        "solve_failed": false,
-        "metadata": {
-          "solved_state": {}
-        }
-      },
-      {
-        "id": "wpose_024",
-        "name": "Static load - heavy",
-        "baseline_id": null,
-        "case_id": "case_022",
-        "project_pose_id": "pose_006",
-        "is_default": false,
-        "parent_pose_id": null,
-        "requires_recompute": true,
-        "solve_failed": false,
-        "metadata": {}
-      },
-      {
-        "id": "wpose_028",
-        "name": "Pose default",
-        "baseline_id": null,
-        "case_id": "case_027",
-        "project_pose_id": null,
-        "is_default": true,
-        "parent_pose_id": "wpose_019",
-        "requires_recompute": false,
-        "solve_failed": false,
-        "metadata": {
-          "solved_state": {}
-        }
-      },
-      {
-        "id": "wpose_029",
-        "name": "Static load - failure",
-        "baseline_id": null,
-        "case_id": "case_027",
-        "project_pose_id": "pose_007",
-        "is_default": false,
-        "parent_pose_id": null,
-        "requires_recompute": true,
-        "solve_failed": false,
-        "metadata": {}
-      },
-      {
-        "id": "wpose_032",
-        "name": "Pose default",
-        "baseline_id": null,
-        "case_id": "case_031",
-        "project_pose_id": null,
-        "is_default": true,
-        "parent_pose_id": "wpose_002",
-        "requires_recompute": false,
-        "solve_failed": false,
-        "metadata": {
-          "solved_state": {}
-        }
-      },
-      {
-        "id": "wpose_033",
-        "name": "Locked pose",
-        "baseline_id": null,
-        "case_id": "case_031",
-        "project_pose_id": "pose_008",
-        "is_default": false,
-        "parent_pose_id": null,
-        "requires_recompute": true,
-        "solve_failed": false,
-        "metadata": {}
-      },
-      {
-        "id": "wpose_035",
-        "name": "Free settle",
-        "baseline_id": "baseline_001",
-        "case_id": null,
-        "project_pose_id": "pose_009",
-        "is_default": false,
-        "parent_pose_id": null,
-        "requires_recompute": true,
-        "solve_failed": false,
-        "metadata": {}
-      }
-    ],
-    "analyses": [
-      {
-        "id": "analysis_004",
-        "name": "Smooth road @ 2.5 Hz",
-        "analysis_type": "dynamic",
-        "baseline_id": "baseline_001",
-        "case_id": null,
-        "workspace_pose_id": "wpose_003",
-        "config": {
-          "duration": 1.0,
-          "steps": 100,
-          "dt": 0.01,
-          "integrator": "implicit",
-          "solver_settings": {},
-          "plots": [],
-          "metrics": []
-        },
-        "metadata": {}
-      },
-      {
-        "id": "analysis_005",
-        "name": "Smooth road under load",
-        "analysis_type": "dynamic",
-        "baseline_id": "baseline_001",
-        "case_id": null,
-        "workspace_pose_id": "wpose_003",
-        "config": {
-          "duration": 1.0,
-          "steps": 100,
-          "dt": 0.01,
-          "integrator": "implicit",
-          "solver_settings": {},
-          "plots": [],
-          "metrics": []
-        },
-        "metadata": {}
-      },
-      {
-        "id": "analysis_009",
-        "name": "Rally washboard run",
-        "analysis_type": "dynamic",
-        "baseline_id": null,
-        "case_id": "case_006",
-        "workspace_pose_id": "wpose_008",
-        "config": {
-          "duration": 1.0,
-          "steps": 100,
-          "dt": 0.01,
-          "integrator": "implicit",
-          "solver_settings": {},
-          "plots": [],
-          "metrics": []
-        },
-        "metadata": {}
-      },
-      {
-        "id": "analysis_013",
-        "name": "Single pothole impact",
-        "analysis_type": "dynamic",
-        "baseline_id": null,
-        "case_id": "case_010",
-        "workspace_pose_id": "wpose_012",
-        "config": {
-          "duration": 1.0,
-          "steps": 100,
-          "dt": 0.01,
-          "integrator": "implicit",
-          "solver_settings": {},
-          "plots": [],
-          "metrics": []
-        },
-        "metadata": {}
-      },
-      {
-        "id": "analysis_017",
-        "name": "Drive at natural frequency",
-        "analysis_type": "dynamic",
-        "baseline_id": null,
-        "case_id": "case_014",
-        "workspace_pose_id": "wpose_016",
-        "config": {
-          "duration": 1.0,
-          "steps": 100,
-          "dt": 0.01,
-          "integrator": "implicit",
-          "solver_settings": {},
-          "plots": [],
-          "metrics": []
-        },
-        "metadata": {}
-      },
-      {
-        "id": "analysis_021",
-        "name": "Comfort cruise (PID on)",
-        "analysis_type": "dynamic",
-        "baseline_id": null,
-        "case_id": "case_018",
-        "workspace_pose_id": "wpose_020",
-        "config": {
-          "duration": 1.0,
-          "steps": 100,
-          "dt": 0.01,
-          "integrator": "implicit",
-          "solver_settings": {},
-          "plots": [],
-          "metrics": []
-        },
-        "metadata": {}
-      },
-      {
-        "id": "analysis_025",
-        "name": "Heavy comfort cruise",
-        "analysis_type": "dynamic",
-        "baseline_id": null,
-        "case_id": "case_022",
-        "workspace_pose_id": "wpose_024",
-        "config": {
-          "duration": 1.0,
-          "steps": 100,
-          "dt": 0.01,
-          "integrator": "implicit",
-          "solver_settings": {},
-          "plots": [],
-          "metrics": []
-        },
-        "metadata": {}
-      },
-      {
-        "id": "analysis_026",
-        "name": "Heavy + pothole",
-        "analysis_type": "dynamic",
-        "baseline_id": null,
-        "case_id": "case_022",
-        "workspace_pose_id": "wpose_024",
-        "config": {
-          "duration": 1.0,
-          "steps": 100,
-          "dt": 0.01,
-          "integrator": "implicit",
-          "solver_settings": {},
-          "plots": [],
-          "metrics": []
-        },
-        "metadata": {}
-      },
-      {
-        "id": "analysis_030",
-        "name": "Failure on rough road",
-        "analysis_type": "dynamic",
-        "baseline_id": null,
-        "case_id": "case_027",
-        "workspace_pose_id": "wpose_029",
-        "config": {
-          "duration": 1.0,
-          "steps": 100,
-          "dt": 0.01,
-          "integrator": "implicit",
-          "solver_settings": {},
-          "plots": [],
-          "metrics": []
-        },
-        "metadata": {}
-      },
-      {
-        "id": "analysis_034",
-        "name": "Static \u2014 locked",
-        "analysis_type": "static",
-        "baseline_id": null,
-        "case_id": "case_031",
-        "workspace_pose_id": "wpose_033",
-        "config": {
-          "gravity_enabled": true,
-          "tolerance": 1e-06,
-          "report_reactions": true,
-          "report_spring_energy": true,
-          "plots": [],
-          "metrics": []
-        },
-        "metadata": {}
-      },
-      {
-        "id": "analysis_036",
-        "name": "Equilibrium \u2014 free settle",
-        "analysis_type": "equilibrium",
-        "baseline_id": "baseline_001",
-        "case_id": null,
-        "workspace_pose_id": "wpose_035",
-        "config": {
-          "gravity_enabled": true,
-          "initial_perturbations": [
-            0.0,
-            0.05,
-            -0.05
-          ],
-          "stability_check": true,
-          "pose_match_tolerance": 0.001,
-          "plots": [],
-          "metrics": []
-        },
-        "metadata": {}
-      }
-    ],
-    "runs": [],
-    "parameter_catalog": {
-      "parameters/param_001": {
-        "path": "parameters/param_001",
-        "tag": "invariant",
-        "display_name": "ArmLength",
-        "unit": "mm",
-        "dimension": "",
-        "default_value": null,
-        "entity_id": "param_001",
-        "property_name": "expression"
-      },
-      "parameters/param_002": {
-        "path": "parameters/param_002",
-        "tag": "invariant",
-        "display_name": "ChassisMountX",
-        "unit": "mm",
-        "dimension": "",
-        "default_value": null,
-        "entity_id": "param_002",
-        "property_name": "expression"
-      },
-      "parameters/param_003": {
-        "path": "parameters/param_003",
-        "tag": "invariant",
-        "display_name": "ChassisMountY",
-        "unit": "mm",
-        "dimension": "",
-        "default_value": null,
-        "entity_id": "param_003",
-        "property_name": "expression"
-      },
-      "parameters/param_004": {
-        "path": "parameters/param_004",
-        "tag": "invariant",
-        "display_name": "SpringRest",
-        "unit": "mm",
-        "dimension": "",
-        "default_value": null,
-        "entity_id": "param_004",
-        "property_name": "expression"
-      },
-      "parameters/param_005": {
-        "path": "parameters/param_005",
-        "tag": "invariant",
-        "display_name": "RoadAmp",
-        "unit": "N",
-        "dimension": "",
-        "default_value": null,
-        "entity_id": "param_005",
-        "property_name": "expression"
-      },
-      "parameters/param_006": {
-        "path": "parameters/param_006",
-        "tag": "invariant",
-        "display_name": "RoadFreq",
-        "unit": "unitless",
-        "dimension": "",
-        "default_value": null,
-        "entity_id": "param_006",
-        "property_name": "expression"
-      },
-      "parameters/param_007": {
-        "path": "parameters/param_007",
-        "tag": "invariant",
-        "display_name": "QuarterCarLoad",
-        "unit": "N",
-        "dimension": "",
-        "default_value": null,
-        "entity_id": "param_007",
-        "property_name": "expression"
-      },
-      "bodies/body_003/mass": {
-        "path": "bodies/body_003/mass",
-        "tag": "invariant",
-        "display_name": "LowerArm mass",
-        "unit": "kg",
-        "dimension": "mass",
-        "default_value": null,
-        "entity_id": "body_003",
-        "property_name": "mass"
-      },
-      "bodies/body_004/mass": {
-        "path": "bodies/body_004/mass",
-        "tag": "invariant",
-        "display_name": "WheelHub mass",
-        "unit": "kg",
-        "dimension": "mass",
-        "default_value": null,
-        "entity_id": "body_004",
-        "property_name": "mass"
-      },
-      "loads/load_001/fx": {
-        "path": "loads/load_001/fx",
-        "tag": "invariant",
-        "display_name": "RoadProfile Fx",
-        "unit": "N",
-        "dimension": "force",
-        "default_value": null,
-        "entity_id": "load_001",
-        "property_name": "fx"
-      },
-      "loads/load_001/fy": {
-        "path": "loads/load_001/fy",
-        "tag": "invariant",
-        "display_name": "RoadProfile Fy",
-        "unit": "N",
-        "dimension": "force",
-        "default_value": null,
-        "entity_id": "load_001",
-        "property_name": "fy"
-      },
-      "loads/load_002/fx": {
-        "path": "loads/load_002/fx",
-        "tag": "invariant",
-        "display_name": "QuarterCarLoad Fx",
-        "unit": "N",
-        "dimension": "force",
-        "default_value": null,
-        "entity_id": "load_002",
-        "property_name": "fx"
-      },
-      "loads/load_002/fy": {
-        "path": "loads/load_002/fy",
-        "tag": "invariant",
-        "display_name": "QuarterCarLoad Fy",
-        "unit": "N",
-        "dimension": "force",
-        "default_value": null,
-        "entity_id": "load_002",
-        "property_name": "fy"
-      },
-      "loads/load_003/fx": {
-        "path": "loads/load_003/fx",
-        "tag": "invariant",
-        "display_name": "ActuatorForce Fx",
-        "unit": "N",
-        "dimension": "force",
-        "default_value": null,
-        "entity_id": "load_003",
-        "property_name": "fx"
-      },
-      "loads/load_003/fy": {
-        "path": "loads/load_003/fy",
-        "tag": "invariant",
-        "display_name": "ActuatorForce Fy",
-        "unit": "N",
-        "dimension": "force",
-        "default_value": null,
-        "entity_id": "load_003",
-        "property_name": "fy"
-      },
-      "springs/spring_001/rest_value": {
-        "path": "springs/spring_001/rest_value",
-        "tag": "invariant",
-        "display_name": "StrutSpring rest value",
-        "unit": "mm",
-        "dimension": "length",
-        "default_value": null,
-        "entity_id": "spring_001",
-        "property_name": "rest_value"
-      },
-      "springs/spring_001/stiffness": {
-        "path": "springs/spring_001/stiffness",
-        "tag": "invariant",
-        "display_name": "StrutSpring stiffness",
-        "unit": "",
-        "dimension": "",
-        "default_value": null,
-        "entity_id": "spring_001",
-        "property_name": "stiffness"
-      },
-      "springs/spring_001/damping": {
-        "path": "springs/spring_001/damping",
-        "tag": "invariant",
-        "display_name": "StrutSpring damping",
-        "unit": "",
-        "dimension": "",
-        "default_value": null,
-        "entity_id": "spring_001",
-        "property_name": "damping"
-      },
-      "model/control_graph/instances/blk_001/parameters/sensor_id": {
-        "path": "model/control_graph/instances/blk_001/parameters/sensor_id",
-        "tag": "variable",
-        "display_name": "blk_001.sensor_id",
-        "unit": "",
-        "dimension": "",
-        "default_value": null,
-        "entity_id": "blk_001",
-        "property_name": "sensor_id"
-      },
-      "block_diagram/instances/blk_001/parameters/sensor_id": {
-        "path": "block_diagram/instances/blk_001/parameters/sensor_id",
-        "tag": "variable",
-        "display_name": "blk_001.sensor_id",
-        "unit": "",
-        "dimension": "",
-        "default_value": null,
-        "entity_id": "blk_001",
-        "property_name": "sensor_id"
-      },
-      "model/control_graph/instances/blk_001/parameters/channel": {
-        "path": "model/control_graph/instances/blk_001/parameters/channel",
-        "tag": "variable",
-        "display_name": "blk_001.channel",
-        "unit": "",
-        "dimension": "",
-        "default_value": null,
-        "entity_id": "blk_001",
-        "property_name": "channel"
-      },
-      "block_diagram/instances/blk_001/parameters/channel": {
-        "path": "block_diagram/instances/blk_001/parameters/channel",
-        "tag": "variable",
-        "display_name": "blk_001.channel",
-        "unit": "",
-        "dimension": "",
-        "default_value": null,
-        "entity_id": "blk_001",
-        "property_name": "channel"
-      },
-      "model/control_graph/instances/blk_002/parameters/k": {
-        "path": "model/control_graph/instances/blk_002/parameters/k",
-        "tag": "variable",
-        "display_name": "blk_002.k",
-        "unit": "",
-        "dimension": "",
-        "default_value": 0.0,
-        "entity_id": "blk_002",
-        "property_name": "k"
-      },
-      "block_diagram/instances/blk_002/parameters/k": {
-        "path": "block_diagram/instances/blk_002/parameters/k",
-        "tag": "variable",
-        "display_name": "blk_002.k",
-        "unit": "",
-        "dimension": "",
-        "default_value": 0.0,
-        "entity_id": "blk_002",
-        "property_name": "k"
-      },
-      "model/control_graph/instances/blk_003/parameters/kp": {
-        "path": "model/control_graph/instances/blk_003/parameters/kp",
-        "tag": "variable",
-        "display_name": "blk_003.kp",
-        "unit": "",
-        "dimension": "",
-        "default_value": 0.0,
-        "entity_id": "blk_003",
-        "property_name": "kp"
-      },
-      "block_diagram/instances/blk_003/parameters/kp": {
-        "path": "block_diagram/instances/blk_003/parameters/kp",
-        "tag": "variable",
-        "display_name": "blk_003.kp",
-        "unit": "",
-        "dimension": "",
-        "default_value": 0.0,
-        "entity_id": "blk_003",
-        "property_name": "kp"
-      },
-      "model/control_graph/instances/blk_003/parameters/ki": {
-        "path": "model/control_graph/instances/blk_003/parameters/ki",
-        "tag": "variable",
-        "display_name": "blk_003.ki",
-        "unit": "",
-        "dimension": "",
-        "default_value": 0.0,
-        "entity_id": "blk_003",
-        "property_name": "ki"
-      },
-      "block_diagram/instances/blk_003/parameters/ki": {
-        "path": "block_diagram/instances/blk_003/parameters/ki",
-        "tag": "variable",
-        "display_name": "blk_003.ki",
-        "unit": "",
-        "dimension": "",
-        "default_value": 0.0,
-        "entity_id": "blk_003",
-        "property_name": "ki"
-      },
-      "model/control_graph/instances/blk_003/parameters/kd": {
-        "path": "model/control_graph/instances/blk_003/parameters/kd",
-        "tag": "variable",
-        "display_name": "blk_003.kd",
-        "unit": "",
-        "dimension": "",
-        "default_value": 0.0,
-        "entity_id": "blk_003",
-        "property_name": "kd"
-      },
-      "block_diagram/instances/blk_003/parameters/kd": {
-        "path": "block_diagram/instances/blk_003/parameters/kd",
-        "tag": "variable",
-        "display_name": "blk_003.kd",
-        "unit": "",
-        "dimension": "",
-        "default_value": 0.0,
-        "entity_id": "blk_003",
-        "property_name": "kd"
-      },
-      "model/control_graph/instances/blk_003/parameters/lower": {
-        "path": "model/control_graph/instances/blk_003/parameters/lower",
-        "tag": "variable",
-        "display_name": "blk_003.lower",
-        "unit": "",
-        "dimension": "",
-        "default_value": -2000.0,
-        "entity_id": "blk_003",
-        "property_name": "lower"
-      },
-      "block_diagram/instances/blk_003/parameters/lower": {
-        "path": "block_diagram/instances/blk_003/parameters/lower",
-        "tag": "variable",
-        "display_name": "blk_003.lower",
-        "unit": "",
-        "dimension": "",
-        "default_value": -2000.0,
-        "entity_id": "blk_003",
-        "property_name": "lower"
-      },
-      "model/control_graph/instances/blk_003/parameters/upper": {
-        "path": "model/control_graph/instances/blk_003/parameters/upper",
-        "tag": "variable",
-        "display_name": "blk_003.upper",
-        "unit": "",
-        "dimension": "",
-        "default_value": 2000.0,
-        "entity_id": "blk_003",
-        "property_name": "upper"
-      },
-      "block_diagram/instances/blk_003/parameters/upper": {
-        "path": "block_diagram/instances/blk_003/parameters/upper",
-        "tag": "variable",
-        "display_name": "blk_003.upper",
-        "unit": "",
-        "dimension": "",
-        "default_value": 2000.0,
-        "entity_id": "blk_003",
-        "property_name": "upper"
-      },
-      "model/control_graph/instances/blk_003/parameters/anti_windup": {
-        "path": "model/control_graph/instances/blk_003/parameters/anti_windup",
-        "tag": "variable",
-        "display_name": "blk_003.anti_windup",
-        "unit": "",
-        "dimension": "",
-        "default_value": 1.0,
-        "entity_id": "blk_003",
-        "property_name": "anti_windup"
-      },
-      "block_diagram/instances/blk_003/parameters/anti_windup": {
-        "path": "block_diagram/instances/blk_003/parameters/anti_windup",
-        "tag": "variable",
-        "display_name": "blk_003.anti_windup",
-        "unit": "",
-        "dimension": "",
-        "default_value": 1.0,
-        "entity_id": "blk_003",
-        "property_name": "anti_windup"
-      },
-      "model/control_graph/instances/blk_004/parameters/load_id": {
-        "path": "model/control_graph/instances/blk_004/parameters/load_id",
-        "tag": "variable",
-        "display_name": "blk_004.load_id",
-        "unit": "",
-        "dimension": "",
-        "default_value": null,
-        "entity_id": "blk_004",
-        "property_name": "load_id"
-      },
-      "block_diagram/instances/blk_004/parameters/load_id": {
-        "path": "block_diagram/instances/blk_004/parameters/load_id",
-        "tag": "variable",
-        "display_name": "blk_004.load_id",
-        "unit": "",
-        "dimension": "",
-        "default_value": null,
-        "entity_id": "blk_004",
-        "property_name": "load_id"
-      },
-      "model/control_graph/instances/blk_004/parameters/component": {
-        "path": "model/control_graph/instances/blk_004/parameters/component",
-        "tag": "variable",
-        "display_name": "blk_004.component",
-        "unit": "",
-        "dimension": "",
-        "default_value": null,
-        "entity_id": "blk_004",
-        "property_name": "component"
-      },
-      "block_diagram/instances/blk_004/parameters/component": {
-        "path": "block_diagram/instances/blk_004/parameters/component",
-        "tag": "variable",
-        "display_name": "blk_004.component",
-        "unit": "",
-        "dimension": "",
-        "default_value": null,
-        "entity_id": "blk_004",
-        "property_name": "component"
-      }
-    },
-    "model_snapshots": {},
-    "promotion_history": [],
-    "next_sequence": 37
-  }
+      ],
+      "runs": [],
+      "overlay": null,
+      "tolerances": {},
+      "metrics": {},
+      "metadata": {}
+    }
+  },
+  "selected_case_id": "case_001",
+  "selected_pose_id": null,
+  "selected_analysis_id": null,
+  "metadata": {}
 }

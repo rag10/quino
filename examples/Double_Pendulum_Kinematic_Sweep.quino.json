@@ -1,293 +1,10 @@
 {
   "schema_version": "0.3.0",
-  "project": {
-    "id": "proj_001",
-    "name": "Double Pendulum Kinematic Sweep",
-    "metadata": {}
-  },
-  "parameters": [],
+  "id": "ws_001",
+  "name": "Double Pendulum Kinematic Sweep",
   "sketch": null,
-  "model": {
-    "bodies": [
-      {
-        "id": "body_001",
-        "name": "Anchor",
-        "type": "point_mass",
-        "markers": [
-          {
-            "id": "marker_001",
-            "name": "P",
-            "type": "structural",
-            "x": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          }
-        ],
-        "edge_order": [
-          "marker_001"
-        ],
-        "closed_shape": true,
-        "mass": null,
-        "com": {
-          "kind": "marker",
-          "data": {
-            "marker_id": "marker_001"
-          }
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {
-          "ground_anchor": true,
-          "ground_marker_id": "marker_001"
-        }
-      },
-      {
-        "id": "body_002",
-        "name": "BarA",
-        "type": "bar",
-        "markers": [
-          {
-            "id": "marker_003",
-            "name": "Hinge",
-            "type": "structural",
-            "x": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          },
-          {
-            "id": "marker_004",
-            "name": "Tip",
-            "type": "structural",
-            "x": {
-              "expression": "200 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "-200 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          }
-        ],
-        "edge_order": [
-          "marker_003",
-          "marker_004"
-        ],
-        "closed_shape": false,
-        "mass": null,
-        "com": {
-          "kind": "bar_percent",
-          "data": {
-            "percent": 50.0
-          }
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {}
-      },
-      {
-        "id": "body_003",
-        "name": "BarB",
-        "type": "bar",
-        "markers": [
-          {
-            "id": "marker_006",
-            "name": "Hinge",
-            "type": "structural",
-            "x": {
-              "expression": "200 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "-200 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          },
-          {
-            "id": "marker_007",
-            "name": "Tip",
-            "type": "structural",
-            "x": {
-              "expression": "400 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "-400 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          }
-        ],
-        "edge_order": [
-          "marker_006",
-          "marker_007"
-        ],
-        "closed_shape": false,
-        "mass": null,
-        "com": {
-          "kind": "bar_percent",
-          "data": {
-            "percent": 50.0
-          }
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {}
-      }
-    ],
-    "sliders": [],
-    "joints": [
-      {
-        "id": "joint_001",
-        "name": "Ground_Anchor",
-        "type": "rigid",
-        "endpoint_a": {
-          "kind": "marker",
-          "body_id": "body_001",
-          "marker_id": "marker_001"
-        },
-        "endpoint_b": {
-          "kind": "ground"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {
-          "internal_ground_anchor": true
-        }
-      },
-      {
-        "id": "joint_002",
-        "name": "ShoulderPivot",
-        "type": "revolute",
-        "endpoint_a": {
-          "kind": "marker",
-          "body_id": "body_001",
-          "marker_id": "marker_001"
-        },
-        "endpoint_b": {
-          "kind": "marker",
-          "body_id": "body_002",
-          "marker_id": "marker_003"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {
-          "angle_limit_reference_body_id": "body_001",
-          "angle_limit_moving_body_id": "body_002"
-        }
-      },
-      {
-        "id": "joint_003",
-        "name": "ElbowPivot",
-        "type": "revolute",
-        "endpoint_a": {
-          "kind": "marker",
-          "body_id": "body_002",
-          "marker_id": "marker_004"
-        },
-        "endpoint_b": {
-          "kind": "marker",
-          "body_id": "body_003",
-          "marker_id": "marker_006"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {}
-      }
-    ],
-    "drivers": [],
-    "loads": [],
-    "sensors": [],
-    "springs": [],
-    "gravity": {
-      "magnitude": 9.81,
-      "direction_x": 0.0,
-      "direction_y": -1.0
-    },
-    "control_graph": null
-  },
+  "parameters": [],
+  "parameter_catalog": {},
   "view_state": {
     "zoom": 1.0,
     "pan_x": 0.0,
@@ -298,114 +15,363 @@
     "show_com": false,
     "show_sliders": true
   },
-  "poses": [
-    {
-      "id": "pose_001",
-      "name": "Pendulum reference pose",
-      "body_poses": {},
+  "gravity_default": null,
+  "root_case_ids": [
+    "case_001"
+  ],
+  "cases": {
+    "case_001": {
+      "id": "case_001",
+      "name": "Root",
+      "description": "",
+      "parent_case_id": null,
+      "model": {
+        "bodies": [
+          {
+            "id": "body_001",
+            "name": "Anchor",
+            "type": "point_mass",
+            "markers": [
+              {
+                "id": "marker_001",
+                "name": "P",
+                "type": "structural",
+                "x": {
+                  "expression": "0 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "0 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              }
+            ],
+            "edge_order": [
+              "marker_001"
+            ],
+            "closed_shape": true,
+            "mass": null,
+            "com": {
+              "kind": "marker",
+              "data": {
+                "marker_id": "marker_001"
+              }
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {
+              "ground_anchor": true,
+              "ground_marker_id": "marker_001"
+            }
+          },
+          {
+            "id": "body_002",
+            "name": "BarA",
+            "type": "bar",
+            "markers": [
+              {
+                "id": "marker_003",
+                "name": "Hinge",
+                "type": "structural",
+                "x": {
+                  "expression": "0 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "0 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              },
+              {
+                "id": "marker_004",
+                "name": "Tip",
+                "type": "structural",
+                "x": {
+                  "expression": "200 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "-200 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              }
+            ],
+            "edge_order": [
+              "marker_003",
+              "marker_004"
+            ],
+            "closed_shape": false,
+            "mass": null,
+            "com": {
+              "kind": "bar_percent",
+              "data": {
+                "percent": 50.0
+              }
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "body_003",
+            "name": "BarB",
+            "type": "bar",
+            "markers": [
+              {
+                "id": "marker_006",
+                "name": "Hinge",
+                "type": "structural",
+                "x": {
+                  "expression": "200 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "-200 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              },
+              {
+                "id": "marker_007",
+                "name": "Tip",
+                "type": "structural",
+                "x": {
+                  "expression": "400 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "-400 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              }
+            ],
+            "edge_order": [
+              "marker_006",
+              "marker_007"
+            ],
+            "closed_shape": false,
+            "mass": null,
+            "com": {
+              "kind": "bar_percent",
+              "data": {
+                "percent": 50.0
+              }
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          }
+        ],
+        "sliders": [],
+        "joints": [
+          {
+            "id": "joint_001",
+            "name": "Ground_Anchor",
+            "type": "rigid",
+            "endpoint_a": {
+              "kind": "marker",
+              "body_id": "body_001",
+              "marker_id": "marker_001"
+            },
+            "endpoint_b": {
+              "kind": "ground"
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {
+              "internal_ground_anchor": true
+            }
+          },
+          {
+            "id": "joint_002",
+            "name": "ShoulderPivot",
+            "type": "revolute",
+            "endpoint_a": {
+              "kind": "marker",
+              "body_id": "body_001",
+              "marker_id": "marker_001"
+            },
+            "endpoint_b": {
+              "kind": "marker",
+              "body_id": "body_002",
+              "marker_id": "marker_003"
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {
+              "angle_limit_reference_body_id": "body_001",
+              "angle_limit_moving_body_id": "body_002"
+            }
+          },
+          {
+            "id": "joint_003",
+            "name": "ElbowPivot",
+            "type": "revolute",
+            "endpoint_a": {
+              "kind": "marker",
+              "body_id": "body_002",
+              "marker_id": "marker_004"
+            },
+            "endpoint_b": {
+              "kind": "marker",
+              "body_id": "body_003",
+              "marker_id": "marker_006"
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          }
+        ],
+        "drivers": [],
+        "loads": [],
+        "sensors": [],
+        "springs": [],
+        "gravity": {
+          "magnitude": 9.81,
+          "direction_x": 0.0,
+          "direction_y": -1.0
+        }
+      },
+      "poses": [
+        {
+          "id": "pose_001",
+          "name": "Pendulum reference pose",
+          "body_poses": {},
+          "parent_pose_id": null,
+          "is_default": false,
+          "requires_recompute": true,
+          "solve_failed": false,
+          "metadata": {}
+        }
+      ],
+      "analyses": [
+        {
+          "id": "analysis_001",
+          "name": "Sweep shoulder + elbow",
+          "analysis_type": "kinematic",
+          "pose_id": "pose_001",
+          "config": {
+            "sweeps": [
+              {
+                "id": "sw_shoulder",
+                "variable_kind": "angle_horizontal",
+                "target_ids": [
+                  "marker_003",
+                  "marker_004"
+                ],
+                "mode": "linear",
+                "start": -1.2,
+                "end": -0.2,
+                "steps": 5,
+                "values": [],
+                "label": "shoulder"
+              },
+              {
+                "id": "sw_elbow",
+                "variable_kind": "angle_between_segments",
+                "target_ids": [
+                  "marker_003",
+                  "marker_004",
+                  "marker_006",
+                  "marker_007"
+                ],
+                "mode": "linear",
+                "start": -0.6,
+                "end": 0.6,
+                "steps": 5,
+                "values": [],
+                "label": "elbow"
+              }
+            ],
+            "allow_failed_steps": true,
+            "plots": [],
+            "metrics": []
+          },
+          "metadata": {}
+        }
+      ],
+      "runs": [],
+      "overlay": null,
+      "tolerances": {},
+      "metrics": {},
       "metadata": {}
     }
-  ],
-  "workspace": {
-    "baselines": [
-      {
-        "id": "baseline_001",
-        "name": "Reference",
-        "description": "",
-        "source_run_id": null,
-        "model_snapshot_id": null,
-        "model_hash": null,
-        "invariant_parameter_keys": [],
-        "approval_status": null,
-        "approved_run_id": null,
-        "tolerances": {},
-        "metrics": {},
-        "metadata": {}
-      }
-    ],
-    "active_baseline_id": "baseline_001",
-    "active_case_id": null,
-    "selected_pose_id": null,
-    "selected_analysis_id": null,
-    "cases": [],
-    "poses": [
-      {
-        "id": "wpose_002",
-        "name": "Pose default",
-        "baseline_id": "baseline_001",
-        "case_id": null,
-        "project_pose_id": null,
-        "is_default": true,
-        "parent_pose_id": null,
-        "requires_recompute": true,
-        "solve_failed": false,
-        "metadata": {}
-      },
-      {
-        "id": "wpose_003",
-        "name": "Pendulum reference pose",
-        "baseline_id": "baseline_001",
-        "case_id": null,
-        "project_pose_id": "pose_001",
-        "is_default": false,
-        "parent_pose_id": null,
-        "requires_recompute": true,
-        "solve_failed": false,
-        "metadata": {}
-      }
-    ],
-    "analyses": [
-      {
-        "id": "analysis_004",
-        "name": "Sweep shoulder + elbow",
-        "analysis_type": "kinematic",
-        "baseline_id": "baseline_001",
-        "case_id": null,
-        "workspace_pose_id": "wpose_003",
-        "config": {
-          "sweeps": [
-            {
-              "id": "sw_shoulder",
-              "variable_kind": "angle_horizontal",
-              "target_ids": [
-                "marker_003",
-                "marker_004"
-              ],
-              "mode": "linear",
-              "start": -1.2,
-              "end": -0.2,
-              "steps": 5,
-              "values": [],
-              "label": "shoulder"
-            },
-            {
-              "id": "sw_elbow",
-              "variable_kind": "angle_between_segments",
-              "target_ids": [
-                "marker_003",
-                "marker_004",
-                "marker_006",
-                "marker_007"
-              ],
-              "mode": "linear",
-              "start": -0.6,
-              "end": 0.6,
-              "steps": 5,
-              "values": [],
-              "label": "elbow"
-            }
-          ],
-          "allow_failed_steps": true,
-          "plots": [],
-          "metrics": []
-        },
-        "metadata": {}
-      }
-    ],
-    "runs": [],
-    "parameter_catalog": {},
-    "model_snapshots": {},
-    "promotion_history": [],
-    "next_sequence": 5
-  }
+  },
+  "selected_case_id": "case_001",
+  "selected_pose_id": null,
+  "selected_analysis_id": null,
+  "metadata": {}
 }

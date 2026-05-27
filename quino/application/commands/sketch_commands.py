@@ -53,12 +53,7 @@ class SketchCommands:
         """No-op: solve cache removed. Kept for API compatibility."""
 
     def _guard_no_case(self) -> None:
-        """Sketch lives only in the baseline; reject mutations in case mode."""
-        if self._ctx.get_active_case() is not None:
-            raise RuntimeError(
-                "Sketch editing is disabled while a case is active. "
-                "Switch to baseline to modify the sketch."
-            )
+        """No-op: sketch lives on the Workspace and can always be edited."""
 
     # --- public sketch API ---------------------------------------------------
 

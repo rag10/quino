@@ -49,15 +49,14 @@ def test_non_dynamic_runners_expose_validate(runner_module, runner_class):
 
 def test_application_run_analysis_dispatches_to_dynamic():
     from quino.application.service import ApplicationService
-    from quino.domain.workspace import Analysis, Baseline, Workspace
+    from quino.domain.workspace import Analysis
 
     app = ApplicationService()
     app.new_project("test")
-    app.project.workspace = Workspace(
-        baselines=[Baseline(id="b", name="base")],
-        analyses=[Analysis(id="a", name="A", analysis_type="dynamic", baseline_id="b")],
-        active_baseline_id="b",
-    )
+    ws = app._workspace
+    case = ws.cases[ws.root_case_ids[0]]
+    analysis = Analysis(id="a", name="A", analysis_type="dynamic")
+    case.analyses.append(analysis)
     result = app.run_analysis("a")
     assert result.analysis_id == "a"
     assert result.status in ("ok", "failed")
@@ -65,15 +64,14 @@ def test_application_run_analysis_dispatches_to_dynamic():
 
 def test_application_run_analysis_returns_analysis_result_for_static():
     from quino.application.service import ApplicationService
-    from quino.domain.workspace import Analysis, Baseline, Workspace
+    from quino.domain.workspace import Analysis
 
     app = ApplicationService()
     app.new_project("test")
-    app.project.workspace = Workspace(
-        baselines=[Baseline(id="b", name="base")],
-        analyses=[Analysis(id="a", name="A", analysis_type="static", baseline_id="b")],
-        active_baseline_id="b",
-    )
+    ws = app._workspace
+    case = ws.cases[ws.root_case_ids[0]]
+    analysis = Analysis(id="a", name="A", analysis_type="static")
+    case.analyses.append(analysis)
     result = app.run_analysis("a")
     assert result.analysis_id == "a"
     assert result.status in {"ok", "failed", "partial"}

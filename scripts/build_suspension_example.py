@@ -15,29 +15,16 @@ What this exercises:
 - Loads: gravity, plus a payload load expressed in the inspector.
 - Block diagram: an "active suspension" control loop reading the hub
   position sensor and driving an actuator force, structured as
-  ModelSensor -> Gain -> PID -> LoadCommand. Disabled at baseline,
-  switched on in one of the cases.
-- Workspace structure:
-    Baseline = "Reference (passive)"
-        Default pose       (rig at rest)
-        Pose "Static load" (suspension compressed by car weight)
-        Analysis "Bump @ rest"
-    Case "Stiffer spring"   (overrides spring stiffness)
-        Default pose
-        Pose "Static load - stiff"
-        Analysis "Bump @ stiff load"
-    Case "Active suspension" (enables PID feedback, softer base)
-        Subcase "Heavy passenger" (adds payload mass)
-            Default pose
-            Pose "Static load - heavy"
-            Analyses on the pose
+  ModelSensor -> Gain -> PID -> LoadCommand.
+- Workspace structure (one root case with multiple analyses):
+    Analysis "Smooth road @ 2.5 Hz"
+    Analysis "Smooth road under load"
 
 Saved to examples/Active_Suspension_Validation.quino.json.
 """
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 from quino.application.service import ApplicationService
@@ -49,7 +36,6 @@ from quino.domain.inputs import (
 )
 from quino.domain.model import SpringEndpoint
 from quino.domain.types import (
-    DriverType,
     JointEndpointKind,
     SpringEndpointKind,
 )
@@ -66,7 +52,7 @@ def build_active_suspension(app: ApplicationService) -> None:
     app.new_project("Active Suspension Validation Rig")
 
     # ------------------------------------------------------------------
-    # 1. Parameters (so case overrides operate on named knobs)
+    # 1. Parameters (so analyses reference named knobs)
     # ------------------------------------------------------------------
     arm_len_id = app.create_parameter(
         "ArmLength", "300 mm", "mm",
@@ -78,7 +64,6 @@ def build_active_suspension(app: ApplicationService) -> None:
         "SpringRest", "320 mm", "mm",
         description="Free length of the strut spring.",
     )
-    # Knobs the user can tweak from the inspector (or override per-case).
     road_amp = app.create_parameter(
         "RoadAmp", "1500 N", "N",
         description="Peak vertical force the road profile applies to the wheel.",
@@ -135,11 +120,6 @@ def build_active_suspension(app: ApplicationService) -> None:
         PropertyValueInput(kind="expression", value="3 kg"),
     )
 
-    # The wheel hub is a small rigid body (sprung mass). Its markers must
-    # coincide at rest with their joint counterparts:
-    #   Center      → coincident with LowerArm.BallJoint  (ball joint)
-    #   StrutAttach → coincident with StrutTopMount       (strut top pivot)
-    #   ContactPatch is below the hub (where the road bump applies).
     hub = app.create_body(
         "WheelHub",
         [
@@ -154,8 +134,6 @@ def build_active_suspension(app: ApplicationService) -> None:
         PropertyValueInput(kind="expression", value="40 kg"),
     )
 
-    # Strut: prismatic slider along the vertical strut axis, anchored at
-    # the strut top mount, pointing down.
     strut_slider = app.create_slider(
         "StrutGuide",
         SliderInput("ArmLength", "320 mm", "270 deg", "-60 mm", "60 mm"),
@@ -164,7 +142,6 @@ def build_active_suspension(app: ApplicationService) -> None:
     # ------------------------------------------------------------------
     # 4. Joints
     # ------------------------------------------------------------------
-    # Lower arm pivots at the chassis mount.
     app.create_joint(
         "Pivot_Chassis",
         "revolute",
@@ -179,7 +156,6 @@ def build_active_suspension(app: ApplicationService) -> None:
             marker_id=_marker_id(app, lower_arm, "Hinge"),
         ),
     )
-    # Ball joint between lower arm and hub.
     app.create_joint(
         "BallJoint",
         "revolute",
@@ -194,10 +170,6 @@ def build_active_suspension(app: ApplicationService) -> None:
             marker_id=_marker_id(app, hub, "Center"),
         ),
     )
-    # Strut prismatic: hub StrutAttach slides along the strut guide axis.
-    # The strut top mount only acts as a geometric reference for the spring
-    # (no separate revolute joint — the slider already constrains the hub
-    # to the strut axis, so adding a pivot would over-constrain the model).
     app.connect_marker_to_slider(
         _marker_id(app, hub, "StrutAttach"),
         strut_slider,
@@ -205,7 +177,7 @@ def build_active_suspension(app: ApplicationService) -> None:
     )
 
     # ------------------------------------------------------------------
-    # 5. Spring + damper as a single linear spring with damping metadata
+    # 5. Spring + damper
     # ------------------------------------------------------------------
     spring_id = app.create_spring(
         "StrutSpring",
@@ -227,29 +199,22 @@ def build_active_suspension(app: ApplicationService) -> None:
     )
     app.update_spring_property(
         spring_id, "stiffness",
-        PropertyValueInput(kind="expression", value="35000"),  # N/m
+        PropertyValueInput(kind="expression", value="35000"),
     )
     app.update_spring_property(
         spring_id, "damping",
-        PropertyValueInput(kind="expression", value="1500"),   # N·s/m
+        PropertyValueInput(kind="expression", value="1500"),
     )
 
     # ------------------------------------------------------------------
     # 6. Road excitation + static car load
     # ------------------------------------------------------------------
-    # The "RoadProfile" load models a continuously undulating road: a sine
-    # with adjustable amplitude (RoadAmp, in N) and frequency (RoadFreq, in
-    # Hz). Per-case overrides will turn it into a pothole pulse, a resonant
-    # excitation, or a high-frequency washboard.
     road_load = app.create_load(
         "RoadProfile",
         _marker_id(app, hub, "ContactPatch"),
         "0 N",
         "RoadAmp * sin(360 deg * RoadFreq * t / 1 s)",
     )
-    # Static quarter-car weight transmitted from the chassis to the hub. We
-    # represent it as a constant downward force on StrutAttach so the spring
-    # sits at a realistic ride height before the road wakes up.
     static_load = app.create_load(
         "QuarterCarLoad",
         _marker_id(app, hub, "StrutAttach"),
@@ -278,15 +243,11 @@ def build_active_suspension(app: ApplicationService) -> None:
             _marker_id(app, lower_arm, "BallJoint"),
         ],
     )
-    # Aceleración vertical del hub para evaluar el confort del pasajero
-    # (a/ay del sensor 'point' es la aceleración vertical en m/s²).
     ride_comfort_sensor = app.create_sensor(
         "RideAccelerometer",
         "point",
         [_marker_id(app, hub, "Center")],
     )
-    # Posición del contact patch — útil para ver el "desplazamiento de la
-    # rueda contra la carretera" en los análisis de pothole / washboard.
     contact_sensor = app.create_sensor(
         "ContactPatchPos",
         "point",
@@ -294,19 +255,13 @@ def build_active_suspension(app: ApplicationService) -> None:
     )
 
     # ------------------------------------------------------------------
-    # 8. Gravity (acts on hub mass)
+    # 8. Gravity
     # ------------------------------------------------------------------
     app.add_gravity()
 
     # ------------------------------------------------------------------
-    # 9. Block diagram (control loop, disabled in baseline)
-    #
-    #   ModelSensor[HubVerticalPos.y]  ──►  Gain(k=-1)  ──►  PID  ──►  LoadCommand(ActuatorForce)
-    #
-    # Saved on baseline; the "Active suspension" case will tune the PID gains
-    # and enable a higher gain factor.
+    # 9. Block diagram (control loop, gain=0 → passive baseline)
     # ------------------------------------------------------------------
-    # We add an "actuator" load that the PID will drive (force in y).
     actuator_load = app.create_load(
         "ActuatorForce",
         _marker_id(app, hub, "StrutAttach"),
@@ -323,7 +278,7 @@ def build_active_suspension(app: ApplicationService) -> None:
         block_type="Gain",
         name="ErrorGain",
         position=(-200.0, -120.0),
-        parameters={"k": 0.0},  # disabled in baseline
+        parameters={"k": 0.0},
     )
     pid_block = app.add_block(
         block_type="PID",
@@ -345,8 +300,6 @@ def build_active_suspension(app: ApplicationService) -> None:
         src_instance=sensor_block, src_port="out",
         dst_instance=gain_block, dst_port="in",
     )
-    # PID block's input port is named "error" (it expects an error signal,
-    # i.e. the negated hub displacement here).
     app.add_connection(
         src_instance=gain_block, src_port="out",
         dst_instance=pid_block, dst_port="error",
@@ -357,247 +310,28 @@ def build_active_suspension(app: ApplicationService) -> None:
     )
 
     # ------------------------------------------------------------------
-    # 10. Workspace: baseline + cases + poses + analyses
+    # 10. Workspace: root case + poses + analyses
     # ------------------------------------------------------------------
-    ws = app.project.workspace
-    # Rename the default baseline to something meaningful for this rig.
-    baseline = ws.baselines[0]
-    app.workspace.rename_baseline(baseline.id, "Reference (passive)")
-    # Opt-in: declare the PID and Gain block parameters as case-invariant so
-    # downstream cases can tune them. Without this, the composer treats block
-    # parameters as study-level variables only.
-    baseline.invariant_parameter_keys.extend([
-        f"model/control_graph/instances/{gain_block}/parameters/k",
-        f"model/control_graph/instances/{pid_block}/parameters/kp",
-        f"model/control_graph/instances/{pid_block}/parameters/ki",
-        f"model/control_graph/instances/{pid_block}/parameters/kd",
-    ])
+    ws = app._workspace
+    case = ws.cases[ws.root_case_ids[0]]
 
-    # --- Baseline-scope analyses + a couple of static poses ------------
     static_pose_base = app.workspace.create_pose(
-        "Static load", baseline_id=baseline.id,
+        "Static load", case_id=case.id,
     )
     app.workspace.create_analysis(
         "Smooth road @ 2.5 Hz",
         analysis_type="dynamic",
-        baseline_id=baseline.id,
+        case_id=case.id,
         workspace_pose_id=static_pose_base.id,
     )
     app.workspace.create_analysis(
         "Smooth road under load",
         analysis_type="dynamic",
-        baseline_id=baseline.id,
+        case_id=case.id,
         workspace_pose_id=static_pose_base.id,
     )
 
-    # --- Case 1: Stiffer spring ("rally setup") ------------------------
-    stiff_case = app.workspace.create_case(
-        "Rally setup (stiffer spring)", baseline_id=baseline.id,
-    )
-    app.workspace.update_case_invariants(
-        stiff_case.id,
-        {
-            f"springs_meta/{spring_id}/stiffness": "55000",
-            f"springs_meta/{spring_id}/damping": "1900",
-            # Rally tracks have higher-frequency, lower-amplitude content.
-            f"parameters/{road_amp}": "1200 N",
-            f"parameters/{road_freq}": "4.0",
-        },
-    )
-    stiff_pose = app.workspace.create_pose(
-        "Static load - stiff", case_id=stiff_case.id,
-    )
-    app.workspace.create_analysis(
-        "Rally washboard run",
-        analysis_type="dynamic",
-        case_id=stiff_case.id,
-        workspace_pose_id=stiff_pose.id,
-    )
-
-    # --- Case 2: Pothole strike ---------------------------------------
-    pothole_case = app.workspace.create_case(
-        "Pothole strike", baseline_id=baseline.id,
-    )
-    # A pothole = wheel briefly loses ground (downward impulse) then slams
-    # the far edge (upward impulse). We approximate it with a 6 Hz wavelet
-    # at much higher amplitude. The 1.2 m/s road profile peak gives ≈ 4 kN.
-    app.workspace.update_case_invariants(
-        pothole_case.id,
-        {
-            f"parameters/{road_amp}": "4000 N",
-            f"parameters/{road_freq}": "6.0",
-        },
-    )
-    pothole_pose = app.workspace.create_pose(
-        "Static load - pothole", case_id=pothole_case.id,
-    )
-    app.workspace.create_analysis(
-        "Single pothole impact",
-        analysis_type="dynamic",
-        case_id=pothole_case.id,
-        workspace_pose_id=pothole_pose.id,
-    )
-
-    # --- Case 3: Resonance test ---------------------------------------
-    # Sprung-mass natural frequency f0 ≈ (1/2π)·sqrt(k/m).
-    # For k=35 kN/m and m=40 kg → f0 ≈ 4.7 Hz. Driving slightly below to
-    # show resonance build-up.
-    resonance_case = app.workspace.create_case(
-        "Resonance sweep", baseline_id=baseline.id,
-    )
-    app.workspace.update_case_invariants(
-        resonance_case.id,
-        {
-            f"parameters/{road_amp}": "800 N",
-            f"parameters/{road_freq}": "4.7",
-            # Low damping so the resonance peak builds up dramatically.
-            f"springs_meta/{spring_id}/damping": "300",
-        },
-    )
-    resonance_pose = app.workspace.create_pose(
-        "Static load - resonance", case_id=resonance_case.id,
-    )
-    app.workspace.create_analysis(
-        "Drive at natural frequency",
-        analysis_type="dynamic",
-        case_id=resonance_case.id,
-        workspace_pose_id=resonance_pose.id,
-    )
-
-    # --- Case 4: Active suspension (PID enabled, softer base) ----------
-    active_case = app.workspace.create_case(
-        "Active suspension", baseline_id=baseline.id,
-    )
-    # Softer mechanical base + nonzero control gains. The PID is asked to
-    # keep the hub centred against an aggressive road input.
-    app.workspace.update_case_invariants(
-        active_case.id,
-        {
-            f"springs_meta/{spring_id}/stiffness": "20000",
-            f"springs_meta/{spring_id}/damping": "800",
-            f"model/control_graph/instances/{gain_block}/parameters/k": "-1.0",
-            f"model/control_graph/instances/{pid_block}/parameters/kp": "1800.0",
-            f"model/control_graph/instances/{pid_block}/parameters/ki": "60.0",
-            f"model/control_graph/instances/{pid_block}/parameters/kd": "120.0",
-            # Mix of bump + sustained excitation so the PID has work to do.
-            f"parameters/{road_amp}": "2200 N",
-            f"parameters/{road_freq}": "3.0",
-        },
-    )
-    active_pose = app.workspace.create_pose(
-        "Settled (active)", case_id=active_case.id,
-    )
-    app.workspace.create_analysis(
-        "Comfort cruise (PID on)",
-        analysis_type="dynamic",
-        case_id=active_case.id,
-        workspace_pose_id=active_pose.id,
-    )
-
-    # --- Subcase under "Active suspension": Heavy passenger ------------
-    heavy_case = app.workspace.create_case(
-        "Heavy passenger", parent_case_id=active_case.id,
-    )
-    # Two adults in the back seat: bump the quarter-car load and the
-    # sprung mass. PID tuning is inherited from the parent case.
-    app.workspace.update_case_invariants(
-        heavy_case.id,
-        {
-            f"bodies/{hub}/mass": "70 kg",
-            f"parameters/{quarter_car_weight}": "6500 N",
-        },
-    )
-    heavy_pose = app.workspace.create_pose(
-        "Static load - heavy", case_id=heavy_case.id,
-    )
-    app.workspace.create_analysis(
-        "Heavy comfort cruise",
-        analysis_type="dynamic",
-        case_id=heavy_case.id,
-        workspace_pose_id=heavy_pose.id,
-    )
-    app.workspace.create_analysis(
-        "Heavy + pothole",
-        analysis_type="dynamic",
-        case_id=heavy_case.id,
-        workspace_pose_id=heavy_pose.id,
-    )
-
-    # --- Subcase under "Active suspension": Failure mode --------------
-    # What happens if the actuator fails (gain drops to zero) while the
-    # car is on rough road? Useful for fault-tolerance studies.
-    fail_case = app.workspace.create_case(
-        "Actuator failure", parent_case_id=active_case.id,
-    )
-    app.workspace.update_case_invariants(
-        fail_case.id,
-        {
-            # Override only the PID/gain: actuator does nothing but the
-            # softer-spring base from the parent is inherited.
-            f"model/control_graph/instances/{gain_block}/parameters/k": "0.0",
-            f"model/control_graph/instances/{pid_block}/parameters/kp": "0.0",
-            f"model/control_graph/instances/{pid_block}/parameters/ki": "0.0",
-            f"model/control_graph/instances/{pid_block}/parameters/kd": "0.0",
-        },
-    )
-    fail_pose = app.workspace.create_pose(
-        "Static load - failure", case_id=fail_case.id,
-    )
-    app.workspace.create_analysis(
-        "Failure on rough road",
-        analysis_type="dynamic",
-        case_id=fail_case.id,
-        workspace_pose_id=fail_pose.id,
-    )
-
-    # --- Static analysis: lock strut at zero stroke -------------------
-    # Static requires DoF=0. We add a constant translational driver on the
-    # strut prismatic joint (StrutSlide) that pins the stroke at 0 mm. The
-    # driver is added as a case-scoped entity so the dynamic analyses on
-    # the baseline keep their freely-moving strut.
-    static_case = app.workspace.create_case(
-        "Locked strut (static)", baseline_id=baseline.id,
-    )
-    strut_joint_id = next(
-        joint.id for joint in app.project.model.joints if joint.name == "StrutSlide"
-    )
-    app.set_working_context(case_id=static_case.id)
-    app.create_driver(
-        "LockStrut",
-        "translation",
-        strut_joint_id,
-        "0 mm",
-        "mm",
-    )
-    app.set_working_context(baseline_id=baseline.id)
-    static_pose = app.workspace.create_pose(
-        "Locked pose", case_id=static_case.id,
-    )
-    app.workspace.create_analysis(
-        "Static — locked",
-        analysis_type="static",
-        case_id=static_case.id,
-        workspace_pose_id=static_pose.id,
-    )
-
-    # --- Equilibrium analysis: free settle under gravity --------------
-    # No case override required — the baseline model already has DoF > 0
-    # (free strut prismatic) and a gravity + spring force source, so
-    # find_stable_equilibria can integrate to the rest position.
-    free_settle_pose = app.workspace.create_pose(
-        "Free settle", baseline_id=baseline.id,
-    )
-    app.workspace.create_analysis(
-        "Equilibrium — free settle",
-        analysis_type="equilibrium",
-        baseline_id=baseline.id,
-        workspace_pose_id=free_settle_pose.id,
-    )
-
-    # Default to the baseline view when the project opens.
-    app.set_working_context(baseline_id=baseline.id)
-
-    app.save_project(str(EXAMPLES_DIR / "Active_Suspension_Validation.quino.json"))
+    app.save_workspace(str(EXAMPLES_DIR / "Active_Suspension_Validation.quino.json"))
 
 
 def main() -> None:

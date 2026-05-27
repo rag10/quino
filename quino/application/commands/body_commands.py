@@ -409,6 +409,7 @@ class BodyCommands:
         from quino.domain.types import JointEndpointKind
 
         project = self._project
+        body = self._find_body_by_marker(marker_id)
         new_x = ScalarProperty(expression=x_expression, unit=marker.x.unit, expected_dimension=Dimension.LENGTH)
         new_y = ScalarProperty(expression=y_expression, unit=marker.y.unit, expected_dimension=Dimension.LENGTH)
         target_x_eval = self._ctx.expressions.evaluate_property(new_x, project.parameters)
@@ -427,47 +428,22 @@ class BodyCommands:
         marker.x = new_x
         marker.y = new_y
 
-        # Propagate to counterparts of joints that were already coincident.
+        # Propagate to joint counterparts (markers and sliders).
         if abs(delta_x) > 1e-12 or abs(delta_y) > 1e-12:
-            for joint in project.model.joints:
-                ep_a, ep_b = joint.endpoint_a, joint.endpoint_b
-                counterpart_id: str | None = None
-                if ep_a.kind is JointEndpointKind.MARKER and ep_a.marker_id == marker_id:
-                    if ep_b.kind is JointEndpointKind.MARKER:
-                        counterpart_id = ep_b.marker_id
-                elif ep_b.kind is JointEndpointKind.MARKER and ep_b.marker_id == marker_id:
-                    if ep_a.kind is JointEndpointKind.MARKER:
-                        counterpart_id = ep_a.marker_id
-                if counterpart_id is None or counterpart_id == marker_id:
-                    continue
-                # Resolve the counterpart marker in case.model.
-                counterpart = None
-                for b in project.model.bodies:
-                    for m in b.markers:
-                        if m.id == counterpart_id:
-                            counterpart = m
-                            break
-                    if counterpart is not None:
-                        break
-                if counterpart is None:
-                    continue
-                # Only drag if the two markers were coincident.
-                cx_eval = self._ctx.expressions.evaluate_property(counterpart.x, project.parameters)
-                cy_eval = self._ctx.expressions.evaluate_property(counterpart.y, project.parameters)
-                cx_mm = self._ctx.units.convert(self._ctx.units.quantity(cx_eval.value, cx_eval.unit), "mm")
-                cy_mm = self._ctx.units.convert(self._ctx.units.quantity(cy_eval.value, cy_eval.unit), "mm")
-                if abs(cx_mm - current_x) > 1e-6 or abs(cy_mm - current_y) > 1e-6:
-                    continue
-                counterpart.x = ScalarProperty(
-                    expression=f"{cx_mm + delta_x:.6f} mm",
-                    unit=counterpart.x.unit,
-                    expected_dimension=Dimension.LENGTH,
+            linked_joints = self._ctx.joints_for_marker(marker_id)
+            if linked_joints:
+                moved_marker_ids = self._ctx.translate_direct_joint_counterparts(
+                    marker_id, linked_joints, delta_x, delta_y
                 )
-                counterpart.y = ScalarProperty(
-                    expression=f"{cy_mm + delta_y:.6f} mm",
-                    unit=counterpart.y.unit,
-                    expected_dimension=Dimension.LENGTH,
-                )
+                for moved_marker_id in moved_marker_ids:
+                    if moved_marker_id == marker_id:
+                        continue
+                    try:
+                        moved_body = self._find_body_by_marker(moved_marker_id)
+                        self._sync_special_com_marker(moved_body)
+                    except ValueError:
+                        pass
+        self._sync_special_com_marker(body)
         self._ctx.invalidate_pose_state()
 
     def move_marker(self, marker_id: str, x_expression: str, y_expression: str) -> None:
@@ -549,6 +525,10 @@ class BodyCommands:
         case = self._ctx.get_active_case()
         if case is not None:
             self._emit_com_anchor_override(case, body_id, anchor)
+            try:
+                self._refresh_com_marker_cache(body)
+            except Exception:
+                pass
             self._ctx.invalidate_pose_state()
             return
         self._ctx.snapshot()

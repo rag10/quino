@@ -43,7 +43,7 @@ def test_equilibrium_runner_persists_typed_artifact(tmp_path, monkeypatch) -> No
     pose = svc.workspace.create_pose("P", case_id=case.id)
     analysis = svc.workspace.create_analysis("E", analysis_type="equilibrium", case_id=case.id, workspace_pose_id=pose.id)
     run = Run(id="r_eq", analysis_id=analysis.id, created_at="...", status="running")
-    svc.project.workspace.runs.append(run)
+    case.runs.append(run)
 
     monkeypatch.setattr(
         "quino.analysis.equilibrium_runner.find_stable_equilibria",

@@ -1166,9 +1166,12 @@ class MainWindow(QtWidgets.QMainWindow):
         # If the active selection is a default WorkspacePose, do NOT create a
         # backing project Pose: the canvas should simply render the composed
         # geometry of the current scope as a read-only snapshot.
-        ws = project.workspace
+        ws = self.app_service._workspace
         if ws is not None and ws.selected_pose_id is not None:
-            wp = next((p for p in ws.poses if p.id == ws.selected_pose_id), None)
+            wp = next(
+                (p for case in ws.cases.values() for p in case.poses if p.id == ws.selected_pose_id),
+                None,
+            )
             if wp is not None and wp.is_default:
                 self._pose_constraints.clear()
                 self.canvas.set_pose_constraints([])
@@ -1417,10 +1420,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.update()
 
     def _on_workflow_pose_selected(self, pose_id: str) -> None:
-        ws = self.app_service.project.workspace if self.app_service.project else None
+        ws = self.app_service._workspace
         if ws is None:
             return
-        pose = next((p for p in ws.poses if p.id == pose_id), None)
+        pose = next(
+            (p for case in ws.cases.values() for p in case.poses if p.id == pose_id),
+            None,
+        )
         if pose is None:
             return
         # Default poses show the model geometry in a read-only viewport,
