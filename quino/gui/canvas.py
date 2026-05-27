@@ -2460,7 +2460,7 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def _collect_markers(
         self,
-        project, Project,
+        project,
         assembled: AssembledMechanism | None = None,
     ) -> list[CanvasMarker]:
         markers: list[CanvasMarker] = []
@@ -2506,7 +2506,7 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def _collect_grounds(
         self,
-        project, Project,
+        project,
         assembled: AssembledMechanism | None = None,
     ) -> list[CanvasGround]:
         grounds: list[CanvasGround] = []
@@ -2538,7 +2538,7 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def _bar_com_preview(
         self,
-        project, Project,
+        project,
         body: Body,
         preview_map: dict,
         assembled: AssembledMechanism | None = None,
@@ -2559,7 +2559,7 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def _project_point_onto_bar(
         self,
-        project, Project,
+        project,
         body: Body,
         x: float,
         y: float,
@@ -2580,7 +2580,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         t = max(0.0, min(1.0, t))
         return x1 + t * dx, y1 + t * dy
 
-    def _collect_sliders(self, project, Project) -> list[CanvasSlider]:
+    def _collect_sliders(self, project) -> list[CanvasSlider]:
         sliders: list[CanvasSlider] = []
         for slider in project.model.sliders:
             try:
@@ -2621,7 +2621,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             )
         return sliders
 
-    def _collect_sketch_points(self, project, Project) -> list[CanvasSketchPoint]:
+    def _collect_sketch_points(self, project) -> list[CanvasSketchPoint]:
         points: list[CanvasSketchPoint] = []
         if project.sketch is None or not project.sketch.visible:
             return points
@@ -2655,7 +2655,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             )
         return points
 
-    def _collect_sketch_entities(self, project, Project) -> list[CanvasSketchEntity]:
+    def _collect_sketch_entities(self, project) -> list[CanvasSketchEntity]:
         entities: list[CanvasSketchEntity] = []
         if project.sketch is None or not project.sketch.visible:
             return entities
@@ -3075,7 +3075,7 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _draw_sketch_constraints(
         self,
         painter: QtGui.QPainter,
-        project, Project,
+        project,
         points: list[CanvasSketchPoint],
         transform,
         *,
@@ -3225,7 +3225,7 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _draw_bodies(
         self,
         painter: QtGui.QPainter,
-        project, Project,
+        project,
         markers: list[CanvasMarker],
         transform,
     ) -> None:
@@ -3317,7 +3317,7 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _draw_joints(
         self,
         painter: QtGui.QPainter,
-        project, Project,
+        project,
         assembled,
         markers: list[CanvasMarker],
         sliders: list[CanvasSlider],
@@ -3434,7 +3434,7 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _draw_drivers(
         self,
         painter: QtGui.QPainter,
-        project, Project,
+        project,
         markers: list[CanvasMarker],
         sliders: list[CanvasSlider],
         transform,
@@ -3495,7 +3495,7 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _draw_sensors(
         self,
         painter: QtGui.QPainter,
-        project, Project,
+        project,
         markers: list[CanvasMarker],
         transform,
     ) -> None:
@@ -3743,7 +3743,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             painter.setPen(QtGui.QPen(QtGui.QColor("#5b5247")))
             painter.drawText(point + QtCore.QPointF(6.0, -6.0), marker.name)
 
-    def _draw_pose_dof_info(self, painter: QtGui.QPainter, project, Project) -> None:
+    def _draw_pose_dof_info(self, painter: QtGui.QPainter, project) -> None:
         """Draw DOF count in the top-right corner when in pose mode."""
         if self._interaction_mode != "pose":
             return
@@ -3771,7 +3771,7 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _draw_pose_constraint_icons(
         self,
         painter: QtGui.QPainter,
-        project, Project,
+        project,
         markers: list[CanvasMarker],
         transform,
     ) -> None:
@@ -3843,7 +3843,7 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _draw_forces(
         self,
         painter: QtGui.QPainter,
-        project, Project,
+        project,
         markers: list[CanvasMarker],
         transform,
     ) -> None:
@@ -3930,7 +3930,7 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _draw_loads(
         self,
         painter: QtGui.QPainter,
-        project, Project,
+        project,
         markers: list[CanvasMarker],
         transform,
     ) -> None:
@@ -4005,7 +4005,7 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _draw_reactions(
         self,
         painter: QtGui.QPainter,
-        project, Project,
+        project,
         transform,
     ) -> None:
         if self._state_overlay is None or not project.reaction_outputs:
@@ -5159,7 +5159,7 @@ class MechanismCanvas(QtWidgets.QWidget):
     def _draw_springs(
         self,
         painter: QtGui.QPainter,
-        project, Project,
+        project,
         assembled: AssembledMechanism | None,
         transform,
     ) -> None:
@@ -5205,7 +5205,7 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def _spring_endpoint_world(
         self,
-        project, Project,
+        project,
         ep,
         assembled: AssembledMechanism | None,
     ) -> tuple[float | None, float | None]:
@@ -6339,7 +6339,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         self.app_service.update_property(driver_id, "law", PropertyValueInput("expression", text))
         self.modelChanged.emit(f"Updated law for {driver.name}")
 
-    def _assembled_mechanism(self, project, Project) -> AssembledMechanism | None:
+    def _assembled_mechanism(self, project) -> AssembledMechanism | None:
         adapter = self.app_service.simulation_runner.adapter
         if not hasattr(adapter, "assembler"):
             return None
@@ -6350,7 +6350,7 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def _marker_world_position(
         self,
-        project, Project,
+        project,
         body_id: str,
         marker_id: str,
         assembled: AssembledMechanism | None,

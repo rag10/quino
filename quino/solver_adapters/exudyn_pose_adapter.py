@@ -18,7 +18,7 @@ class ExudynPoseAdapter(ExudynAdapter):
 
     def solve_pose(
         self,
-        project, Project,
+        project,
         initial_pose: Pose | None,
         temporary_constraints: list[PoseConstraint],
         settings: PoseSolveSettings,
@@ -68,7 +68,7 @@ class ExudynPoseAdapter(ExudynAdapter):
 
     def _solve_pose_once(
         self,
-        project, Project,
+        project,
         assembled,
         initial_pose: Pose | None,
         temporary_constraints: list[PoseConstraint],
@@ -183,7 +183,7 @@ class ExudynPoseAdapter(ExudynAdapter):
         self,
         mbs,
         item_interface,
-        project, Project,
+        project,
         assembled,
         body_objects: dict[str, int],
         node_numbers: dict[str, int],
@@ -397,7 +397,7 @@ class ExudynPoseAdapter(ExudynAdapter):
 
     def _constraint_validation_error(
         self,
-        project, Project,
+        project,
         pose: Pose,
         constraint: PoseConstraint,
     ) -> str | None:
