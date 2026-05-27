@@ -242,6 +242,7 @@ class MechanismCanvas(QtWidgets.QWidget):
     def __init__(self, app_service: ApplicationService, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.app_service = app_service
+        self._show_parent_diff: bool = False
         self._display_project: Project | None = None
         self._selected_entity_id: str | None = None
         self._selected_entity_ids: set[str] = set()
@@ -744,6 +745,10 @@ class MechanismCanvas(QtWidgets.QWidget):
 
     def set_display_project(self, project: Project | None) -> None:
         self._display_project = project
+        self.update()
+
+    def set_show_parent_diff(self, on: bool) -> None:
+        self._show_parent_diff = on
         self.update()
 
     def _read_project(self) -> Project | None:

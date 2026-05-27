@@ -452,6 +452,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.action_fit_view = QtGui.QAction(get_icon("fit-view", color_base), "Fit View", self)
         self.action_fit_view.setToolTip("Fit mechanism to view")
 
+        self.action_show_parent_diff = QtGui.QAction("Show parent diff", self)
+        self.action_show_parent_diff.setCheckable(True)
+        self.action_show_parent_diff.setToolTip("Overlay differences from parent case (rendering deferred)")
+        self.action_show_parent_diff.toggled.connect(lambda on: self.canvas.set_show_parent_diff(on))
+
         self.action_add_rotation_driver = self._tool_action("RotDrv", CanvasMode.CREATE_ROTATION_DRIVER, get_icon("rotate-driver", color_dynamic), "Add a rotation driver to a joint (select a joint on canvas)")
         self.action_add_translation_driver = self._tool_action("LinDrv", CanvasMode.CREATE_TRANSLATION_DRIVER, get_icon("translate-driver", color_dynamic), "Add a translation driver to a slider (select a slider joint on canvas)")
 
