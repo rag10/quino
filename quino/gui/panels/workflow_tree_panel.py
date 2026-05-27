@@ -143,10 +143,14 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         case_id = item.data(0, ROLE_ID)
         if kind != "case" or not case_id:
             return
+        ws = self._service._workspace
+        case = ws.cases.get(case_id) if ws else None
         menu = QtWidgets.QMenu(self)
         fork_action = menu.addAction("Fork case…")
         rename_action = menu.addAction("Rename…")
         delete_action = menu.addAction("Delete")
+        compare_action = menu.addAction("Compare with parent")
+        compare_action.setEnabled(case is not None and case.parent_case_id is not None)
         action = menu.exec(event.globalPos())
         if action == fork_action:
             name, ok = QtWidgets.QInputDialog.getText(self, "Fork case", "New case name:")
@@ -154,8 +158,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
                 self.fork_case(case_id, name.strip())
                 self.refresh()
         elif action == rename_action:
-            ws = self._service._workspace
-            current_name = ws.cases[case_id].name if ws and case_id in ws.cases else ""
+            current_name = case.name if case else ""
             name, ok = QtWidgets.QInputDialog.getText(
                 self, "Rename case", "New name:", text=current_name
             )
@@ -165,3 +168,38 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         elif action == delete_action:
             self.delete_case(case_id)
             self.refresh()
+        elif action == compare_action:
+            self._compute_and_record_compare_warnings(case_id)
+            self.case_selected.emit(case_id)
+
+    def _compute_and_record_compare_warnings(self, case_id: str) -> None:
+        from quino.services.case_overlay_validator import _entity_lookup
+        ws = self._service._workspace
+        if ws is None:
+            return
+        case = ws.cases.get(case_id)
+        if case is None or case.parent_case_id is None:
+            return
+        parent = ws.cases.get(case.parent_case_id)
+        if parent is None:
+            return
+        diffs = []
+        parent_index = _entity_lookup(parent)
+        child_index = _entity_lookup(case)
+        for ent_id, (parent_ent, cls) in parent_index.items():
+            child_ent_tuple = child_index.get(ent_id)
+            if child_ent_tuple is None:
+                diffs.append({"kind": "missing_in_child", "path": f"entities/{ent_id}"})
+                continue
+            for f in cls.__dataclass_fields__:  # type: ignore[attr-defined]
+                try:
+                    if getattr(parent_ent, f) != getattr(child_ent_tuple[0], f):
+                        diffs.append({
+                            "kind": "value_diff",
+                            "path": f"entities/{ent_id}/{f}",
+                            "parent_value": repr(getattr(parent_ent, f)),
+                            "child_value": repr(getattr(child_ent_tuple[0], f)),
+                        })
+                except Exception:
+                    pass
+        case.metadata["divergence_warnings"] = diffs
