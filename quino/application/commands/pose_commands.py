@@ -79,7 +79,7 @@ class PoseCommands:
 
     def list_poses(self) -> list[Pose]:
         project = self._project
-        return list(project.poses)
+        return [p for p in project.poses if not p.is_default]
 
     def get_pose(self, pose_id: str) -> Pose | None:
         project = self._project
@@ -161,7 +161,9 @@ class PoseCommands:
         self._ctx.snapshot()
         project.poses = [pose for pose in project.poses if pose.id != pose_id]
         if self._current_pose_id == pose_id:
-            self._current_pose_id = project.poses[0].id if project.poses else None
+            # Fall back to the first user pose (skip the reference/default).
+            remaining_user = [p for p in project.poses if not getattr(p, "is_default", False)]
+            self._current_pose_id = remaining_user[0].id if remaining_user else None
 
     def reset_current_pose_to_reference(self) -> Pose:
         """Reset the current pose body positions back to the reference geometry."""

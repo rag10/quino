@@ -85,11 +85,47 @@ def com_global_position(
     project, body: Body, pose: Pose | None = None,
 ) -> tuple[float, float]:
     """Return (gx, gy) in mm in the world frame for the given pose (or
-    the reference configuration when ``pose is None``)."""
-    lx, ly = com_local_position(project, body)
+    the reference configuration when ``pose is None``).
+
+    Convention: ``com_local_position`` returns the CoM expressed in the
+    body's reference world frame (same coordinate system as the body's
+    structural markers as authored). A ``BodyPose`` describes the current
+    pose of the body as a rigid-body motion from its reference: the body's
+    anchor (first structural marker) is translated to ``(bp.x, bp.y)`` and
+    rotated by ``bp.angle - body.reference_angle``. So to map the CoM from
+    its reference position to the current pose we:
+
+    1. Compute the CoM position relative to the body anchor in the
+       reference configuration.
+    2. Rotate that offset by the *delta* angle and translate by the
+       anchor's current position.
+    """
+    com_ref_x, com_ref_y = com_local_position(project, body)
     if pose is None or body.id not in pose.body_poses:
-        return (lx, ly)
+        return (com_ref_x, com_ref_y)
     bp = pose.body_poses[body.id]
+    # Anchor position in the reference configuration (= first structural marker).
+    structural = body.structural_markers()
+    if not structural:
+        return (bp.x, bp.y)
+    anchor_ref_x = _eval_mm(project, structural[0].x)
+    anchor_ref_y = _eval_mm(project, structural[0].y)
+    # Reference angle: orientation of the first edge in the reference config.
+    if len(structural) >= 2:
+        next_x = _eval_mm(project, structural[1].x)
+        next_y = _eval_mm(project, structural[1].y)
+        ref_angle = math.atan2(next_y - anchor_ref_y, next_x - anchor_ref_x)
+    else:
+        ref_angle = 0.0
+    # CoM offset from anchor, expressed in the reference world frame.
+    dx_ref = com_ref_x - anchor_ref_x
+    dy_ref = com_ref_y - anchor_ref_y
+    # Express that offset in the body's local frame (un-rotate by ref_angle).
+    cos_r = math.cos(ref_angle)
+    sin_r = math.sin(ref_angle)
+    lx = cos_r * dx_ref + sin_r * dy_ref
+    ly = -sin_r * dx_ref + cos_r * dy_ref
+    # Rotate the local offset by the current body angle and translate.
     cos_a = math.cos(bp.angle)
     sin_a = math.sin(bp.angle)
     return (

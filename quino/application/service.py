@@ -209,7 +209,8 @@ class ApplicationService:
         self._service_context.ids = self.id_service
         root_id = self.id_service.new("case")
         ws_id = self.id_service.new("ws")
-        root = Case(id=root_id, name="Root", model=Model())
+        default_pose = Pose(id=self.id_service.new("pose"), name="Reference", is_default=True)
+        root = Case(id=root_id, name="Root", model=Model(), poses=[default_pose])
         self._workspace = Workspace(
             id=ws_id,
             name=name,
@@ -244,6 +245,7 @@ class ApplicationService:
         self._service_context.ids = self.id_service
         self._sync_id_service()
         self._sync_all_special_com_markers()
+        self._ensure_default_poses()
         case = self.current_case()
         if case is not None and self._workspace is not None and self._workspace.sketch is not None:
             self._workspace.sketch.solve_error = None
@@ -778,16 +780,17 @@ class ApplicationService:
             self.sketch.invalidate_cache()
 
     def _invalidate_pose_state(self) -> None:
-        """Drop pose data after a topology change that could leave stale refs.
+        """Drop user pose data after a topology change that could leave stale refs.
 
-        Poses reference body ids and driver ids; once the model topology
+        User poses reference body ids and driver ids; once the model topology
         changes we cannot guarantee they still describe a valid configuration,
         so we drop them and the user can re-solve from the reference pose.
+        The reference (is_default=True) pose is always preserved.
         """
         self.poses.clear_current()
         case = self.current_case()
         if case is not None:
-            case.poses = []
+            case.poses = [p for p in case.poses if getattr(p, "is_default", False)]
 
     def _operation(self):
         """Context manager that takes a single snapshot for the whole operation."""
@@ -806,6 +809,16 @@ class ApplicationService:
 
     def _sync_all_special_com_markers(self) -> None:
         return self.bodies.sync_all_special_com_markers()
+
+    def _ensure_default_poses(self) -> None:
+        """Guarantee every case has exactly one is_default=True pose (load-time migration)."""
+        ws = self._workspace
+        if ws is None:
+            return
+        for case in ws.cases.values():
+            if not any(p.is_default for p in case.poses):
+                pose_id = self.id_service.new("pose")
+                case.poses.insert(0, Pose(id=pose_id, name="Reference", is_default=True))
 
     def _find_body(self, body_id: str) -> Body:
         case = self.current_case()
@@ -1136,6 +1149,15 @@ class ApplicationService:
 
     def set_selected_analysis(self, analysis_id: str | None) -> None:
         self.workspace.set_selected_analysis(analysis_id)
+
+    def delete_run(self, run_id: str) -> None:
+        self.workspace.delete_run(run_id)
+
+    def duplicate_pose_in_case(self, pose_id: str, *, new_name: str | None = None):
+        return self.workspace.duplicate_pose(pose_id, new_name=new_name)
+
+    def duplicate_analysis(self, analysis_id: str, *, new_name: str | None = None):
+        return self.workspace.duplicate_analysis(analysis_id, new_name=new_name)
 
     # ------------------------------------------------------------------ blocks
 

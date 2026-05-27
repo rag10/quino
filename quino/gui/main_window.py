@@ -55,6 +55,7 @@ from quino.viewer.plot_window import PlotWindow
 from quino.gui.widgets.inspector_widget import InspectorPropertyWidget
 from quino.gui.blocks import BlockEditorWidget
 from quino.gui.widgets.divergences_dock import DivergencesDock
+from quino.gui.widgets.case_diffs_widget import CaseDiffsWidget
 from quino.gui.theme import (
     BLUE,
     BORDER_STRONG,
@@ -163,9 +164,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.left_column.setChildrenCollapsible(False)
         self.workflow_panel = WorkflowTreePanel(self.app_service)
         self.workflow_panel.case_selected.connect(self._on_case_selected)
+        self.workflow_panel.case_activated.connect(self._on_case_activated)
         self.workflow_panel.pose_selected.connect(self._on_workflow_pose_selected)
         self.workflow_panel.analysis_selected.connect(self._on_analysis_selected)
         self.workflow_panel.run_selected.connect(self._on_run_selected)
+        self.workflow_panel.run_now_requested.connect(self._on_run_analysis_requested)
+        self.workflow_panel.rerun_requested.connect(self._on_rerun_requested)
         self.run_status = RunStatusWidget()
         self.run_status.cancel_requested.connect(self._on_cancel_run_requested)
         self.left_column.addWidget(self.workflow_panel)
@@ -330,6 +334,9 @@ class MainWindow(QtWidgets.QMainWindow):
         inspector_splitter.setSizes([320, 160])
 
         right_panel.addTab(inspector_widget, "Inspector")
+
+        self.case_diffs_widget = CaseDiffsWidget(self.app_service)
+        right_panel.addTab(self.case_diffs_widget, "Case Diffs")
 
         parameters_widget = QtWidgets.QWidget()
         parameters_layout = QtWidgets.QVBoxLayout(parameters_widget)
@@ -1121,6 +1128,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.pose_constraints_strip.refresh()
         if hasattr(self, "workflow_panel"):
             self.workflow_panel.refresh()
+        if hasattr(self, "case_diffs_widget"):
+            self.case_diffs_widget.refresh()
         self.action_toggle_sketch_visible.setChecked(project.sketch.visible if project.sketch is not None else False)
         self.action_toggle_sensors.setChecked(project.view_state.show_sensors)
         self.canvas.set_show_sensors(project.view_state.show_sensors)
@@ -1189,11 +1198,13 @@ class MainWindow(QtWidgets.QMainWindow):
             # state and must not bleed across pose switches.
             self._load_pose_constraints_from_current_pose()
             return
-        # If the project already has poses, select the simulation initial
-        # (or the first one) as the editing target. Otherwise create one.
-        if project.poses:
+        # If the project already has user poses, select the simulation initial
+        # (or the first non-default one) as the editing target. The reference
+        # pose (is_default=True) is never an editable target here.
+        editable_poses = [p for p in project.poses if not getattr(p, "is_default", False)]
+        if editable_poses:
             sim_id = self.app_service.get_simulation_initial_pose_id()
-            target = sim_id if sim_id is not None else project.poses[0].id
+            target = sim_id if sim_id is not None else editable_poses[0].id
             self.app_service.set_current_pose_id(target)
         else:
             self.app_service.create_pose(name="Reference")
@@ -1389,7 +1400,27 @@ class MainWindow(QtWidgets.QMainWindow):
                 "Analysis run failed",
                 f"Analysis '{analysis_label}' failed:\n\n{error_text}",
             )
-        elif run is not None and status in {"ok", "partial"}:
+        elif run is not None and status == "partial":
+            self.run_status.show_finished(status, analysis_label)
+            warning_lines = list(run.warnings) if run.warnings else []
+            n_frames = 0
+            try:
+                from quino.services.workspace_runner import load_result_artifact
+                result = load_result_artifact(self.app_service.current_project_dir, run)
+                if result is not None:
+                    n_frames = len(result.frames or [])
+            except Exception:
+                pass
+            text = (
+                f"Analysis '{analysis_label}' finished with partial results.\n\n"
+                f"Frames available: {n_frames}.\n\n"
+                "The trajectory up to the failure point is preserved and can be "
+                "played back, plotted and post-processed normally."
+            )
+            if warning_lines:
+                text += "\n\nDetails:\n" + "\n".join(warning_lines[-3:])
+            QtWidgets.QMessageBox.warning(self, "Analysis run partial", text)
+        elif run is not None and status == "ok":
             self.run_status.show_finished(status, analysis_label)
         else:
             self.run_status.show_idle()
@@ -1408,11 +1439,33 @@ class MainWindow(QtWidgets.QMainWindow):
         if ws is None:
             return
         ws.selected_case_id = case_id
+        self.case_diffs_widget.refresh()
         self._divergences_dock_widget.show_case(case_id)
         case = ws.cases.get(case_id)
         if case and case.metadata.get("divergence_warnings"):
             self._divergences_dock.show()
         self.canvas.update()
+
+    def _on_case_activated(self, case_id: str) -> None:
+        ws = self.app_service._workspace
+        if ws is None:
+            return
+        ws.selected_case_id = case_id
+        self._set_app_mode("model")
+        self._on_working_context_changed()
+        if hasattr(self, "case_diffs_widget"):
+            self.case_diffs_widget.refresh()
+        if hasattr(self, "workflow_panel"):
+            self.workflow_panel.refresh()
+
+    def _on_rerun_requested(self, run_id: str) -> None:
+        case = self.app_service.current_case()
+        if case is None:
+            return
+        run = next((r for r in case.runs if r.id == run_id), None)
+        if run is None:
+            return
+        self._on_run_analysis_requested(run.analysis_id)
 
     def _on_working_context_changed(self) -> None:
         project = self.app_service.display_project

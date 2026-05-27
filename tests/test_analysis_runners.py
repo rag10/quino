@@ -25,6 +25,66 @@ def test_dynamic_runner_validate_returns_list():
     assert isinstance(errors, list)
 
 
+def test_dynamic_runner_returns_partial_when_solver_crashes_with_frames(monkeypatch):
+    """A crashed solve that produced some frames must be reported as 'partial'
+    (not 'failed'), and the frames must be kept for playback."""
+    from quino.analysis.dynamic import DynamicAnalysisRunner
+    from quino.application.service import ApplicationService
+    from quino.domain.model import SimulationResult
+    from quino.domain.workspace import Analysis
+
+    app = ApplicationService()
+    app.new_project("test")
+    analysis = Analysis(id="a1", name="A1", analysis_type="dynamic")
+    runner = DynamicAnalysisRunner()
+
+    fake_result = SimulationResult(
+        success=False,
+        backend="fake",
+        time=[0.0, 0.01, 0.02],
+        frames=[{}, {}, {}],
+        error="Dynamic solve failed after partial trajectory: boom",
+    )
+
+    class _FakeRunner:
+        def run(self, project, duration=1.0, steps=100, cancel_event=None):
+            return fake_result
+
+    import quino.simulation.runner as runner_mod
+    monkeypatch.setattr(runner_mod, "SimulationRunner", lambda _adapter: _FakeRunner())
+
+    result = runner.run(app.project, analysis)
+    assert result.status == "partial"
+    assert result.frames == fake_result.frames
+    assert "boom" in (result.error_message or "")
+
+
+def test_dynamic_runner_returns_failed_when_solver_crashes_with_no_frames(monkeypatch):
+    from quino.analysis.dynamic import DynamicAnalysisRunner
+    from quino.application.service import ApplicationService
+    from quino.domain.model import SimulationResult
+    from quino.domain.workspace import Analysis
+
+    app = ApplicationService()
+    app.new_project("test")
+    analysis = Analysis(id="a1", name="A1", analysis_type="dynamic")
+    runner = DynamicAnalysisRunner()
+
+    fake_result = SimulationResult(
+        success=False, backend="fake", time=[], frames=[], error="boom",
+    )
+
+    class _FakeRunner:
+        def run(self, project, duration=1.0, steps=100, cancel_event=None):
+            return fake_result
+
+    import quino.simulation.runner as runner_mod
+    monkeypatch.setattr(runner_mod, "SimulationRunner", lambda _adapter: _FakeRunner())
+
+    result = runner.run(app.project, analysis)
+    assert result.status == "failed"
+
+
 @pytest.mark.parametrize(
     "runner_module,runner_class",
     [

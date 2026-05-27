@@ -52,7 +52,9 @@ def test_initial_pose_roundtrip_and_backwards_compat(tmp_path) -> None:
 
     legacy = ApplicationService()
     legacy.load_workspace(str(no_pose_path))
-    assert legacy.project.poses == []
+    # Load-time migration auto-creates a reference (default) pose; user poses still empty.
+    non_default = [p for p in legacy.project.poses if not p.is_default]
+    assert non_default == []
     assert legacy.project.simulation_initial_pose_id is None
 
 
@@ -67,9 +69,11 @@ def test_load_legacy_initial_pose_migrates_to_poses_list(tmp_path) -> None:
 
     loaded = ApplicationService()
     loaded.load_workspace(str(path))
-    assert len(loaded.project.poses) == 1
-    assert loaded.project.simulation_initial_pose_id == loaded.project.poses[0].id
-    assert body_id in loaded.project.poses[0].body_poses
+    # Load-time migration adds a reference (empty) pose; the user pose remains.
+    user_poses = [p for p in loaded.project.poses if p.body_poses]
+    assert len(user_poses) == 1
+    assert loaded.project.simulation_initial_pose_id == user_poses[0].id
+    assert body_id in user_poses[0].body_poses
 
 
 def test_create_reference_pose_and_marker_world_position() -> None:

@@ -59,7 +59,14 @@ class DynamicAnalysisRunner(AnalysisRunner):
 
                 run.metrics = evaluate_metrics(list(analysis.config.metrics), artifact)
 
-            status = "ok" if result.success else "failed"
+            # A crashed solve that produced some frames is "partial": the
+            # available trajectory is still usable for playback / plotting.
+            if result.success:
+                status = "ok"
+            elif result.frames:
+                status = "partial"
+            else:
+                status = "failed"
             return AnalysisResult(
                 analysis_id=analysis.id,
                 analysis_type="dynamic",

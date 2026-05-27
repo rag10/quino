@@ -111,8 +111,10 @@ class WorkspaceCommands:
         case.name = name
 
     def delete_case(self, case_id: str) -> None:
-        self._ctx.snapshot()
         ws = self._ensure_workspace()
+        if case_id in ws.root_case_ids and len(ws.root_case_ids) == 1:
+            raise ValueError("Cannot delete the last root case")
+        self._ctx.snapshot()
         descendant_ids = self._collect_descendant_case_ids(ws, case_id)
         remove_ids = {case_id, *descendant_ids}
         for rid in remove_ids:
@@ -161,21 +163,59 @@ class WorkspaceCommands:
         return pose
 
     def rename_pose(self, pose_id: str, name: str) -> None:
-        self._ctx.snapshot()
         pose = self._find_pose_across_cases(pose_id)
-        if pose is not None:
-            pose.name = name
-
-    def delete_pose(self, pose_id: str) -> None:
+        if pose is None:
+            return
+        if getattr(pose, "is_default", False):
+            raise ValueError("Cannot rename the reference pose")
         self._ctx.snapshot()
+        pose.name = name
+
+    def delete_pose(self, pose_id: str, *, cascade: bool = False) -> None:
         ws = self._ensure_workspace()
-        for case in ws.cases.values():
-            before = len(case.poses)
-            case.poses = [p for p in case.poses if p.id != pose_id]
-            if len(case.poses) < before:
-                break
+        pose = self._find_pose_across_cases(pose_id)
+        if pose is None:
+            return
+        if getattr(pose, "is_default", False):
+            raise ValueError("Cannot delete the reference pose")
+        owner_case = next(
+            (c for c in ws.cases.values() if any(p.id == pose_id for p in c.poses)),
+            None,
+        )
+        if owner_case is None:
+            return
+        bound_analyses = [a for a in owner_case.analyses if a.pose_id == pose_id]
+        if bound_analyses and not cascade:
+            raise ValueError(
+                f"Cannot delete pose with {len(bound_analyses)} analyses; "
+                "delete its analyses first or pass cascade=True"
+            )
+        self._ctx.snapshot()
+        if cascade:
+            removed_analysis_ids = {a.id for a in bound_analyses}
+            owner_case.analyses = [a for a in owner_case.analyses if a.id not in removed_analysis_ids]
+            owner_case.runs = [r for r in owner_case.runs if r.analysis_id not in removed_analysis_ids]
+        owner_case.poses = [p for p in owner_case.poses if p.id != pose_id]
         if ws.selected_pose_id == pose_id:
             ws.selected_pose_id = None
+
+    def duplicate_pose(self, pose_id: str, *, new_name: str | None = None):
+        import copy as _copy
+        ws = self._ensure_workspace()
+        owner_case = next(
+            (c for c in ws.cases.values() if any(p.id == pose_id for p in c.poses)),
+            None,
+        )
+        if owner_case is None:
+            raise ValueError(f"Pose {pose_id!r} not found")
+        src = next(p for p in owner_case.poses if p.id == pose_id)
+        self._ctx.snapshot()
+        new_pose = _copy.deepcopy(src)
+        new_pose.id = self._ctx.ids.new("pose")
+        new_pose.name = new_name or f"{src.name} copy"
+        new_pose.is_default = False
+        owner_case.poses.append(new_pose)
+        return new_pose
 
     def set_selected_pose(self, pose_id: str | None) -> None:
         self._ctx.snapshot()
@@ -231,6 +271,32 @@ class WorkspaceCommands:
             before = len(case.analyses)
             case.analyses = [a for a in case.analyses if a.id != analysis_id]
             if len(case.analyses) < before:
+                # Also remove runs of the deleted analysis.
+                case.runs = [r for r in case.runs if r.analysis_id != analysis_id]
+                break
+
+    def duplicate_analysis(self, analysis_id: str, *, new_name: str | None = None) -> Analysis:
+        import copy as _copy
+        ws = self._ensure_workspace()
+        for case in ws.cases.values():
+            src = next((a for a in case.analyses if a.id == analysis_id), None)
+            if src is None:
+                continue
+            self._ctx.snapshot()
+            new_analysis = _copy.deepcopy(src)
+            new_analysis.id = self._ctx.ids.new("analysis")
+            new_analysis.name = new_name or f"{src.name} copy"
+            case.analyses.append(new_analysis)
+            return new_analysis
+        raise ValueError(f"Analysis {analysis_id!r} not found")
+
+    def delete_run(self, run_id: str) -> None:
+        self._ctx.snapshot()
+        ws = self._ensure_workspace()
+        for case in ws.cases.values():
+            before = len(case.runs)
+            case.runs = [r for r in case.runs if r.id != run_id]
+            if len(case.runs) < before:
                 break
 
     def set_selected_analysis(self, analysis_id: str | None) -> None:

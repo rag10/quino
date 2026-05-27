@@ -204,20 +204,28 @@ class _WorkspaceProjectProxy:
 
     @property
     def simulation_initial_pose_id(self) -> "str | None":
-        # Old model had this on Project; derive from Case.poses
+        # Old model had this on Project; derive from Case.poses.
+        # The auto-created reference pose (is_default=True with no body_poses)
+        # is not a simulation initial pose — only a pose explicitly marked as
+        # default AND containing body data acts as the simulation initial.
         if self._case is None:
             return None
         for p in self._case.poses:
-            if getattr(p, "is_default", False):
+            if getattr(p, "is_default", False) and p.body_poses:
                 return p.id
         return None
 
     @simulation_initial_pose_id.setter
     def simulation_initial_pose_id(self, value):
-        # Mark the target pose as is_default; clear all others.
+        # Mark the target user pose as is_default; clear it on other user poses.
+        # The auto-created reference pose (body_poses == {}) is left untouched —
+        # it is always is_default=True and is never a simulation initial pose.
         if self._case is None:
             return
         for p in self._case.poses:
+            if not p.body_poses:
+                # Reference pose: keep its is_default flag intact.
+                continue
             p.is_default = (p.id == value)
 
     @property

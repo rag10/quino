@@ -140,7 +140,15 @@ class RunExecutor(QtCore.QObject):
                     run.metrics.clear()
                 else:
                     run.status = getattr(result, "status", "ok")
-                    run.error_message = getattr(result, "error_message", "")
+                    msg = getattr(result, "error_message", "") or ""
+                    if run.status == "partial":
+                        # Partial runs keep their frames; the failure reason
+                        # is surfaced as a warning rather than as a hard error.
+                        run.error_message = ""
+                        if msg and msg not in run.warnings:
+                            run.warnings.append(msg)
+                    else:
+                        run.error_message = msg
         except Exception as exc:
             with self.app_service.workspace_lock:
                 run.status = "failed"

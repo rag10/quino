@@ -19,19 +19,21 @@ from quino.domain.workspace import (
 
 @dataclass
 class _CaseAsProject:
-    """Minimal adapter making a Case look like a Project for analysis runners."""
+    """Minimal adapter making a Case look like a Project for analysis runners.
+
+    Now delegates to ``_WorkspaceProjectProxy`` so the full set of
+    project-like attributes (sensor_outputs, reaction_outputs, sketch, etc.)
+    is available to the solver adapter.
+    """
     model: Model
     parameters: list
     poses: list
     workspace: None = None
 
     @classmethod
-    def from_case(cls, case: Case, workspace: Workspace) -> "_CaseAsProject":
-        return cls(
-            model=case.model,
-            parameters=workspace.parameters,
-            poses=case.poses,
-        )
+    def from_case(cls, case: Case, workspace: Workspace):
+        from quino.application._context import _WorkspaceProjectProxy
+        return _WorkspaceProjectProxy(workspace, case)
 
 
 def _next_run_id(case: Case) -> str:

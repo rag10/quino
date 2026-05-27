@@ -2086,8 +2086,23 @@ class MechanismCanvas(QtWidgets.QWidget):
                 for marker in self._collect_markers(project, assembled)
                 if marker.visible
             ]
+        # First pass: prioritise non-CoM markers (10 px radius).
         for marker, marker_pos in reversed(screen_markers):
+            if marker.marker_type is MarkerType.COM:
+                continue
             if QtCore.QLineF(screen_pos, marker_pos).length() <= 10.0:
+                return marker
+        # Second pass: CoM markers are only pickable when their owning body
+        # is already selected. This avoids stealing clicks at the centre of a
+        # bar (which often coincides with the CoM glyph) and matches CAD
+        # conventions for sub-entity handles.
+        selected = self._selected_entity_id
+        for marker, marker_pos in reversed(screen_markers):
+            if marker.marker_type is not MarkerType.COM:
+                continue
+            if marker.body_id != selected:
+                continue
+            if QtCore.QLineF(screen_pos, marker_pos).length() <= 8.0:
                 return marker
         return None
 
@@ -2480,6 +2495,15 @@ class MechanismCanvas(QtWidgets.QWidget):
                     cx, cy = self._bar_com_preview(project, body, preview_map, assembled)
                     if cx is not None:
                         x, y = cx, cy
+                if marker.type is MarkerType.COM:
+                    # CoM visibility follows the body-level metadata flag
+                    # (toggled via the "Show/Hide CoM" context menu).
+                    com_visible = bool(body.metadata.values.get("com_visible", True))
+                    marker_visible = not is_ground_anchor and com_visible
+                else:
+                    marker_visible = not is_ground_anchor and (
+                        marker.visible or marker.type is MarkerType.STRUCTURAL
+                    )
                 markers.append(
                     CanvasMarker(
                         entity_id=marker.id,
@@ -2488,10 +2512,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                         x=x,
                         y=y,
                         marker_type=marker.type,
-                        visible=(
-                            not is_ground_anchor
-                            and (marker.visible or marker.type is MarkerType.STRUCTURAL)
-                        ),
+                        visible=marker_visible,
                     )
                 )
         return markers
@@ -3863,7 +3884,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             # than the (now-removed) COM marker. Build a Pose snapshot from
             # the current state overlay (if any) so the arrow tracks playback.
             from quino.services.com_geometry import com_global_position
-            from quino.domain.model import BodyPose, Pose
+            from quino.domain.workspace import BodyPose, Pose
             overlay = self._state_overlay
             pose = None
             if overlay is not None:
