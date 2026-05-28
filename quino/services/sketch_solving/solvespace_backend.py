@@ -255,7 +255,7 @@ class SolvespaceBackend:
         params = sys.params(handle.params)
         return (float(params[0]), float(params[1]))
 
-    def analyze_dof(self, project: "Project") -> "DofResult":
+    def analyze_dof(self, project: "Project") -> DofResult:
         """Per-point DOF analysis via Solvespace perturbation testing.
 
         For each non-fixed SketchPoint and each axis, build a temp solver
@@ -264,8 +264,6 @@ class SolvespaceBackend:
         perturbation, the axis is free; if it pulls the point back, the axis
         is constrained.
         """
-        from quino.services.sketch_solving.base import DofResult
-
         sketch = project.sketch
         if sketch is None:
             return DofResult({}, set(), set(), 0)
