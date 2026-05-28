@@ -69,6 +69,7 @@ class SweepDef:
     steps: int = 1
     values: list[float] = field(default_factory=list)
     label: str = ""
+    reference_mode: str = "absolute"  # "absolute" | "relative"
 
     def resolved_values(self) -> list[float]:
         if self.mode == "list":

@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from PySide6 import QtWidgets
 
+from quino.analysis.kinematic_sweeps import compute_sweep_base_value
 from quino.domain.workspace import SweepDef
 
 _KINDS = {
@@ -17,9 +18,10 @@ _KINDS = {
 
 
 class SweepDefEditor(QtWidgets.QWidget):
-    def __init__(self, project, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(self, project, initial_pose=None, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self._project = project
+        self._initial_pose = initial_pose
         self._target_combos: list[QtWidgets.QComboBox] = []
 
         layout = QtWidgets.QFormLayout(self)
@@ -32,6 +34,12 @@ class SweepDefEditor(QtWidgets.QWidget):
         self.targets_widget = QtWidgets.QWidget(self)
         self.targets_layout = QtWidgets.QFormLayout(self.targets_widget)
         layout.addRow("Targets", self.targets_widget)
+
+        self.ref_mode_combo = QtWidgets.QComboBox(self)
+        self.ref_mode_combo.addItem("Absolute", "absolute")
+        self.ref_mode_combo.addItem("Relative to initial pose", "relative")
+        self.ref_mode_combo.currentIndexChanged.connect(self._update_info_label)
+        layout.addRow("Reference mode", self.ref_mode_combo)
 
         self.mode_combo = QtWidgets.QComboBox(self)
         self.mode_combo.addItem("Linear", "linear")
@@ -57,13 +65,28 @@ class SweepDefEditor(QtWidgets.QWidget):
         layout.addRow("Values", self.values_edit)
         layout.addRow("Label", self.label_edit)
 
+        self.info_label = QtWidgets.QLabel("", self)
+        self.info_label.setWordWrap(True)
+        self.info_label.setStyleSheet("color: gray; font-size: 11px;")
+        layout.addRow(self.info_label)
+
+        # Connect value changes to update info label
+        self.start_spin.valueChanged.connect(self._update_info_label)
+        self.end_spin.valueChanged.connect(self._update_info_label)
+        self.steps_spin.valueChanged.connect(self._update_info_label)
+        self.values_edit.textChanged.connect(self._update_info_label)
+
         self._rebuild_targets()
         self._sync_mode_visibility()
+        self._update_info_label()
 
     def from_sweep_def(self, sweep: SweepDef) -> None:
         idx = self.kind_combo.findData(sweep.variable_kind)
         if idx >= 0:
             self.kind_combo.setCurrentIndex(idx)
+        ref_idx = self.ref_mode_combo.findData(sweep.reference_mode)
+        if ref_idx >= 0:
+            self.ref_mode_combo.setCurrentIndex(ref_idx)
         self.mode_combo.setCurrentIndex(0 if sweep.mode == "linear" else 1)
         self.start_spin.setValue(float(sweep.start))
         self.end_spin.setValue(float(sweep.end))
@@ -75,6 +98,7 @@ class SweepDefEditor(QtWidgets.QWidget):
             target_idx = combo.findData(target)
             if target_idx >= 0:
                 combo.setCurrentIndex(target_idx)
+        self._update_info_label()
 
     def to_sweep_def(self, sweep_id: str | None = None) -> SweepDef:
         mode = self.mode_combo.currentData()
@@ -92,6 +116,7 @@ class SweepDefEditor(QtWidgets.QWidget):
             steps=int(self.steps_spin.value()),
             values=values,
             label=self.label_edit.text().strip(),
+            reference_mode=str(self.ref_mode_combo.currentData()),
         )
 
     def _sync_mode_visibility(self) -> None:
@@ -100,6 +125,7 @@ class SweepDefEditor(QtWidgets.QWidget):
         self.end_spin.setVisible(is_linear)
         self.steps_spin.setVisible(is_linear)
         self.values_edit.setVisible(not is_linear)
+        self._update_info_label()
 
     def _rebuild_targets(self) -> None:
         while self.targets_layout.rowCount():
@@ -107,7 +133,11 @@ class SweepDefEditor(QtWidgets.QWidget):
         self._target_combos.clear()
         kind = str(self.kind_combo.currentData())
         _label, arity, _help = _KINDS[kind]
-        marker_ids = [(marker.name, marker.id) for body in self._project.model.bodies for marker in body.markers]
+        marker_ids = [
+            (f"{body.name}.{marker.name}", marker.id)
+            for body in self._project.model.bodies
+            for marker in body.markers
+        ]
         slider_ids = [(slider.name, slider.id) for slider in self._project.model.sliders]
         for index in range(arity):
             combo = QtWidgets.QComboBox(self.targets_widget)
@@ -117,15 +147,66 @@ class SweepDefEditor(QtWidgets.QWidget):
                 combo.addItem(name, entity_id)
             self.targets_layout.addRow(f"Target {index + 1}", combo)
             self._target_combos.append(combo)
+            combo.currentIndexChanged.connect(self._update_info_label)
+        self._update_info_label()
+
+    def _current_sweep_values(self) -> list[float] | None:
+        try:
+            sweep = self.to_sweep_def("tmp")
+            return sweep.resolved_values()
+        except Exception:
+            return None
+
+    def _update_info_label(self) -> None:
+        if self._initial_pose is None:
+            self.info_label.setText("No initial pose available.")
+            return
+
+        mode = str(self.ref_mode_combo.currentData())
+        kind = str(self.kind_combo.currentData())
+
+        # Build a temporary sweep to compute base value
+        try:
+            sweep = self.to_sweep_def("tmp")
+        except Exception:
+            self.info_label.setText("Invalid sweep configuration.")
+            return
+
+        try:
+            base = compute_sweep_base_value(self._project, sweep, self._initial_pose)
+        except Exception as exc:
+            self.info_label.setText(f"Cannot compute base value: {exc}")
+            return
+
+        values = sweep.resolved_values()
+        if not values:
+            self.info_label.setText("No sweep values configured.")
+            return
+
+        unit = "°" if kind.startswith("angle_") else " mm"
+
+        if mode == "relative":
+            abs_values = [v + base for v in values]
+            self.info_label.setText(
+                f"Initial: {base:.4g}{unit}  |  "
+                f"Absolute range: [{min(abs_values):.4g}, {max(abs_values):.4g}]{unit}"
+            )
+        else:
+            rel_start = values[0] - base
+            rel_end = values[-1] - base
+            self.info_label.setText(
+                f"Relative range: [{rel_start:.4g}, {rel_end:.4g}]{unit}  |  "
+                f"Initial: {base:.4g}{unit}"
+            )
 
 
 class AddSweepDialog(QtWidgets.QDialog):
-    def __init__(self, project, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(self, project, initial_pose=None, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Add Sweep")
         self.result_sweep: SweepDef | None = None
         layout = QtWidgets.QVBoxLayout(self)
-        self.editor = SweepDefEditor(project, self)
+        self.editor = SweepDefEditor(project, initial_pose, self)
         layout.addWidget(self.editor)
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel,

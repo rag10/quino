@@ -178,11 +178,21 @@ class KinematicModeController(AnalysisModeController):
             self._rows.append(row)
         self._panel_layout.addStretch(1)
 
+    def _current_initial_pose(self):
+        case = self.main_window.app_service.current_case()
+        if case is None or self._current_analysis is None:
+            return None
+        pose_id = self._current_analysis.pose_id
+        if pose_id is None:
+            return None
+        return next((p for p in case.poses if p.id == pose_id), None)
+
     def _on_add_sweep(self) -> None:
         project = self.main_window.app_service.display_project
         if project is None or self._current_analysis is None:
             return
-        dialog = AddSweepDialog(project, self.main_window)
+        initial_pose = self._current_initial_pose()
+        dialog = AddSweepDialog(project, initial_pose, self.main_window)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted and dialog.result_sweep is not None:
             self._current_analysis.config.sweeps.append(dialog.result_sweep)
             self._rebuild_rows()
@@ -196,7 +206,8 @@ class KinematicModeController(AnalysisModeController):
         sweep = next((item for item in self._current_analysis.config.sweeps if item.id == sweep_id), None)
         if sweep is None:
             return
-        dialog = SweepEditorDialog(project, sweep, self.main_window)
+        initial_pose = self._current_initial_pose()
+        dialog = SweepEditorDialog(project, sweep, initial_pose, self.main_window)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted and dialog.result_sweep is not None:
             self._current_analysis.config.sweeps = [
                 dialog.result_sweep if item.id == sweep_id else item for item in self._current_analysis.config.sweeps

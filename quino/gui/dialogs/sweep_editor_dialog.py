@@ -7,13 +7,13 @@ from quino.gui.dialogs.add_sweep_dialog import SweepDefEditor
 
 
 class SweepEditorDialog(QtWidgets.QDialog):
-    def __init__(self, project, sweep: SweepDef, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(self, project, sweep: SweepDef, initial_pose=None, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Edit Sweep")
         self.result_sweep: SweepDef | None = None
         self._original = sweep
         layout = QtWidgets.QVBoxLayout(self)
-        self.editor = SweepDefEditor(project, self)
+        self.editor = SweepDefEditor(project, initial_pose, self)
         self.editor.from_sweep_def(sweep)
         layout.addWidget(self.editor)
         buttons = QtWidgets.QDialogButtonBox(

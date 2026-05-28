@@ -12,12 +12,15 @@ from quino.analysis.kinematic_sweeps import (
     AngleHorizontalStrategy,
     AngleVerticalStrategy,
     SliderStrokeStrategy,
+    body_of_marker,
+    compute_sweep_base_value,
+    segment_local_angle,
     slider_axis_for,
     strategy_for,
 )
 from quino.analysis.runner import AnalysisResult, AnalysisRunner
 from quino.domain.workspace import KinematicConfig, Pose, ResultRef, Run
-from quino.pose.geometry import create_reference_pose, marker_world_position
+from quino.pose.geometry import create_reference_pose
 from quino.pose.model import PoseSolveSettings
 from quino.services.sensor_extraction_kinematic import extract_sensors_from_pose
 from quino.services.metric_evaluator import evaluate_metrics
@@ -67,15 +70,26 @@ class KinematicAnalysisRunner(AnalysisRunner):
         for strategy in strategies:
             self._bind_strategy(strategy, project)
 
-        axes = [
-            {"id": strategy.sweep.id, "label": strategy.label(), "values": strategy.sweep.resolved_values()}
-            for strategy in strategies
+        pose = initial_pose or self._initial_pose(project)
+        base_values = [
+            compute_sweep_base_value(project, sweep, pose)
+            for sweep in cfg.sweeps
         ]
+
+        axes = []
+        for strategy, base in zip(strategies, base_values):
+            raw_values = strategy.sweep.resolved_values()
+            if strategy.sweep.reference_mode == "relative":
+                values = [v + base for v in raw_values]
+            else:
+                values = raw_values
+            axes.append({"id": strategy.sweep.id, "label": strategy.label(), "values": values})
+
         shape = [len(axis["values"]) for axis in axes]
 
         pose_runner = PoseRunner(ExudynPoseAdapter(ExpressionService(UnitService())))
         settings = PoseSolveSettings(tolerance=1e-6, max_iterations=80)
-        pose = initial_pose or self._initial_pose(project)
+        last_pose = pose
         last_targets: list[float] | None = None
 
         sensor_channels = {
@@ -97,7 +111,7 @@ class KinematicAnalysisRunner(AnalysisRunner):
                     error_message="Cancelled by user",
                 )
             targets = [axis["values"][indices[i]] for i, axis in enumerate(axes)]
-            cell_pose = pose
+            cell_pose = last_pose
             cell_success = True
             ramp_steps = list(
                 self._ramp(
@@ -121,7 +135,7 @@ class KinematicAnalysisRunner(AnalysisRunner):
                     break
                 cell_pose = result.pose
             if cell_success and cell_pose is not None:
-                pose = cell_pose
+                last_pose = cell_pose
                 last_targets = targets
                 extracted = extract_sensors_from_pose(project, cell_pose)
                 for sensor in project.model.sensors:
@@ -205,43 +219,32 @@ class KinematicAnalysisRunner(AnalysisRunner):
             strategy.bind_geometry(axis=(ax, ay), reference=(rx, ry))
             return
         if isinstance(strategy, AngleBetweenSegmentsStrategy):
-            body_a = self._body_of_marker(project, strategy.sweep.target_ids[0])
-            body_b = self._body_of_marker(project, strategy.sweep.target_ids[2])
+            body_a = body_of_marker(project, strategy.sweep.target_ids[0])
+            body_b = body_of_marker(project, strategy.sweep.target_ids[2])
             strategy.bind_bodies(
                 body_a_id=body_a,
                 body_b_id=body_b,
-                local_phi_a=self._segment_local_angle(project, strategy.sweep.target_ids[0], strategy.sweep.target_ids[1]),
-                local_phi_b=self._segment_local_angle(project, strategy.sweep.target_ids[2], strategy.sweep.target_ids[3]),
+                local_phi_a=segment_local_angle(project, strategy.sweep.target_ids[0], strategy.sweep.target_ids[1]),
+                local_phi_b=segment_local_angle(project, strategy.sweep.target_ids[2], strategy.sweep.target_ids[3]),
             )
             return
         if isinstance(strategy, AngleHorizontalStrategy):
             marker_a, marker_b = strategy.sweep.target_ids[0], strategy.sweep.target_ids[1]
             strategy.bind_bodies(
-                body_a_id=self._body_of_marker(project, marker_a),
+                body_a_id=body_of_marker(project, marker_a),
                 body_b_id="__ground__",
-                local_phi_a=self._segment_local_angle(project, marker_a, marker_b),
+                local_phi_a=segment_local_angle(project, marker_a, marker_b),
                 local_phi_b=0.0,
             )
             return
         if isinstance(strategy, AngleVerticalStrategy):
             marker_a, marker_b = strategy.sweep.target_ids[0], strategy.sweep.target_ids[1]
             strategy.bind_bodies(
-                body_a_id=self._body_of_marker(project, marker_a),
+                body_a_id=body_of_marker(project, marker_a),
                 body_b_id="__ground__",
-                local_phi_a=self._segment_local_angle(project, marker_a, marker_b),
+                local_phi_a=segment_local_angle(project, marker_a, marker_b),
                 local_phi_b=math.pi / 2.0,
             )
-
-    def _body_of_marker(self, project, marker_id: str) -> str:
-        for body in project.model.bodies:
-            if any(marker.id == marker_id for marker in body.markers):
-                return body.id
-        raise ValueError(f"Marker {marker_id!r} not found")
-
-    def _segment_local_angle(self, project, marker_a_id: str, marker_b_id: str) -> float:
-        ax, ay = marker_world_position(project, marker_a_id, None)
-        bx, by = marker_world_position(project, marker_b_id, None)
-        return math.atan2(by - ay, bx - ax)
 
     def _sensor_channel_names(self, kind: str) -> list[str]:
         if kind == "point":

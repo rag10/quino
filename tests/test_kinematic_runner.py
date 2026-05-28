@@ -83,3 +83,54 @@ def test_unreachable_cells_write_nan_and_partial(monkeypatch) -> None:
     assert result.status == "partial"
     assert any(result.failed_mask)
     assert any(math.isnan(value) for value in result.sensors[sensor_id]["values"])
+
+
+def test_relative_mode_offsets_values_by_base(monkeypatch) -> None:
+    svc, body_id, marker_a, marker_b = _bar_project()
+    case = svc.workspace.create_case("C")
+    # Pose with body at x=10, y=0, angle=0 → marker_b at world x=110
+    pose = Pose(
+        id="p1",
+        name="P1",
+        body_poses={body_id: BodyPose(body_id=body_id, x=10.0, y=0.0, angle=0.0)},
+    )
+    case.poses.append(pose)
+    analysis = svc.workspace.create_analysis(
+        "Sweep", analysis_type="kinematic", case_id=case.id, workspace_pose_id=pose.id
+    )
+    # Relative sweep: start=-10, end=10 → absolute values should be [100, 110, 120]
+    analysis.config.sweeps.append(
+        SweepDef(
+            id="sw1",
+            variable_kind="marker_x",
+            target_ids=[marker_b.id],
+            mode="linear",
+            start=-10.0,
+            end=10.0,
+            steps=3,
+            reference_mode="relative",
+        )
+    )
+
+    received_values = []
+
+    class FakePoseRunner:
+        def __init__(self, adapter) -> None:
+            pass
+
+        def solve(self, project, initial_pose, temporary_constraints=None, settings=None):
+            value = temporary_constraints[0].metadata["value"]
+            received_values.append(value)
+            pose = Pose(
+                id="ok",
+                name="ok",
+                body_poses={body_id: BodyPose(body_id=body_id, x=0.0, y=0.0, angle=0.0)},
+            )
+            return type("R", (), {"success": True, "pose": pose})()
+
+    monkeypatch.setattr("quino.pose.runner.PoseRunner", FakePoseRunner)
+    result = KinematicAnalysisRunner().run(svc.project, analysis, initial_pose=pose)
+    assert result.status == "ok"
+    # Absolute values should be 110 + [-10, 0, 10] = [100, 110, 120]
+    assert received_values == [100.0, 110.0, 120.0]
+    assert result.sweep_axes[0]["values"] == [100.0, 110.0, 120.0]

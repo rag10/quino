@@ -97,7 +97,8 @@ def test_analysis_config_roundtrip(tmp_path):
     )
     a.config.sweeps.append(SweepDef(id="sw_1", variable_kind="marker_x",
                                     target_ids=["m1"], mode="linear",
-                                    start=0, end=10, steps=11))
+                                    start=0, end=10, steps=11,
+                                    reference_mode="relative"))
     path = tmp_path / "p.quino.json"
     svc.save_workspace(str(path))
 
@@ -110,6 +111,7 @@ def test_analysis_config_roundtrip(tmp_path):
     assert len(loaded.config.sweeps) == 1
     assert loaded.config.sweeps[0].variable_kind == "marker_x"
     assert loaded.config.sweeps[0].steps == 11
+    assert loaded.config.sweeps[0].reference_mode == "relative"
 
 
 def test_loading_old_schema_version_raises(tmp_path):
