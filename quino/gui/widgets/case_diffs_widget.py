@@ -1,93 +1,48 @@
+"""Side panel showing a short, human-readable diff vs. the parent case.
+
+Pure presentation: the heavy lifting (label resolution, value formatting,
+composite-field decomposition) lives in :mod:`quino.services.case_diff`.
+"""
 from __future__ import annotations
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from quino.application.service import ApplicationService
 from quino.gui.icons import get_icon
-from quino.gui.theme import BLUE_DARK, INK_MUTED, INK_SUBTLE
+from quino.gui.theme import (
+    BLUE_DARK,
+    GREEN,
+    INK_MUTED,
+    INK_SUBTLE,
+    ORANGE,
+    RED,
+)
+from quino.services.case_diff import DiffEntry, diff_case_against
 
-
-_ENTITY_TYPE_LABELS = {
-    "Body": "Body",
-    "Marker": "Marker",
-    "Joint": "Joint",
-    "Slider": "Slider",
-    "Driver": "Driver",
-    "Load": "Load",
-    "Sensor": "Sensor",
-    "Spring": "Spring",
-}
 
 _KIND_COLORS = {
-    "added":   "#25815f",
-    "removed": "#b43a2f",
-    "changed": "#2d74a7",
+    "added": GREEN,
+    "removed": RED,
+    "changed": ORANGE,
 }
 
-_KIND_LABELS = {
-    "added":   "ADDED",
-    "removed": "REMOVED",
-    "changed": "CHANGED",
+_KIND_BADGE = {
+    "added": "+",
+    "removed": "−",
+    "changed": "Δ",
 }
 
-
-def _compute_diffs_for_pair(parent_case, child_case) -> list[dict]:
-    """Return a flat list of diff records between parent_case and child_case."""
-    from quino.services.case_overlay_validator import _entity_lookup
-
-    diffs: list[dict] = []
-    parent_index = _entity_lookup(parent_case)
-    child_index = _entity_lookup(child_case)
-
-    # Entities present in parent but missing in child
-    for ent_id, (parent_ent, cls) in parent_index.items():
-        if ent_id not in child_index:
-            diffs.append({
-                "kind": "removed",
-                "entity_type": cls.__name__,
-                "entity_id": ent_id,
-                "entity_name": getattr(parent_ent, "name", ent_id),
-                "field": None,
-                "parent_value": None,
-                "child_value": None,
-            })
-            continue
-        child_ent, _ = child_index[ent_id]
-        # Field-level diffs
-        for field in cls.__dataclass_fields__:  # type: ignore[attr-defined]
-            if field in ("id",):
-                continue
-            try:
-                pv = getattr(parent_ent, field)
-                cv = getattr(child_ent, field)
-                if pv != cv:
-                    diffs.append({
-                        "kind": "changed",
-                        "entity_type": cls.__name__,
-                        "entity_id": ent_id,
-                        "entity_name": getattr(parent_ent, "name", ent_id),
-                        "field": field,
-                        "parent_value": pv,
-                        "child_value": cv,
-                    })
-            except Exception:
-                pass
-
-    # Entities only in child (added)
-    for ent_id in child_index:
-        if ent_id not in parent_index:
-            child_ent, cls = child_index[ent_id]
-            diffs.append({
-                "kind": "added",
-                "entity_type": cls.__name__,
-                "entity_id": ent_id,
-                "entity_name": getattr(child_ent, "name", ent_id),
-                "field": None,
-                "parent_value": None,
-                "child_value": None,
-            })
-
-    return diffs
+_ENTITY_ICONS = {
+    "Body": "body",
+    "Joint": "revolute",
+    "Marker": "marker",
+    "Slider": "slider",
+    "Driver": "rotate-driver",
+    "Spring": "spring",
+    "Load": "load-gravity",
+    "Sensor": "sensor-distance",
+    "BlockInstance": "block-instance",
+}
 
 
 def _ancestor_chain(ws, case_id: str) -> list:
@@ -105,11 +60,14 @@ def _ancestor_chain(ws, case_id: str) -> list:
 
 
 class CaseDiffsWidget(QtWidgets.QWidget):
-    """Shows entity-level diffs of the active case versus each ancestor up to the root case."""
+    """Compact, readable diff of the active case vs. its parent (or all ancestors)."""
+
+    entity_selected = QtCore.Signal(str)
 
     def __init__(self, app_service: ApplicationService, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self._service = app_service
+
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -128,26 +86,54 @@ class CaseDiffsWidget(QtWidgets.QWidget):
         sep.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
         layout.addWidget(sep)
 
-        # Refresh button
+        # Toolbar
         toolbar = QtWidgets.QHBoxLayout()
-        toolbar.setContentsMargins(8, 4, 8, 0)
+        toolbar.setContentsMargins(8, 4, 8, 4)
+        toolbar.setSpacing(8)
+        self._scope_combo = QtWidgets.QComboBox()
+        self._scope_combo.addItem("Direct parent", userData="parent")
+        self._scope_combo.addItem("All ancestors", userData="ancestors")
+        self._scope_combo.setToolTip("Choose what to compare against.")
+        self._scope_combo.currentIndexChanged.connect(self.refresh)
+        toolbar.addWidget(QtWidgets.QLabel("Compare with:"))
+        toolbar.addWidget(self._scope_combo)
+        self._visual_toggle = QtWidgets.QCheckBox("Show visual changes")
+        self._visual_toggle.setToolTip(
+            "Include purely visual changes (colour, line width, position, name)."
+        )
+        self._visual_toggle.toggled.connect(self.refresh)
+        toolbar.addWidget(self._visual_toggle)
+        toolbar.addStretch(1)
         self._refresh_btn = QtWidgets.QPushButton(get_icon("refresh", BLUE_DARK, size=16), "Refresh")
         self._refresh_btn.setFixedHeight(24)
         self._refresh_btn.clicked.connect(self.refresh)
         toolbar.addWidget(self._refresh_btn)
-        toolbar.addStretch(1)
         layout.addLayout(toolbar)
 
-        # Tree showing diffs
+        # Empty-state placeholder, swapped with the tree as needed.
+        self._stack = QtWidgets.QStackedWidget()
+        layout.addWidget(self._stack, stretch=1)
+
+        self._placeholder = QtWidgets.QLabel("No differences with parent")
+        self._placeholder.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self._placeholder.setStyleSheet(f"color: {INK_SUBTLE}; font-size: 11pt;")
+        self._stack.addWidget(self._placeholder)
+
         self._tree = QtWidgets.QTreeWidget()
-        self._tree.setHeaderLabels(["Entity / Field", "Parent value", "Case value"])
+        self._tree.setHeaderLabels(["Property", "Parent", "This case"])
         self._tree.setColumnCount(3)
-        self._tree.header().setStretchLastSection(True)
+        header = self._tree.header()
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
         self._tree.setRootIsDecorated(True)
         self._tree.setAlternatingRowColors(True)
         self._tree.setExpandsOnDoubleClick(False)
-        layout.addWidget(self._tree, stretch=1)
+        self._tree.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self._stack.addWidget(self._tree)
 
+    # ------------------------------------------------------------------
+    # Public API
     # ------------------------------------------------------------------
 
     def refresh(self) -> None:
@@ -155,90 +141,140 @@ class CaseDiffsWidget(QtWidgets.QWidget):
         ws = self._service._workspace
         if ws is None or not ws.selected_case_id:
             self._header.setText("No active case")
+            self._show_placeholder("No active case")
             return
-
         case = ws.cases.get(ws.selected_case_id)
         if case is None:
             self._header.setText("No active case")
+            self._show_placeholder("No active case")
             return
-
         if case.parent_case_id is None:
-            self._header.setText(f"<b>{case.name}</b> — root case (no parent)")
-            self._tree.addTopLevelItem(
-                QtWidgets.QTreeWidgetItem(["This is a root case", "", ""])
-            )
+            self._header.setText(f"<b>{case.name}</b> — root case")
+            self._show_placeholder("This is a root case — nothing to compare against.")
             return
 
-        self._header.setText(f"<b>{case.name}</b> — diffs vs ancestors")
+        include_visual = self._visual_toggle.isChecked()
+        scope = self._scope_combo.currentData()
 
-        ancestors = _ancestor_chain(ws, case.id)
-        # We compare each consecutive pair: root→…→parent→active
-        pairs: list[tuple] = []
-        chain_with_active = ancestors + [case]
-        for i in range(len(chain_with_active) - 1):
-            pairs.append((chain_with_active[i], chain_with_active[i + 1]))
-
-        if not pairs:
-            self._tree.addTopLevelItem(QtWidgets.QTreeWidgetItem(["No ancestor found", "", ""]))
-            return
-
-        for parent_case, child_case in pairs:
-            section_label = f"{parent_case.name}  →  {child_case.name}"
-            section_item = QtWidgets.QTreeWidgetItem([section_label, "", ""])
-            section_font = section_item.font(0)
-            section_font.setBold(True)
-            section_item.setFont(0, section_font)
-            section_item.setForeground(0, QtGui.QBrush(QtGui.QColor(INK_MUTED)))
-
-            try:
-                diffs = _compute_diffs_for_pair(parent_case, child_case)
-            except Exception as exc:
-                err = QtWidgets.QTreeWidgetItem([f"Error computing diffs: {exc}", "", ""])
-                err.setForeground(0, QtGui.QBrush(QtGui.QColor("#b43a2f")))
-                section_item.addChild(err)
-                self._tree.addTopLevelItem(section_item)
-                section_item.setExpanded(True)
-                continue
-
+        if scope == "ancestors":
+            self._populate_ancestor_chain(ws, case, include_visual)
+        else:
+            parent = ws.cases.get(case.parent_case_id)
+            if parent is None:
+                self._show_placeholder("Parent case not found")
+                return
+            self._header.setText(f"<b>{case.name}</b> vs <b>{parent.name}</b>")
+            diffs = diff_case_against(parent, case, include_visual=include_visual)
             if not diffs:
-                no_diff = QtWidgets.QTreeWidgetItem(["No differences", "", ""])
-                no_diff.setForeground(0, QtGui.QBrush(QtGui.QColor(INK_SUBTLE)))
-                section_item.addChild(no_diff)
+                self._show_placeholder("No differences with parent")
+                return
+            self._populate_section(self._tree.invisibleRootItem(), diffs)
+            self._show_tree()
+
+    # ------------------------------------------------------------------
+    # Internals
+    # ------------------------------------------------------------------
+
+    def _show_placeholder(self, message: str) -> None:
+        self._placeholder.setText(message)
+        self._stack.setCurrentWidget(self._placeholder)
+
+    def _show_tree(self) -> None:
+        self._stack.setCurrentWidget(self._tree)
+
+    def _populate_ancestor_chain(self, ws, case, include_visual: bool) -> None:
+        chain = _ancestor_chain(ws, case.id) + [case]
+        if len(chain) < 2:
+            self._show_placeholder("No ancestors")
+            return
+        any_diff = False
+        self._header.setText(f"<b>{case.name}</b> — diffs along {len(chain) - 1} ancestor step(s)")
+        for parent_case, child_case in zip(chain, chain[1:]):
+            diffs = diff_case_against(parent_case, child_case, include_visual=include_visual)
+            section = QtWidgets.QTreeWidgetItem(
+                [f"{parent_case.name}  →  {child_case.name}", "", ""]
+            )
+            section_font = section.font(0)
+            section_font.setBold(True)
+            section.setFont(0, section_font)
+            section.setForeground(0, QtGui.QBrush(QtGui.QColor(INK_MUTED)))
+            self._tree.addTopLevelItem(section)
+            if diffs:
+                any_diff = True
+                self._populate_section(section, diffs)
             else:
-                # Group by entity
-                by_entity: dict[str, list[dict]] = {}
-                for diff in diffs:
-                    key = f"{diff['entity_type']}:{diff['entity_id']}"
-                    by_entity.setdefault(key, []).append(diff)
+                empty = QtWidgets.QTreeWidgetItem(["No differences", "", ""])
+                empty.setForeground(0, QtGui.QBrush(QtGui.QColor(INK_SUBTLE)))
+                section.addChild(empty)
+            section.setExpanded(True)
+        if not any_diff:
+            self._tree.clear()
+            self._show_placeholder("No differences in the ancestor chain")
+        else:
+            self._show_tree()
 
-                for key, entity_diffs in by_entity.items():
-                    first = entity_diffs[0]
-                    entity_label = f"{first['entity_type']}: {first['entity_name']}"
-                    entity_item = QtWidgets.QTreeWidgetItem([entity_label, "", ""])
-                    entity_font = entity_item.font(0)
-                    entity_font.setBold(True)
-                    entity_item.setFont(0, entity_font)
+    def _populate_section(self, parent_item: QtWidgets.QTreeWidgetItem, diffs: list[DiffEntry]) -> None:
+        # Group by entity.
+        by_entity: dict[str, list[DiffEntry]] = {}
+        order: list[str] = []
+        for d in diffs:
+            if d.entity_id not in by_entity:
+                by_entity[d.entity_id] = []
+                order.append(d.entity_id)
+            by_entity[d.entity_id].append(d)
 
-                    for diff in entity_diffs:
-                        kind = diff["kind"]
-                        color = _KIND_COLORS.get(kind, "#888888")
-                        badge = _KIND_LABELS.get(kind, kind.upper())
-                        if diff["field"] is None:
-                            # Added / removed whole entity
-                            row = QtWidgets.QTreeWidgetItem([f"[{badge}]", "", ""])
-                        else:
-                            pv = str(diff["parent_value"]) if diff["parent_value"] is not None else "—"
-                            cv = str(diff["child_value"]) if diff["child_value"] is not None else "—"
-                            row = QtWidgets.QTreeWidgetItem([diff["field"], pv, cv])
-                        row.setForeground(0, QtGui.QBrush(QtGui.QColor(color)))
-                        row.setToolTip(0, f"[{badge}] {diff.get('field', '')}")
-                        entity_item.addChild(row)
+        for entity_id in order:
+            entries = by_entity[entity_id]
+            head = entries[0]
+            # Top-level entity row.
+            summary = self._summarise_entity(entries)
+            entity_item = QtWidgets.QTreeWidgetItem([
+                f"{head.entity_kind}: {head.entity_label}",
+                summary,
+                "",
+            ])
+            entity_item.setData(0, QtCore.Qt.ItemDataRole.UserRole, entity_id)
+            entity_font = entity_item.font(0)
+            entity_font.setBold(True)
+            entity_item.setFont(0, entity_font)
+            icon_name = _ENTITY_ICONS.get(head.entity_kind)
+            if icon_name is not None:
+                entity_item.setIcon(0, get_icon(icon_name, INK_MUTED, size=14))
+            entity_item.setForeground(1, QtGui.QBrush(QtGui.QColor(INK_MUTED)))
+            parent_item.addChild(entity_item)
 
-                    entity_item.setExpanded(True)
-                    section_item.addChild(entity_item)
+            for d in entries:
+                if d.property_label is None:
+                    # added / removed whole entity — already conveyed by the
+                    # summary on the parent row; no extra child needed.
+                    continue
+                row = QtWidgets.QTreeWidgetItem([
+                    f"{_KIND_BADGE['changed']}  {d.property_label}",
+                    d.parent_text,
+                    d.child_text,
+                ])
+                row.setData(0, QtCore.Qt.ItemDataRole.UserRole, entity_id)
+                colour = QtGui.QColor(_KIND_COLORS.get(d.kind, INK_MUTED))
+                row.setForeground(0, QtGui.QBrush(colour))
+                row.setToolTip(0, f"{d.entity_kind} · {d.property_path}")
+                entity_item.addChild(row)
 
-            section_item.setExpanded(True)
-            self._tree.addTopLevelItem(section_item)
+            entity_item.setExpanded(True)
 
-        self._tree.resizeColumnToContents(0)
-        self._tree.resizeColumnToContents(1)
+    def _summarise_entity(self, entries: list[DiffEntry]) -> str:
+        head = entries[0]
+        if any(e.kind == "added" and e.property_label is None for e in entries):
+            return "added in this case"
+        if any(e.kind == "removed" and e.property_label is None for e in entries):
+            return "removed in this case"
+        changed = [e for e in entries if e.kind == "changed"]
+        if not changed:
+            return ""
+        if len(changed) == 1:
+            return "1 change"
+        return f"{len(changed)} changes"
+
+    def _on_item_double_clicked(self, item: QtWidgets.QTreeWidgetItem, _column: int) -> None:
+        entity_id = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        if isinstance(entity_id, str) and entity_id:
+            self.entity_selected.emit(entity_id)

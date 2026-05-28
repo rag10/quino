@@ -341,6 +341,7 @@ class MainWindow(QtWidgets.QMainWindow):
         right_panel.addTab(inspector_widget, "Inspector")
 
         self.case_diffs_widget = CaseDiffsWidget(self.app_service)
+        self.case_diffs_widget.entity_selected.connect(self._select_entity_by_id)
         right_panel.addTab(self.case_diffs_widget, "Compare with parent")
 
         parameters_widget = QtWidgets.QWidget()
@@ -1785,6 +1786,15 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         analysis.config.plots.append(dialog.result_plot)
         self._render_plot_for_analysis(analysis, dialog.result_plot)
+
+    def _open_metrics_manager_for_analysis(self, analysis) -> None:
+        from quino.gui.dialogs.metrics_manager_dialog import MetricsManagerDialog
+
+        project = self.app_service.display_project
+        if project is None:
+            return
+        dialog = MetricsManagerDialog(project, analysis, parent=self)
+        dialog.exec()
 
     def _render_plot_for_analysis(self, analysis, plot_def) -> None:
         case = self.app_service.current_case()
