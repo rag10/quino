@@ -506,9 +506,15 @@ class ApplicationService:
         value: str | None = None,
         name: str | None = None,
         entity_references: list[str] | None = None,
+        rollback_on_failure: bool = False,
     ) -> str:
         return self.sketch.create_sketch_constraint(
-            constraint_type, references, value=value, name=name, entity_references=entity_references,
+            constraint_type,
+            references,
+            value=value,
+            name=name,
+            entity_references=entity_references,
+            rollback_on_failure=rollback_on_failure,
         )
 
     def update_sketch_constraint(self, constraint_id: str, property_path: str, value: PropertyValueInput) -> None:

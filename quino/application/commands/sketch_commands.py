@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import math
 import re
 
@@ -282,9 +283,18 @@ class SketchCommands:
         self._evaluate_sketch_expression(x_expr, project.parameters)
         self._evaluate_sketch_expression(y_expr, project.parameters)
         with self._ctx.operation():
+            sketch = self._require_sketch()
+            previous_entities = copy.deepcopy(sketch.entities)
+            previous_error = sketch.solve_error
+            previous_bad = list(sketch.bad_constraint_ids)
             point.x = x_expr
             point.y = y_expr
-            self._apply_sketch_constraints({point_id})
+            result = self._apply_sketch_constraints({point_id})
+            if not result.success:
+                sketch.entities = previous_entities
+                sketch.solve_error = previous_error
+                sketch.bad_constraint_ids = previous_bad
+                raise ValueError(result.message or "Sketch point move could not be solved")
 
     def toggle_sketch_construction(self, entity_ids: list[str] | set[str]) -> bool:
         self._guard_no_case()
@@ -315,6 +325,11 @@ class SketchCommands:
         }:
             raise ValueError("Only distance/radius constraints can be edited with this helper")
         with self._ctx.operation():
+            sketch = self._require_sketch()
+            previous_entities = copy.deepcopy(sketch.entities)
+            previous_constraints = copy.deepcopy(sketch.constraints)
+            previous_error = sketch.solve_error
+            previous_bad = list(sketch.bad_constraint_ids)
             scalar = self._scalar(value, "mm", Dimension.LENGTH)
             eval_result = self._ctx.expressions.evaluate_property(scalar, self._project.parameters)
             if eval_result.value <= 0:
@@ -322,7 +337,13 @@ class SketchCommands:
             constraint.value = scalar
             if label_position is not None:
                 constraint.metadata.values["label_position"] = [label_position[0], label_position[1]]
-            self._apply_sketch_constraints({constraint.references[0]} if constraint.references else set())
+            result = self._apply_sketch_constraints({constraint.references[0]} if constraint.references else set())
+            if not result.success:
+                sketch.entities = previous_entities
+                sketch.constraints = previous_constraints
+                sketch.solve_error = previous_error
+                sketch.bad_constraint_ids = previous_bad
+                raise ValueError(result.message or "Sketch constraint edit could not be solved")
 
     def apply_sketch_constraint_from_entities(
         self,
@@ -361,16 +382,28 @@ class SketchCommands:
             SketchConstraintType.COLLINEAR,
             SketchConstraintType.SYMMETRIC,
         }:
-            return self.create_sketch_constraint(ctype.value, refs, value=value, entity_references=entity_refs or None)
+            return self.create_sketch_constraint(
+                ctype.value,
+                refs,
+                value=value,
+                entity_references=entity_refs or None,
+                rollback_on_failure=True,
+            )
         if ctype in {
             SketchConstraintType.PARALLEL,
             SketchConstraintType.PERPENDICULAR,
             SketchConstraintType.EQUAL_LENGTH,
             SketchConstraintType.ANGLE,
         }:
-            return self.create_sketch_constraint(ctype.value, refs, value=value)
+            return self.create_sketch_constraint(ctype.value, refs, value=value, rollback_on_failure=True)
         if ctype in {SketchConstraintType.ON_CIRCLE, SketchConstraintType.TANGENT}:
-            return self.create_sketch_constraint(ctype.value, refs, value=value, entity_references=entity_refs)
+            return self.create_sketch_constraint(
+                ctype.value,
+                refs,
+                value=value,
+                entity_references=entity_refs,
+                rollback_on_failure=True,
+            )
         raise ValueError(f"Unsupported sketch constraint type: {constraint_type}")
 
     def create_sketch_constraint(
@@ -380,6 +413,7 @@ class SketchCommands:
         value: str | None = None,
         name: str | None = None,
         entity_references: list[str] | None = None,
+        rollback_on_failure: bool = False,
     ) -> str:
         self._guard_no_case()
         project = self._project
@@ -458,13 +492,23 @@ class SketchCommands:
         )
         self._validate_sketch_constraint_name(constraint.name)
         self._ctx.snapshot()
+        previous_entities = copy.deepcopy(sketch.entities)
+        previous_constraints = copy.deepcopy(sketch.constraints)
+        previous_error = sketch.solve_error
+        previous_bad = list(sketch.bad_constraint_ids)
         sketch.constraints[constraint.id] = constraint
         locked_refs = (
             set()
             if constraint_enum is SketchConstraintType.COINCIDENT and normalized_entity_refs
             else ({normalized_refs[0]} if normalized_refs else set())
         )
-        self._apply_sketch_constraints(locked_refs)
+        result = self._apply_sketch_constraints(locked_refs)
+        if rollback_on_failure and not result.success:
+            sketch.entities = previous_entities
+            sketch.constraints = previous_constraints
+            sketch.solve_error = previous_error
+            sketch.bad_constraint_ids = previous_bad
+            raise ValueError(result.message or "Sketch constraint could not be solved")
         return constraint.id
 
     def update_sketch_constraint(self, constraint_id: str, property_path: str, value: PropertyValueInput) -> None:
@@ -505,8 +549,19 @@ class SketchCommands:
                 if eval_result.value == 0.0:
                     raise ValueError("Angle constraint value cannot be zero")
             self._ctx.snapshot()
+            sketch = self._require_sketch()
+            previous_entities = copy.deepcopy(sketch.entities)
+            previous_constraints = copy.deepcopy(sketch.constraints)
+            previous_error = sketch.solve_error
+            previous_bad = list(sketch.bad_constraint_ids)
             constraint.value = scalar
-            self._apply_sketch_constraints({constraint.references[0]} if constraint.references else set())
+            result = self._apply_sketch_constraints({constraint.references[0]} if constraint.references else set())
+            if not result.success:
+                sketch.entities = previous_entities
+                sketch.constraints = previous_constraints
+                sketch.solve_error = previous_error
+                sketch.bad_constraint_ids = previous_bad
+                raise ValueError(result.message or "Sketch constraint edit could not be solved")
             return
         if property_path in {"label_x", "label_y"}:
             if constraint.type not in {
@@ -603,8 +658,17 @@ class SketchCommands:
             expr = Expression(value.value)
             self._evaluate_sketch_expression(expr, project.parameters)
             self._ctx.snapshot()
+            sketch = self._require_sketch()
+            previous_entities = copy.deepcopy(sketch.entities)
+            previous_error = sketch.solve_error
+            previous_bad = list(sketch.bad_constraint_ids)
             setattr(entity, property_path, expr)
-            self._apply_sketch_constraints(set())
+            result = self._apply_sketch_constraints(set())
+            if not result.success:
+                sketch.entities = previous_entities
+                sketch.solve_error = previous_error
+                sketch.bad_constraint_ids = previous_bad
+                raise ValueError(result.message or "Sketch point edit could not be solved")
             return
         if isinstance(entity, SketchCircle):
             if property_path == "center_point_id":
@@ -1034,7 +1098,12 @@ class SketchCommands:
         return ScalarProperty(expression=expression, unit=unit, expected_dimension=dimension)
 
     def _mm_expression(self, value: float) -> str:
-        return f"{value:.6g} mm"
+        if abs(value) < 1e-6:
+            value = 0.0
+        text = f"{value:.9f}".rstrip("0").rstrip(".")
+        if text in {"", "-0"}:
+            text = "0"
+        return f"{text} mm"
 
     def _normalize_angle_expression(self, expression: str) -> str:
         stripped = expression.strip()

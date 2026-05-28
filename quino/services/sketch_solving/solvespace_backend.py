@@ -250,12 +250,188 @@ class SolvespaceBackend:
             return ((sx - cx) ** 2 + (sy - cy) ** 2) ** 0.5
         return None
 
+    def analyze_dof(self, project: "Project") -> DofResult:
+        """Analyze sketch mobility without confusing internal rigidity with world anchoring."""
+        sketch = project.sketch
+        if sketch is None:
+            return DofResult({}, set(), set(), 0)
+        points = list(sketch.points())
+        if not points:
+            return DofResult({}, set(), set(), 0)
+
+        ref_result = self.solve(project)
+        ref_positions = ref_result.positions if ref_result.success else {}
+        fixed_ids = self._fixed_point_ids(sketch)
+        component_ids = self._point_component_ids(sketch)
+        component_has_fix: dict[int, bool] = {}
+        for point_id, component_id in component_ids.items():
+            component_has_fix.setdefault(component_id, False)
+            if point_id in fixed_ids:
+                component_has_fix[component_id] = True
+
+        raw_point_dof: dict[str, int] = {}
+        epsilon = 1.0
+        threshold = epsilon * 0.3
+        for point in points:
+            if point.id in fixed_ids:
+                raw_point_dof[point.id] = 0
+                continue
+            ref_xy = ref_positions.get(point.id)
+            if ref_xy is None:
+                raw_point_dof[point.id] = 2
+                continue
+            free_axes = 0
+            for axis in (0, 1):
+                if self._axis_is_free(project, sketch, point.id, ref_xy, axis, epsilon, threshold):
+                    free_axes += 1
+            raw_point_dof[point.id] = free_axes
+
+        point_dof: dict[str, int] = {}
+        fully_constrained_points: set[str] = set()
+        floating_points: set[str] = set()
+        for point_id, dof in raw_point_dof.items():
+            component_id = component_ids.get(point_id)
+            anchored = component_has_fix.get(component_id, False)
+            if dof == 0 and not anchored:
+                floating_points.add(point_id)
+                point_dof[point_id] = 2
+            else:
+                point_dof[point_id] = dof
+                if dof == 0:
+                    fully_constrained_points.add(point_id)
+
+        fully_constrained_entities: set[str] = set()
+        floating_entities: set[str] = set()
+        for entity in sketch.entities.values():
+            ref_point_ids = self._entity_point_ids(entity)
+            if ref_point_ids and all(pid in fully_constrained_points for pid in ref_point_ids):
+                fully_constrained_entities.add(entity.id)
+            elif ref_point_ids and all(pid in floating_points for pid in ref_point_ids):
+                floating_entities.add(entity.id)
+
+        total_system_dof = self._normalized_system_dof(project, sketch)
+        return DofResult(
+            point_dof=point_dof,
+            fully_constrained_point_ids=fully_constrained_points,
+            fully_constrained_entity_ids=fully_constrained_entities,
+            total_free_dof=total_system_dof if total_system_dof is not None else sum(point_dof.values()),
+            fixed_point_ids=fixed_ids,
+            floating_point_ids=floating_points,
+            floating_entity_ids=floating_entities,
+            component_ids_by_point=component_ids,
+            component_has_fix=component_has_fix,
+            total_system_dof=total_system_dof,
+        )
+
+    def _fixed_point_ids(self, sketch: "Sketch") -> set[str]:
+        fixed_ids: set[str] = set()
+        for constraint in sketch.constraints.values():
+            if constraint.type is SketchConstraintType.FIX:
+                fixed_ids.update(constraint.references)
+        return fixed_ids
+
+    def _point_component_ids(self, sketch: "Sketch") -> dict[str, int]:
+        point_ids = [point.id for point in sketch.points()]
+        parent = {point_id: point_id for point_id in point_ids}
+
+        def find(point_id: str) -> str:
+            while parent[point_id] != point_id:
+                parent[point_id] = parent[parent[point_id]]
+                point_id = parent[point_id]
+            return point_id
+
+        def union(a: str, b: str) -> None:
+            if a not in parent or b not in parent:
+                return
+            root_a = find(a)
+            root_b = find(b)
+            if root_a != root_b:
+                parent[root_b] = root_a
+
+        for entity in sketch.entities.values():
+            ids = self._entity_point_ids(entity)
+            for point_id in ids[1:]:
+                union(ids[0], point_id)
+        for constraint in sketch.constraints.values():
+            ids = list(constraint.references)
+            for entity_id in constraint.entity_references:
+                entity = sketch.entities.get(entity_id)
+                if entity is not None:
+                    ids.extend(self._entity_point_ids(entity))
+            ids = [point_id for point_id in ids if point_id in parent]
+            for point_id in ids[1:]:
+                union(ids[0], point_id)
+
+        root_to_index: dict[str, int] = {}
+        result: dict[str, int] = {}
+        for point_id in point_ids:
+            root = find(point_id)
+            if root not in root_to_index:
+                root_to_index[root] = len(root_to_index)
+            result[point_id] = root_to_index[root]
+        return result
+
+    def _normalized_system_dof(self, project: "Project", sketch: "Sketch") -> int | None:
+        try:
+            sys = ps.SolverSystem()
+            wp = sys.create_2d_base()
+            nm_3d = sys.entity(0)
+            fixed_ids = self._fixed_point_ids(sketch)
+            point_handles: dict[str, object] = {}
+            for point in sketch.points():
+                x, y = self._evaluate_point(project, point)
+                handle = sys.add_point_2d(x, y, wp)
+                if point.id in fixed_ids:
+                    sys.dragged(handle, wp)
+                point_handles[point.id] = handle
+            entity_handles: dict[str, object] = {}
+            radius_entities: dict[str, object] = {}
+            for entity in sketch.entities.values():
+                self._create_entity(
+                    sys, wp, nm_3d, entity, point_handles, entity_handles, radius_entities, project,
+                )
+            from quino.services.sketch_solving.constraint_mapping import emit_constraint
+            constrained_radii: set[str] = set()
+            for constraint in sketch.constraints.values():
+                if constraint.type is SketchConstraintType.FIX:
+                    continue
+                if constraint.type is SketchConstraintType.RADIUS:
+                    constrained_radii.update(constraint.entity_references or [])
+                    constrained_radii.update(constraint.references or [])
+                if constraint.type is SketchConstraintType.TANGENT:
+                    constrained_radii.update(constraint.entity_references or [])
+                try:
+                    emit_constraint(
+                        sys, wp, constraint,
+                        points=point_handles,
+                        entities=entity_handles,
+                        project=project,
+                        expressions=self._expressions,
+                        units=self._units,
+                    )
+                except (ValueError, TypeError):
+                    continue
+            for entity in sketch.entities.values():
+                if entity.id in constrained_radii:
+                    continue
+                handle = entity_handles.get(entity.id)
+                if handle is None:
+                    continue
+                if isinstance(entity, (SketchCircle, SketchArc)):
+                    radius_mm = self._evaluate_radius(entity, project)
+                    if radius_mm is not None:
+                        sys.diameter(handle, 2.0 * radius_mm)
+            sys.solve()
+            return max(0, int(sys.dof()) - 6)
+        except Exception:
+            return None
+
     @staticmethod
     def _read_point(sys, handle) -> tuple[float, float]:
         params = sys.params(handle.params)
         return (float(params[0]), float(params[1]))
 
-    def analyze_dof(self, project: "Project") -> DofResult:
+    def _analyze_dof_legacy(self, project: "Project") -> DofResult:
         """Per-point DOF analysis via Solvespace perturbation testing.
 
         For each non-fixed SketchPoint and each axis, build a temp solver

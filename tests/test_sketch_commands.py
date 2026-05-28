@@ -109,3 +109,9 @@ def test_toggle_sketch_construction_flips_all_targets() -> None:
     new_value = app.toggle_sketch_construction([line])
     assert new_value is True
     assert sketch.entities[line].construction is True
+
+
+def test_scientific_notation_length_expression_is_supported() -> None:
+    app = _make_app()
+    quantity = app.expression_service.evaluate_expression("1.67803e-08 mm", [])
+    assert app.unit_service.convert(quantity, "mm") == pytest.approx(1.67803e-08)

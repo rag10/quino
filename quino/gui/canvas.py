@@ -994,6 +994,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             constraint_id = self.app_service.create_sketch_constraint(
                 SketchConstraintType.FIX.value,
                 [sketch_point.id],
+                rollback_on_failure=True,
             )
             self.entitySelected.emit(constraint_id)
             self.modelChanged.emit("Created sketch fix constraint")
@@ -1289,10 +1290,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         if self._mode == CanvasMode.SELECT:
             if clicked_sketch_point is not None and self._interaction_mode in ("sketch", "all"):
                 self._select_canvas_entity(clicked_sketch_point.entity_id, additive=additive_selection)
-                point_is_locked = self._is_point_fixed(clicked_sketch_point.entity_id) or (
-                    self._dof_result is not None
-                    and self._dof_result.point_dof.get(clicked_sketch_point.entity_id, 2) == 0
-                )
+                point_is_locked = self._is_point_fixed(clicked_sketch_point.entity_id)
                 if self._editing_enabled and not point_is_locked and not additive_selection:
                     self._dragging_sketch_point = clicked_sketch_point
                     self._dragging_sketch_point_preview = (
@@ -1408,6 +1406,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             constraint_id = self.app_service.create_sketch_constraint(
                 constraint_type,
                 list(self._pending_distance_constraint_refs),
+                rollback_on_failure=True,
             )
             constraint = self.app_service.project.sketch.constraints.get(constraint_id)
             if constraint is not None:
@@ -1474,6 +1473,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             constraint_id = self.app_service.create_sketch_constraint(
                 SketchConstraintType.FIX.value,
                 [clicked_sketch_point.entity_id],
+                rollback_on_failure=True,
             )
             self.entitySelected.emit(constraint_id)
             self.modelChanged.emit("Created sketch fix constraint")
@@ -1735,7 +1735,16 @@ class MechanismCanvas(QtWidgets.QWidget):
             if project is not None and project.sketch is not None:
                 dof_result = self.app_service.sketch_solver.analyze_dof(project)
                 self._dof_result = dof_result
-                self.dofInfoChanged.emit(f"Free DOF: {dof_result.total_free_dof}")
+                floating_components = {
+                    dof_result.component_ids_by_point.get(point_id)
+                    for point_id in getattr(dof_result, "floating_point_ids", set())
+                }
+                floating_components.discard(None)
+                suffix = (
+                    f" | floating components: {len(floating_components)}"
+                    if floating_components else ""
+                )
+                self.dofInfoChanged.emit(f"Free DOF: {dof_result.total_free_dof}{suffix}")
             else:
                 self._dof_result = None
                 self.dofInfoChanged.emit("")
@@ -1832,7 +1841,16 @@ class MechanismCanvas(QtWidgets.QWidget):
                 x, y = self._to_world(event.position(), self._current_transform())
                 self._dragging_sketch_point_preview = (self._dragging_sketch_point.entity_id, x, y)
             point_id, x, y = self._dragging_sketch_point_preview
-            self.app_service.move_sketch_point_with_solver(point_id, self._mm_expression(x), self._mm_expression(y))
+            try:
+                self.app_service.move_sketch_point_with_solver(point_id, self._mm_expression(x), self._mm_expression(y))
+            except Exception as exc:
+                self.modelChanged.emit(f"Move sketch point failed: {exc}")
+                self._dragging_sketch_point = None
+                self._dragging_sketch_point_preview = None
+                self._dragging_sketch_solution_preview = {}
+                self._snap_preview_world = None
+                self.update()
+                return
             self._dragging_sketch_point = None
             self._dragging_sketch_point_preview = None
             self._dragging_sketch_solution_preview = {}
@@ -2985,12 +3003,18 @@ class MechanismCanvas(QtWidgets.QWidget):
         def _entity_color(entity_id: str, construction: bool) -> QtGui.QColor:
             if dof_result is not None and entity_id in dof_result.fully_constrained_entity_ids:
                 return QtGui.QColor("#4caf50")
+            if dof_result is not None and entity_id in getattr(dof_result, "floating_entity_ids", set()):
+                return QtGui.QColor("#4b8bbd")
             return QtGui.QColor(color_normal if not construction else color_construction)
 
         def _point_color(point_id: str, construction: bool) -> QtGui.QColor:
             if construction:
                 return QtGui.QColor(color_pt_const)
             if dof_result is not None:
+                if point_id in getattr(dof_result, "fixed_point_ids", set()):
+                    return QtGui.QColor("#2f8f4e")
+                if point_id in getattr(dof_result, "floating_point_ids", set()):
+                    return QtGui.QColor("#4b8bbd")
                 dof = dof_result.point_dof.get(point_id, 2)
                 if dof == 0:
                     return QtGui.QColor("#4caf50")
@@ -4209,10 +4233,7 @@ class MechanismCanvas(QtWidgets.QWidget):
             self._hovered_sketch_point_id = hovered_point.entity_id if hovered_point is not None else None
             if hovered_point is not None:
                 self._hovered_sketch_entity_id = None
-                _hovered_is_locked = self._is_point_fixed(hovered_point.entity_id) or (
-                    self._dof_result is not None
-                    and self._dof_result.point_dof.get(hovered_point.entity_id, 2) == 0
-                )
+                _hovered_is_locked = self._is_point_fixed(hovered_point.entity_id)
                 if self._mode == CanvasMode.SELECT and self._editing_enabled and _hovered_is_locked:
                     self.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.ForbiddenCursor))
                 elif self._mode == CanvasMode.SELECT:
@@ -4943,6 +4964,7 @@ class MechanismCanvas(QtWidgets.QWidget):
                 constraint_type_str, point_ids,
                 value=value_str,
                 entity_references=entity_refs if entity_refs else None,
+                rollback_on_failure=True,
             )
         except Exception as exc:
             QtWidgets.QMessageBox.warning(self, "Constraint error", str(exc))
@@ -4982,9 +5004,17 @@ class MechanismCanvas(QtWidgets.QWidget):
         tolerance = 1e-6
         try:
             if abs(y2 - y1) <= tolerance:
-                self.app_service.create_sketch_constraint(SketchConstraintType.HORIZONTAL.value, [point_a_id, point_b_id])
+                self.app_service.create_sketch_constraint(
+                    SketchConstraintType.HORIZONTAL.value,
+                    [point_a_id, point_b_id],
+                    rollback_on_failure=True,
+                )
             elif abs(x2 - x1) <= tolerance:
-                self.app_service.create_sketch_constraint(SketchConstraintType.VERTICAL.value, [point_a_id, point_b_id])
+                self.app_service.create_sketch_constraint(
+                    SketchConstraintType.VERTICAL.value,
+                    [point_a_id, point_b_id],
+                    rollback_on_failure=True,
+                )
         except Exception:
             return
 

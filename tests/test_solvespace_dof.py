@@ -79,3 +79,21 @@ def test_total_free_dof_counts_axes():
     svc.create_sketch_point("5 mm", "0 mm", "P2")
     result = _make_backend().analyze_dof(svc.project)
     assert result.total_free_dof == 4
+
+
+def test_rigid_but_unfixed_component_is_reported_as_floating():
+    svc = ApplicationService()
+    svc.new_project("T")
+    svc.create_sketch("S")
+    p1 = svc.create_sketch_point("0 mm", "0 mm", "A")
+    p2 = svc.create_sketch_point("10 mm", "0 mm", "B")
+    p3 = svc.create_sketch_point("0 mm", "10 mm", "C")
+    svc.create_sketch_constraint("distance", [p1, p2], value="10 mm")
+    svc.create_sketch_constraint("distance", [p2, p3], value="14.1421356 mm")
+    svc.create_sketch_constraint("distance", [p3, p1], value="10 mm")
+
+    result = _make_backend().analyze_dof(svc.project)
+
+    assert {p1, p2, p3}.issubset(result.floating_point_ids)
+    assert not ({p1, p2, p3} & result.fully_constrained_point_ids)
+    assert result.total_free_dof >= 3
