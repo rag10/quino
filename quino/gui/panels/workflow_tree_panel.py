@@ -49,6 +49,82 @@ def _group_item(label: str, icon_name: str) -> QtWidgets.QTreeWidgetItem:
     return item
 
 
+# Colours for the case/subcase pill background drawn by _CaseFrameDelegate.
+_CASE_PILL_BG_INACTIVE = "#eaf3fb"
+_CASE_PILL_BORDER_INACTIVE = "#bcd6ec"
+_CASE_PILL_BG_ACTIVE = "#1e6fb0"
+_CASE_PILL_BORDER_ACTIVE = "#174462"
+_CASE_PILL_RADIUS = 6
+
+
+class _CaseFrameDelegate(QtWidgets.QStyledItemDelegate):
+    """Draws a rounded "pill" frame behind case/subcase nodes.
+
+    For non-case rows the default delegate behaviour is used unchanged.
+    """
+
+    def paint(
+        self,
+        painter: QtGui.QPainter,
+        option: QtWidgets.QStyleOptionViewItem,
+        index: QtCore.QModelIndex,
+    ) -> None:
+        kind = index.data(ROLE_NODE_KIND)
+        if kind != "case":
+            super().paint(painter, option, index)
+            return
+
+        # Detect "active case" by checking whether the foreground brush is
+        # pure white — this is the marker the panel sets when is_active.
+        fg = index.data(QtCore.Qt.ItemDataRole.ForegroundRole)
+        is_active = False
+        if fg is not None:
+            try:
+                col = QtGui.QColor(fg) if not isinstance(fg, QtGui.QBrush) else fg.color()
+                is_active = col.name().lower() == "#ffffff"
+            except Exception:
+                is_active = False
+
+        bg = QtGui.QColor(_CASE_PILL_BG_ACTIVE if is_active else _CASE_PILL_BG_INACTIVE)
+        border = QtGui.QColor(_CASE_PILL_BORDER_ACTIVE if is_active else _CASE_PILL_BORDER_INACTIVE)
+
+        # Draw the rounded pill behind the row content.
+        pill_rect = QtCore.QRectF(option.rect).adjusted(2.0, 2.0, -3.0, -2.0)
+        painter.save()
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
+        painter.setBrush(QtGui.QBrush(bg))
+        painter.setPen(QtGui.QPen(border, 1.0))
+        painter.drawRoundedRect(pill_rect, _CASE_PILL_RADIUS, _CASE_PILL_RADIUS)
+        painter.restore()
+
+        # Now overlay icon + text manually so we don't fight with the style's
+        # default selection painting.
+        icon = index.data(QtCore.Qt.ItemDataRole.DecorationRole)
+        text = index.data(QtCore.Qt.ItemDataRole.DisplayRole) or ""
+        font = index.data(QtCore.Qt.ItemDataRole.FontRole)
+
+        row_rect = QtCore.QRect(option.rect)
+        left = row_rect.left() + 8
+        icon_size = 20
+        if isinstance(icon, QtGui.QIcon) and not icon.isNull():
+            icon_rect = QtCore.QRect(left, row_rect.center().y() - icon_size // 2, icon_size, icon_size)
+            icon.paint(painter, icon_rect, QtCore.Qt.AlignmentFlag.AlignCenter)
+            left = icon_rect.right() + 8
+
+        text_rect = QtCore.QRect(left, row_rect.top(), row_rect.right() - left - 6, row_rect.height())
+        painter.save()
+        if isinstance(font, QtGui.QFont):
+            painter.setFont(font)
+        text_color = QtGui.QColor("#ffffff" if is_active else BLUE_DARK)
+        painter.setPen(QtGui.QPen(text_color))
+        painter.drawText(
+            text_rect,
+            int(QtCore.Qt.AlignmentFlag.AlignVCenter | QtCore.Qt.AlignmentFlag.AlignLeft),
+            str(text),
+        )
+        painter.restore()
+
+
 class WorkflowTreePanel(QtWidgets.QWidget):
     case_selected = QtCore.Signal(str)      # single-click on case: set active, inspect
     case_activated = QtCore.Signal(str)     # double-click on case: enter model mode
@@ -71,6 +147,8 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         self._tree.itemClicked.connect(self._on_item_clicked)
         self._tree.itemDoubleClicked.connect(self._on_item_double_clicked)
         self._tree.customContextMenuRequested.connect(self._on_context_menu_requested)
+        self._case_delegate = _CaseFrameDelegate(self._tree)
+        self._tree.setItemDelegate(self._case_delegate)
         layout.addWidget(self._tree)
 
     # ------------------------------------------------------------------
@@ -168,16 +246,14 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         is_active = ws.selected_case_id == case.id
         is_root = case.parent_case_id is None
         icon_name = "workspace-case" if is_root else "workspace-subcase"
-        # Cases (root) and subcases are visually emphasised:
-        #   - bold text always
-        #   - larger icon and font for root cases
-        #   - dark-blue ink for label
-        #   - subtle blue tint as background to mark hierarchy; stronger when active
-        #   - "▸ " prefix on subcases for a quick visual cue
+        # Cases (root) and subcases get a rounded coloured frame painted by
+        # _CaseFrameDelegate. Text is dark blue when inactive, white when the
+        # case is the one currently being worked on.
         label_prefix = "" if is_root else "▸ "
         item = QtWidgets.QTreeWidgetItem([f"{label_prefix}{case.name}"])
         icon_size = 20 if is_root else 18
-        item.setIcon(0, get_icon(icon_name, BLUE_DARK, size=icon_size))
+        icon_color = "#ffffff" if is_active else BLUE_DARK
+        item.setIcon(0, get_icon(icon_name, icon_color, size=icon_size))
         item.setData(0, ROLE_NODE_KIND, "case")
         item.setData(0, ROLE_ID, case.id)
 
@@ -188,11 +264,9 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         else:
             font.setPointSizeF(font.pointSizeF() + 0.5)
         item.setFont(0, font)
-        item.setForeground(0, QtGui.QBrush(QtGui.QColor(BLUE_DARK)))
-
-        # Background tint: deeper for active, subtler (almost white) otherwise.
-        bg_hex = BLUE_SOFT if is_active else "#eef5fb"
-        item.setBackground(0, QtGui.QBrush(QtGui.QColor(bg_hex)))
+        # The delegate inspects the foreground colour: pure white => active.
+        text_color = "#ffffff" if is_active else BLUE_DARK
+        item.setForeground(0, QtGui.QBrush(QtGui.QColor(text_color)))
 
         item.setToolTip(
             0,

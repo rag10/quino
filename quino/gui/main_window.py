@@ -1103,6 +1103,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._center_stack.setCurrentIndex(0)
             if self._has_simulation_frames():
                 self._rewind_simulation_to_start()
+            self.canvas.set_playback_locked(False)
             self.canvas.set_pose_readonly(False)
             self.refresh_all()
 
@@ -2051,7 +2052,11 @@ class MainWindow(QtWidgets.QMainWindow):
             frame = self._last_simulation_result.frames[index]
             time_value = self._last_simulation_result.time[index] if index < len(self._last_simulation_result.time) else 0.0
         self._last_simulation_state = frame
-        self.canvas.set_state_overlay(frame)
+        # In model mode the canvas must paint the editable base geometry, not
+        # the simulated frame — otherwise edits (marker drags, mass changes)
+        # appear to "snap back" because the overlay overrides the body pose.
+        canvas_overlay = None if self._app_mode == "model" else frame
+        self.canvas.set_state_overlay(canvas_overlay)
         self.canvas.set_simulation_time(time_value)
         if self.app_service.project is not None:
             self._populate_canvas_summary(self.app_service.project)
