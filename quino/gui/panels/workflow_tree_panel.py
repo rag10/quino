@@ -166,20 +166,39 @@ class WorkflowTreePanel(QtWidgets.QWidget):
 
     def _build_case_item(self, case: Case, ws) -> QtWidgets.QTreeWidgetItem:
         is_active = ws.selected_case_id == case.id
-        icon_name = "workspace-subcase" if case.parent_case_id else "workspace-case"
-        item = QtWidgets.QTreeWidgetItem([case.name])
-        item.setIcon(
-            0,
-            get_icon(icon_name, BLUE_DARK if is_active else INK_MUTED, size=16),
-        )
+        is_root = case.parent_case_id is None
+        icon_name = "workspace-case" if is_root else "workspace-subcase"
+        # Cases (root) and subcases are visually emphasised:
+        #   - bold text always
+        #   - larger icon and font for root cases
+        #   - dark-blue ink for label
+        #   - subtle blue tint as background to mark hierarchy; stronger when active
+        #   - "▸ " prefix on subcases for a quick visual cue
+        label_prefix = "" if is_root else "▸ "
+        item = QtWidgets.QTreeWidgetItem([f"{label_prefix}{case.name}"])
+        icon_size = 20 if is_root else 18
+        item.setIcon(0, get_icon(icon_name, BLUE_DARK, size=icon_size))
         item.setData(0, ROLE_NODE_KIND, "case")
         item.setData(0, ROLE_ID, case.id)
-        if is_active:
-            font = item.font(0)
-            font.setBold(True)
-            item.setFont(0, font)
-            item.setBackground(0, QtGui.QBrush(QtGui.QColor(BLUE_SOFT)))
-        item.setToolTip(0, f"Case: {case.name}" + (" (active)" if is_active else ""))
+
+        font = item.font(0)
+        font.setBold(True)
+        if is_root:
+            font.setPointSizeF(font.pointSizeF() + 1.5)
+        else:
+            font.setPointSizeF(font.pointSizeF() + 0.5)
+        item.setFont(0, font)
+        item.setForeground(0, QtGui.QBrush(QtGui.QColor(BLUE_DARK)))
+
+        # Background tint: deeper for active, subtler (almost white) otherwise.
+        bg_hex = BLUE_SOFT if is_active else "#eef5fb"
+        item.setBackground(0, QtGui.QBrush(QtGui.QColor(bg_hex)))
+
+        item.setToolTip(
+            0,
+            f"{'Case' if is_root else 'Subcase'}: {case.name}"
+            + (" (active)" if is_active else ""),
+        )
 
         analyses_by_pose: dict[str | None, list] = {}
         for analysis in case.analyses:
