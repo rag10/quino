@@ -63,6 +63,37 @@ def test_solve_sketch_returns_report_without_raising() -> None:
     assert any(m.code == "sketch_solved" for m in report.messages)
 
 
+def test_apply_constraint_from_entity_keeps_solver_rejected_constraint() -> None:
+    app = _make_app()
+    app.create_sketch()
+    p1 = app.create_sketch_point("0 mm", "0 mm", "A")
+    p2 = app.create_sketch_point("0 mm", "10 mm", "B")
+    line_id = app.create_sketch_line_segment(p1, p2, "L1")
+    app.create_sketch_constraint("fix", [p1])
+    app.create_sketch_constraint("fix", [p2])
+
+    cid = app.apply_sketch_constraint_from_entities("horizontal", [line_id])
+
+    sketch = app.project.sketch
+    assert cid in sketch.constraints
+    assert sketch.constraints[cid].type.value == "horizontal"
+    assert sketch.solve_error is not None
+
+
+def test_horizontal_constraint_accepts_line_entity_reference() -> None:
+    app = _make_app()
+    app.create_sketch()
+    p1 = app.create_sketch_point("0 mm", "0 mm", "A")
+    p2 = app.create_sketch_point("10 mm", "5 mm", "B")
+    line_id = app.create_sketch_line_segment(p1, p2, "L1")
+
+    cid = app.create_sketch_constraint("horizontal", [line_id])
+
+    sketch = app.project.sketch
+    assert cid in sketch.constraints
+    assert sketch.constraints[cid].references == [p1, p2]
+
+
 def test_delete_sketch_entity_removes_point_and_dependents() -> None:
     app = _make_app()
     app.create_sketch()

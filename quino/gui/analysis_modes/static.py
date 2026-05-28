@@ -73,7 +73,14 @@ class StaticModeController(AnalysisModeController):
             self.main_window._open_compare_runs_dialog,
             tooltip="Compare persisted runs for this analysis.",
         )
-        self.main_window._add_toolbar_block(bar, [[reactions_action, plot_action, compare_action]], "View")
+        metrics_action = self._toolbar_action(
+            "Metrics",
+            "bar",
+            ORANGE,
+            lambda: self.main_window._open_metrics_manager_for_analysis(self._current_analysis),
+            tooltip="Configure metrics for this analysis.",
+        )
+        self.main_window._add_toolbar_block(bar, [[reactions_action, plot_action, compare_action, metrics_action]], "View")
         self.toolbar = bar
         return bar
 

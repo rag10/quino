@@ -6,7 +6,7 @@ from quino.gui.analysis_modes import register_mode
 from quino.gui.analysis_modes._base import AnalysisModeController
 from quino.gui.dialogs.add_sweep_dialog import AddSweepDialog
 from quino.gui.dialogs.sweep_editor_dialog import SweepEditorDialog
-from quino.gui.theme import BLUE, GREEN, INK_MUTED, VIOLET
+from quino.gui.theme import BLUE, GREEN, INK_MUTED, ORANGE, VIOLET
 from quino.gui.widgets.report_panel import ReportPanelWidget
 from quino.gui.widgets.sweep_slider_row import SweepSliderRow
 from quino.services.kinematic_cache import KinematicCache
@@ -67,7 +67,14 @@ class KinematicModeController(AnalysisModeController):
             self.main_window._open_compare_runs_dialog,
             tooltip="Compare persisted runs for this analysis.",
         )
-        self.main_window._add_toolbar_block(bar, [[self.action_show_traj, plot_action, compare_action]], "View")
+        metrics_action = self._toolbar_action(
+            "Metrics",
+            "bar",
+            ORANGE,
+            lambda: self.main_window._open_metrics_manager_for_analysis(self._current_analysis),
+            tooltip="Configure metrics for this analysis.",
+        )
+        self.main_window._add_toolbar_block(bar, [[self.action_show_traj, plot_action, compare_action, metrics_action]], "View")
         self.toolbar = bar
         return bar
 

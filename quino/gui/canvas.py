@@ -194,6 +194,8 @@ _SEGMENT_PAIR_MODES: frozenset[str] = frozenset({
 })
 
 _LINE_TWO_POINT_CONSTRAINT_MODES: frozenset[str] = frozenset({
+    CanvasMode.CREATE_SKETCH_HORIZONTAL,
+    CanvasMode.CREATE_SKETCH_VERTICAL,
     CanvasMode.CREATE_SKETCH_DISTANCE,
     CanvasMode.CREATE_SKETCH_HORIZONTAL_DISTANCE,
     CanvasMode.CREATE_SKETCH_VERTICAL_DISTANCE,
@@ -994,7 +996,6 @@ class MechanismCanvas(QtWidgets.QWidget):
             constraint_id = self.app_service.create_sketch_constraint(
                 SketchConstraintType.FIX.value,
                 [sketch_point.id],
-                rollback_on_failure=True,
             )
             self.entitySelected.emit(constraint_id)
             self.modelChanged.emit("Created sketch fix constraint")
@@ -1406,7 +1407,6 @@ class MechanismCanvas(QtWidgets.QWidget):
             constraint_id = self.app_service.create_sketch_constraint(
                 constraint_type,
                 list(self._pending_distance_constraint_refs),
-                rollback_on_failure=True,
             )
             constraint = self.app_service.project.sketch.constraints.get(constraint_id)
             if constraint is not None:
@@ -1473,7 +1473,6 @@ class MechanismCanvas(QtWidgets.QWidget):
             constraint_id = self.app_service.create_sketch_constraint(
                 SketchConstraintType.FIX.value,
                 [clicked_sketch_point.entity_id],
-                rollback_on_failure=True,
             )
             self.entitySelected.emit(constraint_id)
             self.modelChanged.emit("Created sketch fix constraint")
@@ -4964,7 +4963,6 @@ class MechanismCanvas(QtWidgets.QWidget):
                 constraint_type_str, point_ids,
                 value=value_str,
                 entity_references=entity_refs if entity_refs else None,
-                rollback_on_failure=True,
             )
         except Exception as exc:
             QtWidgets.QMessageBox.warning(self, "Constraint error", str(exc))
@@ -5007,13 +5005,11 @@ class MechanismCanvas(QtWidgets.QWidget):
                 self.app_service.create_sketch_constraint(
                     SketchConstraintType.HORIZONTAL.value,
                     [point_a_id, point_b_id],
-                    rollback_on_failure=True,
                 )
             elif abs(x2 - x1) <= tolerance:
                 self.app_service.create_sketch_constraint(
                     SketchConstraintType.VERTICAL.value,
                     [point_a_id, point_b_id],
-                    rollback_on_failure=True,
                 )
         except Exception:
             return

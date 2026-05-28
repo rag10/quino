@@ -2538,6 +2538,47 @@ def test_coincident_point_then_line_uses_entity_reference() -> None:
     assert canvas._sensor_marker_ids == [p3]
 
 
+def test_horizontal_vertical_constraint_from_fixed_free_line_click() -> None:
+    from quino.domain.types import SketchEntityType
+    from quino.gui.canvas import CanvasMode, CanvasSketchEntity, MechanismCanvas
+
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    app_svc = ApplicationService()
+    app_svc.new_project("test")
+    canvas = MechanismCanvas(app_svc)
+
+    app_svc.create_sketch()
+    p1 = app_svc.create_sketch_point("0 mm", "0 mm")
+    p2 = app_svc.create_sketch_point("100 mm", "50 mm")
+    line_id = app_svc.create_sketch_line_segment(p1, p2)
+    app_svc.create_sketch_constraint("fix", [p1], rollback_on_failure=True)
+
+    seg = app_svc.get_entity(line_id)
+    entity = CanvasSketchEntity(
+        entity_id=seg.id,
+        name="",
+        entity_type=SketchEntityType.LINE_SEGMENT,
+        point_ids=[seg.start_point_id, seg.end_point_id],
+        visible=True,
+        construction=False,
+    )
+
+    canvas.set_interaction_mode("sketch")
+    canvas.set_mode(CanvasMode.CREATE_SKETCH_HORIZONTAL)
+    canvas._handle_constraint_input_click(None, entity, n_pts=2, n_ent=0)
+
+    sketch = app_svc.project.sketch
+    assert sketch is not None
+    assert any(constraint.type.value == "horizontal" for constraint in sketch.constraints.values())
+    assert sketch.entities[p2].y.text == "0 mm"
+
+    canvas.set_mode(CanvasMode.CREATE_SKETCH_VERTICAL)
+    canvas._handle_constraint_input_click(None, entity, n_pts=2, n_ent=0)
+
+    assert any(constraint.type.value == "vertical" for constraint in sketch.constraints.values())
+    assert sketch.entities[p2].x.text == "0 mm"
+
+
 def test_canvas_pose_readonly_blocks_drag() -> None:
     qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     app = ApplicationService()

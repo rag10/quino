@@ -7,6 +7,7 @@ from PySide6 import QtWidgets
 
 from quino.gui.analysis_modes import register_mode
 from quino.gui.analysis_modes._base import AnalysisModeController
+from quino.gui.theme import ORANGE
 from quino.gui.widgets.report_panel import ReportPanelWidget
 from quino.pose.geometry import pose_to_state_overlay
 from quino.services.workspace_runner import load_result_artifact
@@ -30,9 +31,16 @@ class DynamicModeController(AnalysisModeController):
             "Run",
         )
         self.main_window._add_toolbar_sep(self.toolbar)
+        metrics_action = self._toolbar_action(
+            "Metrics",
+            "bar",
+            ORANGE,
+            lambda: self.main_window._open_metrics_manager_for_analysis(self._current_analysis),
+            tooltip="Configure metrics for this analysis.",
+        )
         self.main_window._add_toolbar_block(
             self.toolbar,
-            [[self.main_window.action_new_plot, self.main_window.action_compare_runs, self.main_window.action_show_trajectories]],
+            [[metrics_action, self.main_window.action_new_plot, self.main_window.action_compare_runs, self.main_window.action_show_trajectories]],
             "View",
         )
         self.main_window._add_toolbar_sep(self.toolbar)

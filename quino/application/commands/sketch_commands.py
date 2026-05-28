@@ -387,7 +387,6 @@ class SketchCommands:
                 refs,
                 value=value,
                 entity_references=entity_refs or None,
-                rollback_on_failure=True,
             )
         if ctype in {
             SketchConstraintType.PARALLEL,
@@ -395,14 +394,13 @@ class SketchCommands:
             SketchConstraintType.EQUAL_LENGTH,
             SketchConstraintType.ANGLE,
         }:
-            return self.create_sketch_constraint(ctype.value, refs, value=value, rollback_on_failure=True)
+            return self.create_sketch_constraint(ctype.value, refs, value=value)
         if ctype in {SketchConstraintType.ON_CIRCLE, SketchConstraintType.TANGENT}:
             return self.create_sketch_constraint(
                 ctype.value,
                 refs,
                 value=value,
                 entity_references=entity_refs,
-                rollback_on_failure=True,
             )
         raise ValueError(f"Unsupported sketch constraint type: {constraint_type}")
 
@@ -428,6 +426,10 @@ class SketchCommands:
         # ON_CIRCLE type stays available for loading legacy JSON.
         if constraint_enum is SketchConstraintType.ON_CIRCLE:
             constraint_enum = SketchConstraintType.COINCIDENT
+        if constraint_enum in {SketchConstraintType.HORIZONTAL, SketchConstraintType.VERTICAL} and len(normalized_refs) == 1:
+            entity = sketch.entities.get(normalized_refs[0])
+            if isinstance(entity, (SketchLineSegment, SketchInfiniteLine)):
+                normalized_refs = self._line_point_ids(entity)
         self._validate_sketch_constraint_references(constraint_enum, normalized_refs, normalized_entity_refs)
         scalar_value = None
         if constraint_enum in {

@@ -190,8 +190,8 @@ def _ws_with_joint() -> tuple[Workspace, Case]:
     body2 = _body("thigh", name="thigh")
     joint = Joint(
         id="j1", name="knee", type=JointType.REVOLUTE,
-        endpoint_a=JointEndpoint(kind=JointEndpointKind.BODY_MARKER, body_id="ground", marker_id="m1"),
-        endpoint_b=JointEndpoint(kind=JointEndpointKind.BODY_MARKER, body_id="thigh", marker_id="m1"),
+        endpoint_a=JointEndpoint(kind=JointEndpointKind.MARKER, body_id="ground", marker_id="m1"),
+        endpoint_b=JointEndpoint(kind=JointEndpointKind.MARKER, body_id="thigh", marker_id="m1"),
     )
     # Marker ids collide; rename body2's markers so the model is consistent.
     body2.markers[0].id = "m3"
