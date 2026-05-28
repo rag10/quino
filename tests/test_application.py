@@ -406,6 +406,92 @@ def test_update_property_on_jointed_marker_translates_direct_counterpart() -> No
     assert _mm(app, moved_marker2.y.expression) == pytest.approx(5.0)
 
 
+def test_update_property_on_jointed_marker_translates_transitive_marker_component() -> None:
+    app = make_app()
+    body1 = app.create_body("Mass1", [MarkerInput("0 mm", "0 mm", "P1")])
+    body2 = app.create_body("Mass2", [MarkerInput("0 mm", "0 mm", "P2")])
+    body3 = app.create_body("Mass3", [MarkerInput("0 mm", "0 mm", "P3")])
+    marker1 = next(marker.id for marker in app._find_body(body1).markers if marker.name == "P1")
+    marker2 = next(marker.id for marker in app._find_body(body2).markers if marker.name == "P2")
+    marker3 = next(marker.id for marker in app._find_body(body3).markers if marker.name == "P3")
+    app.create_joint(
+        "Joint12",
+        "revolute",
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body1, marker_id=marker1),
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body2, marker_id=marker2),
+    )
+    app.create_joint(
+        "Joint23",
+        "revolute",
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body2, marker_id=marker2),
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body3, marker_id=marker3),
+    )
+
+    app.update_property(marker1, "x", PropertyValueInput("expression", "25 mm"))
+    app.update_property(marker1, "y", PropertyValueInput("expression", "5 mm"))
+
+    report = app.validate_model()
+    for marker_id in (marker1, marker2, marker3):
+        marker = app._find_entity(marker_id)
+        assert _mm(app, marker.x.expression) == pytest.approx(25.0)
+        assert _mm(app, marker.y.expression) == pytest.approx(5.0)
+    assert not any(message.code == "joint_gap" for message in report.messages)
+
+
+def test_update_property_on_marker_translates_transitive_slider_component() -> None:
+    app = make_app()
+    body1 = app.create_body("Mass1", [MarkerInput("0 mm", "0 mm", "P1")])
+    body2 = app.create_body("Mass2", [MarkerInput("0 mm", "0 mm", "P2")])
+    slider_id = app.create_slider("Guide", SliderInput("0 mm", "0 mm", "0 deg", "-20 mm", "20 mm"))
+    marker1 = next(marker.id for marker in app._find_body(body1).markers if marker.name == "P1")
+    marker2 = next(marker.id for marker in app._find_body(body2).markers if marker.name == "P2")
+    app.create_joint(
+        "Joint12",
+        "revolute",
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body1, marker_id=marker1),
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body2, marker_id=marker2),
+    )
+    app.connect_marker_to_slider(marker2, slider_id, name="Slider_P2", align="none")
+
+    app.update_property(marker1, "x", PropertyValueInput("expression", "25 mm"))
+    app.update_property(marker1, "y", PropertyValueInput("expression", "5 mm"))
+
+    marker2_obj = app._find_entity(marker2)
+    slider = app._find_entity(slider_id)
+    report = app.validate_model()
+    assert _mm(app, marker2_obj.x.expression) == pytest.approx(25.0)
+    assert _mm(app, marker2_obj.y.expression) == pytest.approx(5.0)
+    assert _mm(app, slider.origin_x.expression) == pytest.approx(25.0)
+    assert _mm(app, slider.origin_y.expression) == pytest.approx(5.0)
+    assert not any(message.code in {"joint_gap", "slider_joint_gap"} for message in report.messages)
+
+
+def test_moving_slider_origin_translates_transitive_marker_component() -> None:
+    app = make_app()
+    body1 = app.create_body("Mass1", [MarkerInput("0 mm", "0 mm", "P1")])
+    body2 = app.create_body("Mass2", [MarkerInput("0 mm", "0 mm", "P2")])
+    slider_id = app.create_slider("Guide", SliderInput("0 mm", "0 mm", "0 deg", "-20 mm", "20 mm"))
+    marker1 = next(marker.id for marker in app._find_body(body1).markers if marker.name == "P1")
+    marker2 = next(marker.id for marker in app._find_body(body2).markers if marker.name == "P2")
+    app.create_joint(
+        "Joint12",
+        "revolute",
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body1, marker_id=marker1),
+        JointEndpointInput(JointEndpointKind.MARKER, body_id=body2, marker_id=marker2),
+    )
+    app.connect_marker_to_slider(marker2, slider_id, name="Slider_P2", align="none")
+
+    app.update_property(slider_id, "origin_x", PropertyValueInput("expression", "25 mm"))
+    app.update_property(slider_id, "origin_y", PropertyValueInput("expression", "5 mm"))
+
+    report = app.validate_model()
+    for marker_id in (marker1, marker2):
+        marker = app._find_entity(marker_id)
+        assert _mm(app, marker.x.expression) == pytest.approx(25.0)
+        assert _mm(app, marker.y.expression) == pytest.approx(5.0)
+    assert not any(message.code in {"joint_gap", "slider_joint_gap"} for message in report.messages)
+
+
 def test_units_validation_rejects_angle_in_length_slot() -> None:
     app = make_app()
     body_id = app.create_bar("Crank", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("L1", "0 mm", "B"))

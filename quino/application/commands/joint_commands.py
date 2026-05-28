@@ -151,6 +151,105 @@ class JointCommands:
             if joint.endpoint_a.marker_id == marker_id or joint.endpoint_b.marker_id == marker_id
         ]
 
+    def _endpoint_graph_node(self, endpoint: JointEndpoint) -> tuple[str, str] | None:
+        if endpoint.kind is JointEndpointKind.MARKER and endpoint.marker_id is not None:
+            return ("marker", endpoint.marker_id)
+        if endpoint.kind is JointEndpointKind.SLIDER and endpoint.slider_id is not None:
+            return ("slider", endpoint.slider_id)
+        return None
+
+    def _joint_connected_component(
+        self,
+        *,
+        marker_id: str | None = None,
+        slider_id: str | None = None,
+        blocked_nodes: set[tuple[str, str]] | None = None,
+    ) -> tuple[set[str], set[str]]:
+        if (marker_id is None) == (slider_id is None):
+            raise ValueError("Provide exactly one marker_id or slider_id")
+        start = ("marker", marker_id) if marker_id is not None else ("slider", slider_id)
+        blocked = blocked_nodes or set()
+        if start in blocked:
+            return set(), set()
+
+        project = self._ctx.effective_project()
+        visited: set[tuple[str, str]] = set()
+        pending: list[tuple[str, str]] = [start]
+        while pending:
+            node = pending.pop()
+            if node in visited or node in blocked:
+                continue
+            visited.add(node)
+            for joint in project.model.joints:
+                nodes = [
+                    endpoint_node
+                    for endpoint_node in (
+                        self._endpoint_graph_node(joint.endpoint_a),
+                        self._endpoint_graph_node(joint.endpoint_b),
+                    )
+                    if endpoint_node is not None
+                ]
+                if node not in nodes:
+                    continue
+                for neighbour in nodes:
+                    if neighbour not in visited and neighbour not in blocked:
+                        pending.append(neighbour)
+
+        marker_ids = {node_id for kind, node_id in visited if kind == "marker"}
+        slider_ids = {node_id for kind, node_id in visited if kind == "slider"}
+        return marker_ids, slider_ids
+
+    def _translate_slider_origin_expression(
+        self,
+        slider: Slider,
+        delta_x_mm: float,
+        delta_y_mm: float,
+    ) -> None:
+        slider.origin_x.expression = self._offset_expression(
+            slider.origin_x.expression,
+            delta_x_mm,
+            "mm",
+        )
+        slider.origin_y.expression = self._offset_expression(
+            slider.origin_y.expression,
+            delta_y_mm,
+            "mm",
+        )
+
+    def _translate_connected_component(
+        self,
+        *,
+        marker_id: str | None = None,
+        slider_id: str | None = None,
+        delta_x_mm: float,
+        delta_y_mm: float,
+        moved_marker_ids: set[str] | None = None,
+        moved_slider_ids: set[str] | None = None,
+        blocked_nodes: set[tuple[str, str]] | None = None,
+    ) -> tuple[set[str], set[str]]:
+        marker_ids, slider_ids = self._joint_connected_component(
+            marker_id=marker_id,
+            slider_id=slider_id,
+            blocked_nodes=blocked_nodes,
+        )
+        moved_markers = moved_marker_ids if moved_marker_ids is not None else set()
+        moved_sliders = moved_slider_ids if moved_slider_ids is not None else set()
+        for linked_marker_id in marker_ids:
+            if linked_marker_id in moved_markers:
+                continue
+            linked_marker = self._ctx.find_entity(linked_marker_id)
+            if isinstance(linked_marker, Marker):
+                self._translate_marker_expression(linked_marker, delta_x_mm, delta_y_mm)
+                moved_markers.add(linked_marker_id)
+        for linked_slider_id in slider_ids:
+            if linked_slider_id in moved_sliders:
+                continue
+            linked_slider = self._ctx.find_entity(linked_slider_id)
+            if isinstance(linked_slider, Slider):
+                self._translate_slider_origin_expression(linked_slider, delta_x_mm, delta_y_mm)
+                moved_sliders.add(linked_slider_id)
+        return moved_markers, moved_sliders
+
     def _translate_direct_joint_counterparts(
         self,
         marker_id: str,
@@ -158,40 +257,16 @@ class JointCommands:
         delta_x_mm: float,
         delta_y_mm: float,
     ) -> set[str]:
-        # Direct-only: move immediate counterparts of marker_id, no BFS transitives
+        # Kept under the old name because BodyCommands uses this context hook.
+        # The behavior is intentionally transitive: all markers/sliders joined
+        # to the dragged marker are one editable spatial component.
         moved_marker_ids: set[str] = {marker_id}
-        moved_slider_ids: set[str] = set()
-        for joint in joints:
-            ep_a, ep_b = joint.endpoint_a, joint.endpoint_b
-            counterpart_marker_id: str | None = None
-            counterpart_slider_id: str | None = None
-            if ep_a.kind is JointEndpointKind.MARKER and ep_a.marker_id == marker_id:
-                if ep_b.kind is JointEndpointKind.MARKER:
-                    counterpart_marker_id = ep_b.marker_id
-                elif ep_b.kind is JointEndpointKind.SLIDER:
-                    counterpart_slider_id = ep_b.slider_id
-            elif ep_b.kind is JointEndpointKind.MARKER and ep_b.marker_id == marker_id:
-                if ep_a.kind is JointEndpointKind.MARKER:
-                    counterpart_marker_id = ep_a.marker_id
-                elif ep_a.kind is JointEndpointKind.SLIDER:
-                    counterpart_slider_id = ep_a.slider_id
-            else:
-                continue
-            if counterpart_marker_id and counterpart_marker_id not in moved_marker_ids:
-                linked_marker = self._ctx.find_entity(counterpart_marker_id)
-                if isinstance(linked_marker, Marker):
-                    self._translate_marker_expression(linked_marker, delta_x_mm, delta_y_mm)
-                    moved_marker_ids.add(counterpart_marker_id)
-            if counterpart_slider_id and counterpart_slider_id not in moved_slider_ids:
-                linked_slider = self._ctx.find_entity(counterpart_slider_id)
-                if isinstance(linked_slider, Slider):
-                    self._translate_slider_expression(
-                        linked_slider,
-                        delta_x_mm,
-                        delta_y_mm,
-                        moved_marker_ids=moved_marker_ids,
-                    )
-                    moved_slider_ids.add(counterpart_slider_id)
+        moved_marker_ids, _ = self._translate_connected_component(
+            marker_id=marker_id,
+            delta_x_mm=delta_x_mm,
+            delta_y_mm=delta_y_mm,
+            moved_marker_ids=moved_marker_ids,
+        )
         return moved_marker_ids
 
     # ------------------------------------------------------------------
@@ -291,21 +366,14 @@ class JointCommands:
         delta_y_mm: float,
         moved_marker_ids: set[str] | None = None,
     ) -> None:
-        slider.origin_x.expression = self._offset_expression(
-            slider.origin_x.expression,
-            delta_x_mm,
-            "mm",
-        )
-        slider.origin_y.expression = self._offset_expression(
-            slider.origin_y.expression,
-            delta_y_mm,
-            "mm",
-        )
-        self._translate_markers_linked_to_slider(
-            slider.id,
-            delta_x_mm,
-            delta_y_mm,
-            moved_marker_ids or set(),
+        moved_sliders = {slider.id}
+        self._translate_slider_origin_expression(slider, delta_x_mm, delta_y_mm)
+        self._translate_connected_component(
+            slider_id=slider.id,
+            delta_x_mm=delta_x_mm,
+            delta_y_mm=delta_y_mm,
+            moved_marker_ids=moved_marker_ids or set(),
+            moved_slider_ids=moved_sliders,
         )
 
     # ------------------------------------------------------------------
@@ -345,8 +413,13 @@ class JointCommands:
         self._ctx.snapshot()
         slider.origin_x = new_x
         slider.origin_y = new_y
-        moved_marker_ids: set[str] = set()
-        self._translate_markers_linked_to_slider(slider.id, delta_x, delta_y, moved_marker_ids)
+        self._translate_connected_component(
+            slider_id=slider.id,
+            delta_x_mm=delta_x,
+            delta_y_mm=delta_y,
+            moved_slider_ids={slider.id},
+        )
+        self._ctx.sync_all_special_com_markers()
         self._ctx.invalidate_pose_state()
 
     def _rotate_slider(self, slider_id: str, angle_expression: str) -> None:
@@ -389,8 +462,18 @@ class JointCommands:
             return
         self._ctx.snapshot()
         slider.angle = new_angle
+        moved_marker_ids: set[str] = set()
         for marker, marker_x, marker_y in marker_targets:
-            self._set_marker_absolute_mm(marker, marker_x, marker_y)
+            current_x = self._evaluate_scalar_as(marker.x, "mm")
+            current_y = self._evaluate_scalar_as(marker.y, "mm")
+            self._translate_connected_component(
+                marker_id=marker.id,
+                delta_x_mm=marker_x - current_x,
+                delta_y_mm=marker_y - current_y,
+                moved_marker_ids=moved_marker_ids,
+                blocked_nodes={("slider", slider.id)},
+            )
+        self._ctx.sync_all_special_com_markers()
         self._ctx.invalidate_pose_state()
 
     # ------------------------------------------------------------------
@@ -868,6 +951,18 @@ class JointCommands:
                 slider.travel_max = ScalarProperty(
                     expression=travel_max, unit="mm", expected_dimension=Dimension.LENGTH
                 )
+        moved_marker_ids: set[str] = set()
+        moved_slider_ids: set[str] = {slider.id}
         for marker, marker_x, marker_y in marker_targets:
-            self._set_marker_absolute_mm(marker, marker_x, marker_y)
+            current_x = self._evaluate_scalar_as(marker.x, "mm")
+            current_y = self._evaluate_scalar_as(marker.y, "mm")
+            self._translate_connected_component(
+                marker_id=marker.id,
+                delta_x_mm=marker_x - current_x,
+                delta_y_mm=marker_y - current_y,
+                moved_marker_ids=moved_marker_ids,
+                moved_slider_ids=moved_slider_ids,
+                blocked_nodes={("slider", slider.id)},
+            )
+        self._ctx.sync_all_special_com_markers()
         self._ctx.invalidate_pose_state()
