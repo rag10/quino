@@ -1249,20 +1249,6 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_poses_panel_mutated(self) -> None:
         self._mark_project_dirty()
 
-    def _on_run_study_requested(self, study_id: str) -> None:
-        project_dir = self._current_project_path.parent if self._current_project_path else None
-        try:
-            self.app_service.workspace.run_study(
-                study_id,
-                self.app_service.simulation_runner,
-                project_dir=project_dir,
-            )
-            self._mark_project_dirty()
-            if hasattr(self, "workflow_panel"):
-                self.workflow_panel.refresh()
-        except Exception as exc:
-            QtWidgets.QMessageBox.critical(self, "Run Study Failed", str(exc))
-
     def _on_analysis_selected(self, analysis_id: str) -> None:
         ws = self.app_service._workspace
         if ws is None:
@@ -2669,69 +2655,69 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tree.blockSignals(False)
 
     def _inject_case_override_hints(self, selected_entity_id: str | None) -> None:
-        """Render under each overridden property row a "Root case: ..." (or
-        "Inherited from <CaseName>: ...") hint, plus a Reset button when the
-        override is local to the active case (hence resettable from here)."""
+        """Render link-state hints under each property row of the selected entity,
+        derived from ``case.overlay``.
+
+        - If the entity is local to the active case: every cascadable property gets a
+          "Local to this case" hint (not resettable; nothing to restore).
+        - If the entity is inherited and the property is unlinked (override):
+          hint shows the parent value, with a Reset button to re-link.
+        - If the entity is inherited and the property is still linked, no hint.
+        """
         if not selected_entity_id:
             return
-        project = self.app_service.project
         ws = self.app_service._workspace
-        if project is None or ws is None or not ws.selected_case_id:
+        if ws is None or not ws.selected_case_id:
             return
         case = ws.cases.get(ws.selected_case_id)
-        if case is None:
+        if case is None or case.overlay is None:
             return
+        entry = case.overlay.entities.get(selected_entity_id)
+        if entry is None:
+            return
+        parent_case = ws.cases.get(case.parent_case_id) if case.parent_case_id else None
+        parent_label = parent_case.name if parent_case is not None else "parent"
+
+        from quino.services.cascade_property_registry import cascadable_properties
+        from quino.services.case_overlay_validator import _entity_lookup
+
+        lookup = _entity_lookup(case)
+        ent_info = lookup.get(selected_entity_id)
+        if ent_info is None:
+            return
+        entity, cls = ent_info
         try:
-            from quino.services.case_diff_summary import build_case_diff_summary
-        except ImportError:
+            base_props = set(cascadable_properties(cls))
+        except ValueError:
+            base_props = set()
+        # Include dynamic paths the engine cascades (parameters.*, metadata.values.*).
+        dyn_props: set[str] = set()
+        parameters = getattr(entity, "parameters", None)
+        if isinstance(parameters, dict):
+            dyn_props.update(f"parameters.{k}" for k in parameters)
+        metadata = getattr(entity, "metadata", None)
+        values = getattr(metadata, "values", None) if metadata is not None else None
+        if isinstance(values, dict):
+            dyn_props.update(f"metadata.values.{k}" for k in values)
+
+        if entry.origin == "local":
+            for prop in sorted(base_props | dyn_props):
+                self.inspector.set_property_hint(prop, "Local to this case", resettable=False)
             return
-        summary = build_case_diff_summary(project, case)
-        # Map source_case_id -> case object for name lookup.
-        case_by_id = ws.cases
-        # Invariant override hints
-        for entry in summary.invariant_overrides:
-            parts = entry.path.split("/")
-            if len(parts) < 3 or parts[1] != selected_entity_id:
+
+        parent_entity = None
+        if parent_case is not None:
+            parent_entity = _entity_lookup(parent_case).get(selected_entity_id, (None, None))[0]
+        for prop in sorted(base_props | dyn_props):
+            if prop in entry.linked_properties or prop.split(".", 1)[0] in entry.linked_properties:
                 continue
-            prop_path = parts[2]
-            baseline_str = self._baseline_value_for_path(project, entry.path)
-            if baseline_str is None:
-                baseline_str = f"{entry.value:.4g} {entry.unit}".strip()
-            if entry.is_local:
-                if entry.shadows_inherited:
-                    source_case = case_by_id.get(entry.source_case_id)
-                    parent_label = source_case.name if source_case else "parent"
-                    hint = f"Root case: {baseline_str}  ·  Local override shadows {parent_label}"
-                else:
-                    hint = f"Root case: {baseline_str}"
-                self.inspector.set_property_hint(prop_path, hint, resettable=True)
-            else:
-                source_case = case_by_id.get(entry.source_case_id)
-                src_label = source_case.name if source_case else "ancestor"
-                hint = f"Inherited from {src_label}: {baseline_str} (current applies)"
-                self.inspector.set_property_hint(prop_path, hint, resettable=False)
-        # Reference-override hints (e.g. block parameter string overrides).
-        for entry in summary.reference_overrides:
-            if entry.entity_id != selected_entity_id:
-                continue
-            # Skip internal/positional refs for blocks
-            if entry.prop in {"_position"}:
-                continue
-            # For block string overrides we stored {parameters: {key: value}}
-            # so render each nested key with the appropriate path.
-            if entry.prop == "parameters" and isinstance(entry.value, dict):
-                for k in entry.value:
-                    prop_path = f"block_param/{entry.entity_id}/{k}"
-                    if entry.is_local:
-                        self.inspector.set_property_hint(
-                            prop_path, "Local override (case)", resettable=True,
-                        )
-                    else:
-                        source_case = case_by_id.get(entry.source_case_id)
-                        src_label = source_case.name if source_case else "ancestor"
-                        self.inspector.set_property_hint(
-                            prop_path, f"Inherited from {src_label}", resettable=False,
-                        )
+            parent_val_str = self._format_property_value(parent_entity, prop) if parent_entity is not None else None
+            hint = (
+                f"Overrides {parent_label}: {parent_val_str}"
+                if parent_val_str is not None
+                else f"Overrides {parent_label}"
+            )
+            self.inspector.set_property_hint(prop, hint, resettable=True)
 
     def _on_inspector_override_reset(self, path: str) -> None:
         """Handle the inspector's Reset-override button.
@@ -2855,75 +2841,25 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.inspector.layout.addStretch()
 
-    def _baseline_value_for_path(self, project, path: str) -> str | None:
-        """Read the baseline (pre-override) value at *path* for the inspector hint.
-
-        Supports the same path domains as the composer's resolvers
-        (bodies/markers/sliders/joints/drivers/springs/loads/springs_meta).
-        Returns a formatted "<value> <unit>" string, or None if the path
-        cannot be resolved.
-        """
+    def _format_property_value(self, entity: object | None, path: str) -> str | None:
+        """Return a short string for the entity's property at ``path``, supporting
+        nested paths (``metadata.values.<k>``, ``parameters.<k>``, ``style.color``)."""
+        if entity is None:
+            return None
         try:
-            parts = path.split("/")
-            if len(parts) < 3:
-                return None
-            domain, entity_id, prop = parts[0], parts[1], parts[2]
-            obj = None
-            if domain == "bodies":
-                obj = next((b for b in project.model.bodies if b.id == entity_id), None)
-            elif domain == "markers":
-                for body in project.model.bodies:
-                    for m in body.markers:
-                        if m.id == entity_id:
-                            obj = m
-                            break
-                    if obj is not None:
-                        break
-            elif domain == "sliders":
-                obj = next((s for s in project.model.sliders if s.id == entity_id), None)
-            elif domain == "joints":
-                joint = next((j for j in project.model.joints if j.id == entity_id), None)
-                if joint is None:
-                    return None
-                key = {
-                    "friction_coulomb": "friction_coulomb",
-                    "friction_viscous": "friction_viscous",
-                    "friction_pin_radius": "friction_pin_radius",
-                    "angle_limit_positive": "angle_limit_positive_deg",
-                    "angle_limit_negative": "angle_limit_negative_deg",
-                }.get(prop, prop)
-                val = joint.metadata.values.get(key)
-                if val is None:
+            target: object = entity
+            for part in path.split("."):
+                if isinstance(target, dict):
+                    target = target.get(part)
+                else:
+                    target = getattr(target, part, None)
+                if target is None:
                     return "(unset)"
-                return f"{float(val):.4g}"
-            elif domain == "drivers":
-                obj = next((d for d in project.model.drivers if d.id == entity_id), None)
-            elif domain == "springs":
-                obj = next((s for s in project.model.springs if s.id == entity_id), None)
-            elif domain == "springs_meta":
-                spring = next((s for s in project.model.springs if s.id == entity_id), None)
-                if spring is None:
-                    return None
-                val = spring.metadata.values.get(prop)
-                if val is None:
-                    return "(unset)"
-                return f"{float(val):.4g}"
-            elif domain == "loads":
-                obj = next((l for l in project.model.loads if l.id == entity_id), None)
-            elif domain == "parameters":
-                p = next((p for p in project.parameters if p.id == entity_id), None)
-                if p is None:
-                    return None
-                return p.expression
-
-            if obj is None:
-                return None
-            scalar = getattr(obj, prop, None)
-            if scalar is None:
-                return "(unset)"
-            if hasattr(scalar, "expression"):
-                return scalar.expression
-            return str(scalar)
+            if hasattr(target, "expression"):
+                return str(getattr(target, "expression"))
+            if isinstance(target, float):
+                return f"{target:.4g}"
+            return str(target)
         except Exception:
             return None
 
@@ -2950,82 +2886,59 @@ class MainWindow(QtWidgets.QMainWindow):
             item.setFont(0, font)
             it += 1
 
-        project = self.app_service.project
         ws = self.app_service._workspace
-        if project is None or ws is None or ws.selected_case_id is None:
+        if ws is None or ws.selected_case_id is None:
             return
         case = ws.cases.get(ws.selected_case_id)
-        if case is None:
+        if case is None or case.overlay is None:
             return
-
-        try:
-            from quino.services.case_diff_summary import build_case_diff_summary
-        except ImportError:
-            return
-        summary = build_case_diff_summary(project, case)
-        if not (summary.invariant_overrides or summary.additions or summary.removals
-                or summary.reference_overrides):
-            return
-
-        case_by_id = ws.cases
-
-        # Aggregate per-entity: most specific tag wins (added > removed > override).
-        # Each value: (color_hex, italic, tooltip)
-        per_entity: dict[str, tuple[str, bool, str]] = {}
-
-        def _set(entity_id: str, color: str, italic: bool, tip: str) -> None:
-            per_entity[entity_id] = (color, italic, tip)
 
         from quino.gui._palette import (
-            ADDED_GREEN, ADDED_GREEN_SOFT,
-            OVERRIDE_ORANGE, OVERRIDE_ORANGE_SOFT,
-            REMOVED_RED, REMOVED_RED_SOFT,
+            ADDED_GREEN,
+            OVERRIDE_ORANGE,
+            REMOVED_RED,
         )
 
-        for entry in summary.invariant_overrides:
-            parts = entry.path.split("/")
-            if len(parts) >= 2:
-                eid = parts[1]
-                source = case_by_id.get(entry.source_case_id)
-                src_label = source.name if source else entry.source_case_id
-                if entry.is_local:
-                    tip = f"Property override (local): {entry.path}"
-                    if entry.shadows_inherited:
-                        tip += "  ·  shadows an inherited override"
-                    _set(eid, OVERRIDE_ORANGE, False, tip)
-                else:
-                    _set(eid, OVERRIDE_ORANGE_SOFT, True,
-                         f"Inherited override from {src_label}: {entry.path}")
+        # entity_id -> (color_hex, italic, tooltip)
+        per_entity: dict[str, tuple[str, bool, str]] = {}
 
-        for entry in summary.reference_overrides:
-            tip = f"Override {entry.prop}"
-            source = case_by_id.get(entry.source_case_id)
-            src_label = source.name if source else entry.source_case_id
-            if entry.is_local:
-                _set(entry.entity_id, OVERRIDE_ORANGE, False, tip + " (local)")
-            else:
-                _set(entry.entity_id, OVERRIDE_ORANGE_SOFT, True,
-                     f"Inherited {entry.prop} from {src_label}")
+        # Local entities (added in this case).
+        for ent_id, entry in case.overlay.entities.items():
+            if entry.origin == "local":
+                per_entity[ent_id] = (ADDED_GREEN, False, "Added in this case")
+            elif entry.linked_properties is not None and entry.origin == "inherited":
+                # Any unlinked cascadable property means the row has an override.
+                # We use a coarse signal here: if any linked prop is missing vs the
+                # full cascadable set the engine would assign at fork, flag it.
+                # Cheaper proxy: highlight when linked_properties is not "everything".
+                # That is acceptable as a visual cue; precise per-prop diff goes in
+                # the inspector hint.
+                pass
 
-        for entry in summary.removals:
-            if entry.kind != "entity":
+        # Inherited entities deleted by this case.
+        for ent_id in case.overlay.deleted_inherited_entity_ids:
+            per_entity[ent_id] = (REMOVED_RED, True, "Deleted from parent in this case")
+
+        # Inherited entities with overrides (any unlinked cascadable prop).
+        from quino.services.cascade_property_registry import cascadable_properties
+        from quino.services.case_overlay_validator import _entity_lookup
+        lookup = _entity_lookup(case)
+        for ent_id, entry in case.overlay.entities.items():
+            if entry.origin != "inherited" or ent_id in per_entity:
                 continue
-            source = case_by_id.get(entry.source_case_id)
-            src_label = source.name if source else entry.source_case_id
-            if entry.is_local:
-                _set(str(entry.payload), REMOVED_RED, False, "Removed by this case")
-            else:
-                _set(str(entry.payload), REMOVED_RED_SOFT, True,
-                     f"Removed by ancestor {src_label}")
-
-        for entry in summary.additions:
-            source = case_by_id.get(entry.source_case_id)
-            src_label = source.name if source else entry.source_case_id
-            if entry.is_local:
-                _set(entry.entity_id, ADDED_GREEN, False, "Added by this case")
-            else:
-                _set(entry.entity_id, ADDED_GREEN_SOFT, True,
-                     f"Inherited (added by {src_label})")
+            ent_info = lookup.get(ent_id)
+            if ent_info is None:
+                continue
+            _ent, cls = ent_info
+            try:
+                full = set(cascadable_properties(cls))
+            except ValueError:
+                full = set()
+            base_linked = {p.split(".", 1)[0] for p in entry.linked_properties}
+            if not full.issubset(base_linked):
+                per_entity[ent_id] = (
+                    OVERRIDE_ORANGE, False, "Property override in this case",
+                )
 
         # Walk tree and apply.
         it = QtWidgets.QTreeWidgetItemIterator(self.tree)

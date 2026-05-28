@@ -63,16 +63,29 @@ def cascadable_properties(cls: Type) -> frozenset[str]:
 
 def is_cascadable_property(cls: Type, prop: str) -> bool:
     """
-    Check if a property is cascadable for the given type.
+    Check if a property path is cascadable for the given type.
 
-    Args:
-        cls: The model class.
-        prop: The property name.
-
-    Returns:
-        True if the property is cascadable, False otherwise.
+    Recognises nested paths the engine cascades dynamically:
+      - ``parameters.<key>``         (block instance parameters)
+      - ``metadata.values.<key>``    (per-entity metadata bag)
+      - ``style.<key>``              (visual override)
+    The root name is validated against the registry.
     """
     try:
-        return prop in cascadable_properties(cls)
+        registry = cascadable_properties(cls)
     except ValueError:
         return False
+    if prop in registry:
+        return True
+    root = prop.split(".", 1)[0]
+    if root == "parameters" and root not in registry:
+        # BlockInstance parameters live in a dict; treat any "parameters.<k>" as cascadable.
+        from quino.domain.blocks import BlockInstance
+        if cls is BlockInstance:
+            return True
+        return False
+    if root in {"metadata", "style"}:
+        # metadata.values.<k> and style.<k> are cascadable regardless of dataclass field
+        # presence — both are bags addressed by nested key.
+        return True
+    return root in registry

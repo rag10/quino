@@ -125,3 +125,36 @@ def test_example_registry_skips_json_with_duplicate_name(tmp_path) -> None:
     registry = ExampleRegistry(examples_dir=tmp_path)
     names = [e.name for e in registry.list_examples()]
     assert names.count("Four Bar") == 1
+
+
+def test_all_example_files_load_and_overlays_validate() -> None:
+    """Every examples/*.quino.json must load as a Workspace at schema 0.3.0
+    and every child case must satisfy validate_overlay against its parent.
+
+    Acceptance criterion from docs/PLAN-02.md §5.
+    """
+    from pathlib import Path
+
+    from quino.serialization.json_io import JsonMapper
+    from quino.services.case_overlay_validator import validate_overlay
+
+    repo_root = Path(__file__).resolve().parents[1]
+    examples_dir = repo_root / "examples"
+    example_files = sorted(examples_dir.glob("*.quino.json"))
+    assert example_files, "No example files found under examples/"
+
+    failures: list[str] = []
+    for path in example_files:
+        try:
+            ws = JsonMapper().load(str(path))
+        except Exception as exc:
+            failures.append(f"{path.name}: load failed — {exc}")
+            continue
+        assert ws.schema_version == "0.3.0", f"{path.name}: not 0.3.0"
+        for case in ws.cases.values():
+            parent = ws.cases.get(case.parent_case_id) if case.parent_case_id else None
+            try:
+                validate_overlay(case, parent)
+            except Exception as exc:
+                failures.append(f"{path.name} :: case {case.id}: {exc}")
+    assert not failures, "Example/overlay validation failed:\n" + "\n".join(failures)

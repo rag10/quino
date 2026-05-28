@@ -336,6 +336,42 @@ def test_reparent_case_rejects_cycle():
         engine.reparent_case(parent.id, new_parent_case_id=c2)
 
 
+def test_reparent_case_marks_runs_stale():
+    from quino.domain.workspace import Analysis, Run
+
+    ws, parent = _ws_with_root_case()
+    engine = CascadingEngine(ws)
+    c1 = engine.fork_case(parent.id, "C1")
+    c2 = engine.fork_case(parent.id, "C2")
+    grandchild = engine.fork_case(c1, "GC")
+
+    # Seed each fork-affected case with one ok run.
+    for case_id in (c1, grandchild):
+        case = ws.cases[case_id]
+        analysis = Analysis(id=f"a-{case_id}", name="dyn", analysis_type="dynamic")
+        case.analyses.append(analysis)
+        case.runs.append(
+            Run(id=f"r-{case_id}", analysis_id=analysis.id, created_at="2026-01-01T00:00:00Z",
+                status="ok")
+        )
+
+    # Sibling c2 should not be affected.
+    case_c2 = ws.cases[c2]
+    analysis_c2 = Analysis(id="a-c2", name="dyn", analysis_type="dynamic")
+    case_c2.analyses.append(analysis_c2)
+    case_c2.runs.append(
+        Run(id="r-c2", analysis_id=analysis_c2.id, created_at="2026-01-01T00:00:00Z", status="ok")
+    )
+
+    result = engine.reparent_case(c1, new_parent_case_id=None)
+    assert c1 in result.stale_case_ids
+    assert grandchild in result.stale_case_ids
+    assert ws.cases[c1].runs[0].status == "stale"
+    assert ws.cases[grandchild].runs[0].status == "stale"
+    # Sibling untouched.
+    assert ws.cases[c2].runs[0].status == "ok"
+
+
 # ---------------------------------------------------------------------------
 # Task 13: end-to-end engine validation
 # ---------------------------------------------------------------------------

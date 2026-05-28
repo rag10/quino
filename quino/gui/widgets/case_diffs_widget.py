@@ -105,7 +105,7 @@ def _ancestor_chain(ws, case_id: str) -> list:
 
 
 class CaseDiffsWidget(QtWidgets.QWidget):
-    """Shows entity-level diffs of the active case versus each ancestor up to baseline."""
+    """Shows entity-level diffs of the active case versus each ancestor up to the root case."""
 
     def __init__(self, app_service: ApplicationService, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -162,16 +162,16 @@ class CaseDiffsWidget(QtWidgets.QWidget):
             return
 
         if case.parent_case_id is None:
-            self._header.setText(f"<b>{case.name}</b> — baseline case (no parent)")
+            self._header.setText(f"<b>{case.name}</b> — root case (no parent)")
             self._tree.addTopLevelItem(
-                QtWidgets.QTreeWidgetItem(["This is the baseline case", "", ""])
+                QtWidgets.QTreeWidgetItem(["This is a root case", "", ""])
             )
             return
 
         self._header.setText(f"<b>{case.name}</b> — diffs vs ancestors")
 
         ancestors = _ancestor_chain(ws, case.id)
-        # We compare each consecutive pair: baseline→…→parent→active
+        # We compare each consecutive pair: root→…→parent→active
         pairs: list[tuple] = []
         chain_with_active = ancestors + [case]
         for i in range(len(chain_with_active) - 1):

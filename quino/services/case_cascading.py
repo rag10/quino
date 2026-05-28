@@ -15,6 +15,7 @@ from quino.domain.workspace import (
     Workspace,
     create_default_pose,
 )
+from quino.services.cascade_property_category import is_model_affecting
 from quino.services.cascade_property_registry import cascadable_properties
 from quino.services.case_overlay_validator import _entity_lookup, rebuild_overlay
 from quino.services.run_invalidation import mark_runs_stale_for_case
@@ -88,13 +89,8 @@ def _connection_key(conn: Connection) -> ConnectionKey:
 
 
 def _is_model_affecting_property(prop: str) -> bool:
-    if prop == "position":
-        return False
-    if prop in {"name", "visible"}:
-        return False
-    if prop == "style" or prop.startswith("style."):
-        return False
-    return True
+    """Thin wrapper kept for callers within this module."""
+    return is_model_affecting(prop)
 
 
 class CascadingEngine:
@@ -472,7 +468,8 @@ class CascadingEngine:
 
     # --------------------------------------------------------------- reparent
 
-    def reparent_case(self, case_id: str, new_parent_case_id: str | None) -> None:
+    def reparent_case(self, case_id: str, new_parent_case_id: str | None) -> OperationResult:
+        result = OperationResult()
         case = self._ws.cases[case_id]
         if new_parent_case_id is not None and self._would_form_cycle(case_id, new_parent_case_id):
             raise ValueError(
@@ -488,6 +485,16 @@ class CascadingEngine:
                 self._ws.root_case_ids.append(case_id)
         else:
             rebuild_overlay(case, self._ws.cases[new_parent_case_id])
+
+        # Reparenting can change the effective model of the case and any
+        # descendant whose inheritance chain is rerouted; invalidate them.
+        affected = {case_id}
+        affected.update(self._all_descendants(case_id))
+        for cid in affected:
+            self._mark_modified(result, cid, model_affecting=True)
+        result.applied_changes.append(f"{case_id}:reparent:{new_parent_case_id}")
+        self._apply_staleness(result, "case reparented")
+        return result
 
     # ---------------------------------------------------------------- helpers
 
@@ -672,6 +679,17 @@ class CascadingEngine:
 
     def _direct_children(self, case_id: str) -> list[str]:
         return [c.id for c in self._ws.cases.values() if c.parent_case_id == case_id]
+
+    def _all_descendants(self, case_id: str) -> set[str]:
+        out: set[str] = set()
+        frontier = list(self._direct_children(case_id))
+        while frontier:
+            current = frontier.pop()
+            if current in out:
+                continue
+            out.add(current)
+            frontier.extend(self._direct_children(current))
+        return out
 
     def _would_form_cycle(self, case_id: str, candidate_parent_id: str) -> bool:
         current: str | None = candidate_parent_id
