@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import queue
 import threading
 from dataclasses import asdict, dataclass, field
@@ -10,6 +11,7 @@ from PySide6 import QtCore
 
 from quino.analysis.registry import get_runner_for_type
 from quino.domain.workspace import Run
+from quino.pose.geometry import create_reference_pose
 from quino.services.workspace_runner import _CaseAsProject, _next_run_id
 
 
@@ -130,8 +132,8 @@ class RunExecutor(QtCore.QObject):
             initial_pose = None
             if getattr(analysis, "pose_id", None):
                 candidate = next((p for p in case.poses if p.id == analysis.pose_id), None)
-                if candidate is not None and getattr(candidate, "body_poses", None):
-                    initial_pose = candidate
+                if candidate is not None:
+                    initial_pose = _complete_pose_for_project(project, candidate)
             result = runner.run(
                 project,
                 analysis,
@@ -178,3 +180,12 @@ class RunExecutor(QtCore.QObject):
         if case is None:
             return None
         return next((r for r in case.runs if r.id == run_id), None)
+
+
+def _complete_pose_for_project(project, pose):
+    complete = create_reference_pose(project, pose_id=pose.id, name=pose.name)
+    complete.metadata = copy.deepcopy(pose.metadata)
+    complete.initial_velocities = dict(getattr(pose, "initial_velocities", {}))
+    for body_id, body_pose in getattr(pose, "body_poses", {}).items():
+        complete.body_poses[body_id] = copy.deepcopy(body_pose)
+    return complete

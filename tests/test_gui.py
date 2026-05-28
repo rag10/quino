@@ -9,6 +9,7 @@ from PySide6 import QtCore, QtGui, QtTest, QtWidgets
 from quino.application.examples import build_double_pendulum_example
 from quino.application.service import ApplicationService
 from quino.domain.inputs import JointEndpointInput, MarkerInput, PropertyValueInput, SliderInput
+from quino.domain.model import BodyPose
 from quino.domain.types import JointEndpointKind
 from quino.gui.canvas import CanvasMode
 from quino.gui.main_window import MainWindow
@@ -2629,6 +2630,32 @@ def test_analysis_mode_button_disabled_when_no_analysis_selected(qtbot):
     ws = app._workspace
     assert ws.selected_analysis_id is None
     assert not window._mode_analysis_btn.isEnabled()
+
+
+def test_selecting_analysis_uses_bound_pose_on_canvas(qtbot):
+    qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    svc = ApplicationService()
+    svc.new_workspace("test")
+    body_id = svc.create_bar("Bar", MarkerInput("0 mm", "0 mm", "A"), MarkerInput("100 mm", "0 mm", "B"))
+    pose = svc.workspace.create_pose("Pose 45")
+    pose.body_poses[body_id] = BodyPose(body_id=body_id, x=0.0, y=0.0, angle=math.pi / 4.0)
+    analysis = svc.workspace.create_analysis(
+        "A",
+        analysis_type="dynamic",
+        workspace_pose_id=pose.id,
+    )
+    svc.set_working_context(case_id=svc._workspace.root_case_ids[0])
+    svc.set_selected_pose(None)
+    svc.set_selected_analysis(None)
+
+    window = MainWindow(svc)
+    qtbot.addWidget(window)
+    window._on_analysis_selected(analysis.id)
+    qt_app.processEvents()
+
+    assert svc._workspace.selected_pose_id == pose.id
+    assert svc.get_current_pose_id() == pose.id
+    assert window._last_simulation_state[f"{body_id}.angle"] == pytest.approx(math.pi / 4.0)
 
 
 def test_workflow_badge_shows_breadcrumb(qtbot):

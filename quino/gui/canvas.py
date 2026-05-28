@@ -1187,10 +1187,8 @@ class MechanismCanvas(QtWidgets.QWidget):
             if case is not None:
                 badges.append((f"Case: {case.name}", "#2255aa"))
         if self._interaction_mode == "pose" and ws.selected_pose_id:
-            wp = next(
-                (p for case in ws.cases.values() for p in case.poses if p.id == ws.selected_pose_id),
-                None,
-            )
+            case = ws.cases.get(ws.selected_case_id) if ws.selected_case_id else None
+            wp = next((p for p in case.poses if p.id == ws.selected_pose_id), None) if case is not None else None
             if wp is not None:
                 tag = " [default]" if wp.is_default else ""
                 badges.append((f"Pose: {wp.name}{tag}", "#c75b12"))

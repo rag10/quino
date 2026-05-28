@@ -390,7 +390,7 @@ class DynamicModeController(AnalysisModeController):
             if index < len(self.main_window._last_simulation_result.time):
                 time_value = self.main_window._last_simulation_result.time[index]
         else:
-            initial_pose = self.main_window.app_service.get_simulation_initial_pose()
+            initial_pose = self._analysis_initial_pose()
             if initial_pose is not None:
                 frame = pose_to_state_overlay(initial_pose)
         self.main_window._last_simulation_state = frame
@@ -399,6 +399,15 @@ class DynamicModeController(AnalysisModeController):
         if self.main_window.app_service.project is not None:
             self.main_window._populate_canvas_summary(self.main_window.app_service.project)
         self.main_window._update_interaction_state()
+
+    def _analysis_initial_pose(self):
+        if self._current_analysis is None:
+            return self.main_window.app_service.get_simulation_initial_pose()
+        ws = self.main_window.app_service._workspace
+        case = self.main_window.app_service.current_case()
+        if ws is None or case is None or self._current_analysis.pose_id is None:
+            return self.main_window.app_service.get_simulation_initial_pose()
+        return next((p for p in case.poses if p.id == self._current_analysis.pose_id), None)
 
     def update_timeline_controls(self) -> None:
         result = self.main_window._last_simulation_result

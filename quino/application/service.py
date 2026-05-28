@@ -725,7 +725,24 @@ class ApplicationService:
                     status="failed",
                     error_message="; ".join(errors),
                 )
-            return runner.run(composed, analysis, initial_pose=None)
+            initial_pose = None
+            if getattr(analysis, "pose_id", None):
+                candidate = next(
+                    (pose for pose in target_case.poses if pose.id == analysis.pose_id),
+                    None,
+                )
+                if candidate is not None:
+                    from quino.pose.geometry import create_reference_pose
+                    initial_pose = create_reference_pose(
+                        composed,
+                        pose_id=candidate.id,
+                        name=candidate.name,
+                    )
+                    initial_pose.metadata = copy.deepcopy(candidate.metadata)
+                    initial_pose.initial_velocities = dict(candidate.initial_velocities)
+                    for body_id, body_pose in candidate.body_poses.items():
+                        initial_pose.body_poses[body_id] = copy.deepcopy(body_pose)
+            return runner.run(composed, analysis, initial_pose=initial_pose)
         except NotImplementedError as exc:
             return AnalysisResult(
                 analysis_id=analysis_id,

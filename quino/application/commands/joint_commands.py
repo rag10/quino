@@ -346,19 +346,6 @@ class JointCommands:
                 seen.add(marker_id)
         return markers
 
-    def _translate_markers_linked_to_slider(
-        self,
-        slider_id: str,
-        delta_x_mm: float,
-        delta_y_mm: float,
-        moved_marker_ids: set[str],
-    ) -> None:
-        for linked_marker in self._markers_linked_to_slider(slider_id):
-            if linked_marker.id in moved_marker_ids:
-                continue
-            self._translate_marker_expression(linked_marker, delta_x_mm, delta_y_mm)
-            moved_marker_ids.add(linked_marker.id)
-
     def _translate_slider_expression(
         self,
         slider: Slider,

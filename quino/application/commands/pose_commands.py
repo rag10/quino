@@ -13,9 +13,9 @@ from quino.pose.runner import PoseRunner
 class PoseCommands:
     """Command-service for pose operations.
 
-    Owns the current-pose selection state (`_current_pose_id`). Project-scoped
-    state such as `simulation_initial_pose_id` and per-pose `initial_velocities`
-    live on the domain `Project`/`Pose` objects, not here.
+    Pose state is local to the active case.  The workspace selected_pose_id is
+    the source of truth; _current_pose_id is kept only as a legacy mirror for
+    callers that still ask this service directly.
     """
 
     def __init__(self, ctx: ServiceContext, runner: PoseRunner) -> None:
@@ -30,11 +30,24 @@ class PoseCommands:
             raise ValueError("No active project")
         return project
 
+    @property
+    def _workspace(self):
+        return self._ctx.workspace_provider()
+
+    def _active_case(self):
+        case = self._ctx.current_case_provider()
+        if case is None:
+            raise ValueError("No active case")
+        return case
+
     # --- internal state hooks (called from ApplicationService) ---------------
 
     def clear_current(self) -> None:
         """Drop the current pose selection (used on new/load/undo/redo)."""
         self._current_pose_id = None
+        ws = self._workspace
+        if ws is not None:
+            ws.selected_pose_id = None
 
     def cleanup_driver_velocities(self, removed_driver_ids: set[str]) -> None:
         project = self._ctx.project_provider()
@@ -48,9 +61,9 @@ class PoseCommands:
     # --- helpers ------------------------------------------------------------
 
     def _next_pose_name(self) -> str:
-        project = self._project
-        existing = {pose.name for pose in project.poses}
-        index = len(project.poses) + 1
+        case = self._active_case()
+        existing = {pose.name for pose in case.poses}
+        index = len(case.poses) + 1
         while f"Pose {index}" in existing:
             index += 1
         return f"Pose {index}"
@@ -78,54 +91,73 @@ class PoseCommands:
         return build_reference_pose(project, pose_id=self._ctx.ids.new("pose"), name=name)
 
     def list_poses(self) -> list[Pose]:
-        project = self._project
-        return [p for p in project.poses if not p.is_default]
+        case = self._active_case()
+        return [p for p in case.poses if not p.is_default]
 
     def get_pose(self, pose_id: str) -> Pose | None:
-        project = self._project
-        return next((pose for pose in project.poses if pose.id == pose_id), None)
+        case = self._active_case()
+        return next((pose for pose in case.poses if pose.id == pose_id), None)
 
     def get_current_pose_id(self) -> str | None:
-        return self._current_pose_id
+        ws = self._workspace
+        case = self._ctx.current_case_provider()
+        pose_id = ws.selected_pose_id if ws is not None else self._current_pose_id
+        if pose_id is None or case is None:
+            return None
+        pose = next((p for p in case.poses if p.id == pose_id), None)
+        if pose is None or getattr(pose, "is_default", False):
+            return None
+        self._current_pose_id = pose_id
+        return pose_id
 
     def set_current_pose_id(self, pose_id: str | None) -> None:
+        ws = self._workspace
         if pose_id is None:
             self._current_pose_id = None
+            if ws is not None:
+                ws.selected_pose_id = None
             return
-        if self.get_pose(pose_id) is None:
+        pose = self.get_pose(pose_id)
+        if pose is None:
             raise ValueError(f"Unknown pose id: {pose_id}")
-        self._current_pose_id = pose_id
+        if getattr(pose, "is_default", False):
+            self._current_pose_id = None
+        else:
+            self._current_pose_id = pose_id
+        if ws is not None:
+            ws.selected_pose_id = pose_id
 
     def get_current_pose(self) -> Pose | None:
-        if self._current_pose_id is None:
+        pose_id = self.get_current_pose_id()
+        if pose_id is None:
             return None
-        return self.get_pose(self._current_pose_id)
+        return self.get_pose(pose_id)
 
     def set_current_pose(self, pose: Pose | None) -> None:
         """Replace the body_poses of the current pose with the given values."""
         if pose is None:
             return
-        project = self._project
+        case = self._active_case()
         completed = self.complete_pose(pose)
         target = self.get_current_pose()
         if target is None:
-            project.poses.append(completed)
-            self._current_pose_id = completed.id
+            case.poses.append(completed)
+            self.set_current_pose_id(completed.id)
             return
         target.body_poses = copy.deepcopy(completed.body_poses)
         self._mark_runs_stale_for_current_pose("pose edited")
 
     def create_pose(self, name: str | None = None, *, set_current: bool = True) -> Pose:
-        project = self._project
+        case = self._active_case()
         pose = self.create_reference_pose(name=name or self._next_pose_name())
         self._ctx.snapshot()
-        project.poses.append(pose)
+        case.poses.append(pose)
         if set_current:
-            self._current_pose_id = pose.id
+            self.set_current_pose_id(pose.id)
         return pose
 
     def duplicate_pose(self, pose_id: str, *, set_current: bool = True) -> Pose:
-        project = self._project
+        case = self._active_case()
         source = self.get_pose(pose_id)
         if source is None:
             raise ValueError(f"Unknown pose id: {pose_id}")
@@ -137,9 +169,9 @@ class PoseCommands:
             initial_velocities=dict(source.initial_velocities),
             metadata=copy.deepcopy(source.metadata),
         )
-        project.poses.append(clone)
+        case.poses.append(clone)
         if set_current:
-            self._current_pose_id = clone.id
+            self.set_current_pose_id(clone.id)
         return clone
 
     def rename_pose(self, pose_id: str, name: str) -> None:
@@ -155,25 +187,29 @@ class PoseCommands:
         pose.name = name
 
     def delete_pose(self, pose_id: str) -> None:
-        project = self._project
+        case = self._active_case()
         if self.get_pose(pose_id) is None:
             return
         self._ctx.snapshot()
-        project.poses = [pose for pose in project.poses if pose.id != pose_id]
-        if self._current_pose_id == pose_id:
+        case.poses = [pose for pose in case.poses if pose.id != pose_id]
+        ws = self._workspace
+        if self._current_pose_id == pose_id or (ws is not None and ws.selected_pose_id == pose_id):
             # Fall back to the first user pose (skip the reference/default).
-            remaining_user = [p for p in project.poses if not getattr(p, "is_default", False)]
-            self._current_pose_id = remaining_user[0].id if remaining_user else None
+            remaining_user = [p for p in case.poses if not getattr(p, "is_default", False)]
+            next_id = remaining_user[0].id if remaining_user else None
+            self._current_pose_id = next_id
+            if ws is not None:
+                ws.selected_pose_id = next_id
 
     def reset_current_pose_to_reference(self) -> Pose:
         """Reset the current pose body positions back to the reference geometry."""
-        project = self._project
+        case = self._active_case()
         reference = self.create_reference_pose()
         current = self.get_current_pose()
         if current is None:
             self._ctx.snapshot()
-            project.poses.append(reference)
-            self._current_pose_id = reference.id
+            case.poses.append(reference)
+            self.set_current_pose_id(reference.id)
             return reference
         current.body_poses = reference.body_poses
         self._mark_runs_stale_for_current_pose("pose reset to reference")
@@ -184,19 +220,18 @@ class PoseCommands:
         return project.simulation_initial_pose_id
 
     def set_simulation_initial_pose(self, pose_id: str | None) -> None:
-        project = self._project
         if pose_id is not None and self.get_pose(pose_id) is None:
             raise ValueError(f"Unknown pose id: {pose_id}")
-        if project.simulation_initial_pose_id == pose_id:
+        if self.get_simulation_initial_pose_id() == pose_id:
             return
         self._ctx.snapshot()
-        project.simulation_initial_pose_id = pose_id
+        self._project.simulation_initial_pose_id = pose_id
 
     def get_simulation_initial_pose(self) -> Pose | None:
-        project = self._project
-        if project.simulation_initial_pose_id is None:
+        pose_id = self.get_simulation_initial_pose_id()
+        if pose_id is None:
             return None
-        return self.get_pose(project.simulation_initial_pose_id)
+        return self.get_pose(pose_id)
 
     def set_driver_initial_velocity(self, driver_id: str, value: float | None) -> None:
         """Set/clear the initial velocity for a driver on the *current* pose."""
@@ -219,9 +254,10 @@ class PoseCommands:
 
     def set_initial_pose_from_current(self) -> None:
         """Mark the current pose as the simulation initial pose."""
-        if self._current_pose_id is None:
+        pose_id = self.get_current_pose_id()
+        if pose_id is None:
             raise ValueError("No current pose is available")
-        self.set_simulation_initial_pose(self._current_pose_id)
+        self.set_simulation_initial_pose(pose_id)
 
     def clear_initial_pose(self) -> None:
         self.set_simulation_initial_pose(None)
@@ -232,11 +268,12 @@ class PoseCommands:
         settings: PoseSolveSettings | None = None,
     ) -> PoseSolveResult:
         project = self._project
+        case = self._active_case()
         working_pose = self.get_current_pose()
         if working_pose is None:
             reference = self.create_reference_pose()
-            project.poses.append(reference)
-            self._current_pose_id = reference.id
+            case.poses.append(reference)
+            self.set_current_pose_id(reference.id)
             working_pose = reference
         result = self._runner.solve(
             project,
@@ -261,7 +298,7 @@ class PoseCommands:
         ws = self._ctx.workspace_provider()
         if ws is None:
             return 0
-        pose_id = self._current_pose_id
+        pose_id = self.get_current_pose_id()
         if pose_id is None:
             return 0
         from quino.services.run_invalidation import mark_runs_stale_for_pose

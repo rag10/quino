@@ -105,6 +105,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tree_items: dict[str, QtWidgets.QTreeWidgetItem] = {}
         self._expanded_tree_keys: set[str] = set()
         self._pose_constraints: dict[str, PoseConstraint] = {}
+        self._pose_constraints_loaded_pose_id: str | None = None
         self._pose_pick_state: dict | None = None
         self._active_prescribe_action: QtGui.QAction | None = None
         self._pending_pose_drag: tuple[str, float, float] | None = None
@@ -1196,18 +1197,20 @@ class MainWindow(QtWidgets.QMainWindow):
         # geometry of the current scope as a read-only snapshot.
         ws = self.app_service._workspace
         if ws is not None and ws.selected_pose_id is not None:
-            wp = next(
-                (p for case in ws.cases.values() for p in case.poses if p.id == ws.selected_pose_id),
-                None,
-            )
+            case = ws.cases.get(ws.selected_case_id) if ws.selected_case_id else None
+            wp = next((p for p in case.poses if p.id == ws.selected_pose_id), None) if case else None
             if wp is not None and wp.is_default:
                 self._pose_constraints.clear()
+                self._pose_constraints_loaded_pose_id = None
                 self.canvas.set_pose_constraints([])
                 return
         if self.app_service.get_current_pose() is not None:
-            # Always reload from the active pose: prescribes are per-pose
-            # state and must not bleed across pose switches.
-            self._load_pose_constraints_from_current_pose()
+            # Prescribes are per-pose. Reload only when the editing target
+            # changes; reloading on every solve would drop unsaved edits that
+            # were just staged in memory.
+            current_pose_id = self.app_service.get_current_pose_id()
+            if current_pose_id != self._pose_constraints_loaded_pose_id:
+                self._load_pose_constraints_from_current_pose()
             return
         # If the project already has user poses, select the simulation initial
         # (or the first non-default one) as the editing target. The reference
@@ -1229,6 +1232,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._active_prescribe_action = None
         self._pose_pick_state = None
         self._pose_constraints.clear()
+        self._pose_constraints_loaded_pose_id = None
         self.canvas.set_pose_constraints([])
 
     def _on_poses_panel_current_changed(self, pose_id: str) -> None:
@@ -1260,24 +1264,56 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Run Study Failed", str(exc))
 
     def _on_analysis_selected(self, analysis_id: str) -> None:
-        case = self.app_service.current_case()
-        if case is None:
+        ws = self.app_service._workspace
+        if ws is None:
             return
-        analysis = next((item for item in case.analyses if item.id == analysis_id), None)
-        if analysis is None:
+        owner = None
+        analysis = None
+        active = self.app_service.current_case()
+        cases = ([active] if active is not None else []) + [
+            c for c in ws.cases.values() if active is None or c.id != active.id
+        ]
+        for case in cases:
+            found = next((item for item in case.analyses if item.id == analysis_id), None)
+            if found is not None:
+                owner = case
+                analysis = found
+                break
+        if owner is None or analysis is None:
             return
+        ws.selected_case_id = owner.id
+        ws.selected_analysis_id = analysis.id
+        ws.selected_pose_id = analysis.pose_id
+        if analysis.pose_id is not None:
+            try:
+                self.app_service.set_current_pose_id(analysis.pose_id)
+            except ValueError:
+                pass
         self._set_app_mode("analysis")
         self._set_app_mode_analysis(analysis)
+        self._apply_current_frame()
+        if hasattr(self, "workflow_panel"):
+            self.workflow_panel.refresh()
 
     def _on_run_selected(self, run_id: str) -> None:
-        case = self.app_service.current_case()
-        if case is None:
+        ws = self.app_service._workspace
+        if ws is None:
             return
-        run = next((r for r in case.runs if r.id == run_id), None)
-        if run is None:
+        case = None
+        run = None
+        for candidate in ws.cases.values():
+            found = next((r for r in candidate.runs if r.id == run_id), None)
+            if found is not None:
+                case = candidate
+                run = found
+                break
+        if case is None or run is None:
             return
+        ws.selected_case_id = case.id
         analysis = next((a for a in case.analyses if a.id == run.analysis_id), None)
         if analysis is not None:
+            ws.selected_analysis_id = analysis.id
+            ws.selected_pose_id = analysis.pose_id
             self._set_app_mode("analysis")
             self._set_app_mode_analysis(analysis)
             if self._active_mode_controller is not None:
@@ -1450,6 +1486,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if ws is None:
             return
         ws.selected_case_id = case_id
+        ws.selected_pose_id = None
+        ws.selected_analysis_id = None
+        self.app_service.poses.clear_current()
         self.case_diffs_widget.refresh()
         self._divergences_dock_widget.show_case(case_id)
         case = ws.cases.get(case_id)
@@ -1462,6 +1501,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if ws is None:
             return
         ws.selected_case_id = case_id
+        ws.selected_pose_id = None
+        ws.selected_analysis_id = None
+        self.app_service.poses.clear_current()
         self._set_app_mode("model")
         self._on_working_context_changed()
         if hasattr(self, "case_diffs_widget"):
@@ -1495,14 +1537,19 @@ class MainWindow(QtWidgets.QMainWindow):
         ws = self.app_service._workspace
         if ws is None:
             return
-        pose = next(
-            (p for case in ws.cases.values() for p in case.poses if p.id == pose_id),
-            None,
-        )
-        if pose is None:
+        owner = None
+        pose = None
+        for case in ws.cases.values():
+            found = next((p for p in case.poses if p.id == pose_id), None)
+            if found is not None:
+                owner = case
+                pose = found
+                break
+        if owner is None or pose is None:
             return
         # Default poses show the model geometry in a read-only viewport,
         # non-default poses enter the editable pose mode.
+        ws.selected_case_id = owner.id
         self.app_service.set_selected_pose(pose_id)
         self.canvas.set_pose_readonly(pose.is_default)
         already_in_pose_mode = self._app_mode == "pose"
@@ -3268,6 +3315,7 @@ class MainWindow(QtWidgets.QMainWindow):
             {"key": key, "constraint": self._pose_constraint_to_metadata(constraint)}
             for key, constraint in self._pose_constraints.items()
         ]
+        self._pose_constraints_loaded_pose_id = pose.id
         self.canvas.set_pose_constraints(self._pose_constraints.values())
         self._mark_project_dirty()
         # Prescribes are part of the pose's persisted state — any change
@@ -3284,6 +3332,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _load_pose_constraints_from_current_pose(self) -> None:
         pose = self.app_service.get_current_pose()
         self._pose_constraints.clear()
+        self._pose_constraints_loaded_pose_id = pose.id if pose is not None else None
         if pose is not None:
             raw_items = pose.metadata.values.get("pose_constraints", [])
             if isinstance(raw_items, list):

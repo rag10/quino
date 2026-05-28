@@ -297,10 +297,8 @@ class StaticModeController(AnalysisModeController):
         if pose_id is None:
             self.main_window.canvas.set_kinematic_pose(None)
             return
-        pose = next(
-            (p for case in ws.cases.values() for p in case.poses if p.id == pose_id),
-            None,
-        )
+        case = ws.cases.get(ws.selected_case_id) if ws.selected_case_id else None
+        pose = next((p for p in case.poses if p.id == pose_id), None) if case is not None else None
         if pose is None or not pose.body_poses:
             self.main_window.canvas.set_kinematic_pose(None)
             return

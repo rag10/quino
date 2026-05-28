@@ -194,7 +194,14 @@ class WorkspaceCommands:
             owner_case.runs = [r for r in owner_case.runs if r.analysis_id not in removed_analysis_ids]
         owner_case.poses = [p for p in owner_case.poses if p.id != pose_id]
         if ws.selected_pose_id == pose_id:
-            ws.selected_pose_id = None
+            fallback = next((p.id for p in owner_case.poses if not p.is_default), None)
+            ws.selected_pose_id = fallback
+            try:
+                self._ctx.set_current_pose_id(fallback)
+            except Exception:
+                pass
+        if ws.selected_analysis_id is not None and all(a.id != ws.selected_analysis_id for a in owner_case.analyses):
+            ws.selected_analysis_id = None
 
     def duplicate_pose(self, pose_id: str, *, new_name: str | None = None):
         import copy as _copy
@@ -217,12 +224,26 @@ class WorkspaceCommands:
     def set_selected_pose(self, pose_id: str | None) -> None:
         self._ctx.snapshot()
         ws = self._ensure_workspace()
-        ws.selected_pose_id = pose_id
-        if pose_id is None:
+        if pose_id is not None:
+            owner = self._find_case_for_pose(pose_id)
+            if owner is None:
+                raise ValueError(f"Pose {pose_id!r} not found")
+            ws.selected_case_id = owner.id
+            pose = next(p for p in owner.poses if p.id == pose_id)
+            try:
+                self._ctx.set_current_pose_id(None if pose.is_default else pose_id)
+            except Exception:
+                pass
+            if ws.selected_analysis_id is not None:
+                analysis = next((a for a in owner.analyses if a.id == ws.selected_analysis_id), None)
+                if analysis is None or analysis.pose_id != pose_id:
+                    ws.selected_analysis_id = None
+        else:
             try:
                 self._ctx.set_current_pose_id(None)
             except Exception:
                 pass
+        ws.selected_pose_id = pose_id
 
     # ------------------------------------------------------------------ analysis
 
@@ -244,6 +265,11 @@ class WorkspaceCommands:
         case = ws.cases.get(target_case_id)
         if case is None:
             raise ValueError(f"Case {target_case_id!r} not found")
+        if workspace_pose_id is None:
+            default_pose = next((p for p in case.poses if p.is_default), None)
+            workspace_pose_id = default_pose.id if default_pose is not None else None
+        elif all(p.id != workspace_pose_id for p in case.poses):
+            raise ValueError(f"Pose {workspace_pose_id!r} not found in case {target_case_id!r}")
         analysis_id = self._ctx.ids.new("analysis")
         analysis = Analysis(
             id=analysis_id,
@@ -270,6 +296,8 @@ class WorkspaceCommands:
             if len(case.analyses) < before:
                 # Also remove runs of the deleted analysis.
                 case.runs = [r for r in case.runs if r.analysis_id != analysis_id]
+                if ws.selected_analysis_id == analysis_id:
+                    ws.selected_analysis_id = None
                 break
 
     def duplicate_analysis(self, analysis_id: str, *, new_name: str | None = None) -> Analysis:
@@ -299,6 +327,12 @@ class WorkspaceCommands:
     def set_selected_analysis(self, analysis_id: str | None) -> None:
         self._ctx.snapshot()
         ws = self._ensure_workspace()
+        if analysis_id is not None:
+            owner, analysis = self._find_case_and_analysis(analysis_id)
+            if owner is None or analysis is None:
+                raise ValueError(f"Analysis {analysis_id!r} not found")
+            ws.selected_case_id = owner.id
+            ws.selected_pose_id = analysis.pose_id
         ws.selected_analysis_id = analysis_id
 
     def _clear_invalid_selections(self, ws: Workspace) -> None:
@@ -357,6 +391,33 @@ class WorkspaceCommands:
                 if a.id == analysis_id:
                     return a
         return None
+
+    def _find_case_for_pose(self, pose_id: str) -> Case | None:
+        ws = self._workspace
+        if ws is None:
+            return None
+        active = ws.cases.get(ws.selected_case_id) if ws.selected_case_id else None
+        if active is not None and any(p.id == pose_id for p in active.poses):
+            return active
+        for case in ws.cases.values():
+            if any(p.id == pose_id for p in case.poses):
+                return case
+        return None
+
+    def _find_case_and_analysis(self, analysis_id: str) -> tuple[Case | None, Analysis | None]:
+        ws = self._workspace
+        if ws is None:
+            return None, None
+        active = ws.cases.get(ws.selected_case_id) if ws.selected_case_id else None
+        if active is not None:
+            analysis = next((a for a in active.analyses if a.id == analysis_id), None)
+            if analysis is not None:
+                return active, analysis
+        for case in ws.cases.values():
+            analysis = next((a for a in case.analyses if a.id == analysis_id), None)
+            if analysis is not None:
+                return case, analysis
+        return None, None
 
     def _collect_descendant_case_ids(self, ws: Workspace, case_id: str) -> set[str]:
         descendants: set[str] = set()

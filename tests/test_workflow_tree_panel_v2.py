@@ -290,6 +290,57 @@ def test_create_analysis_lands_on_correct_case_after_fork(app, qtbot):
     assert len(ws.cases[child_id].analyses) == 1
 
 
+def test_double_click_new_user_pose_activates_that_pose(app, qtbot):
+    from quino.gui.panels.workflow_tree_panel import ROLE_ID
+
+    service = ApplicationService()
+    service.new_workspace("Test")
+    pose = service.workspace.create_pose("Pose B")
+    panel = WorkflowTreePanel(service)
+    qtbot.addWidget(panel)
+    panel.refresh()
+
+    root = panel.top_level_items()[0]
+    pose_node = next(
+        item for item in _collect_items(root, kind_filter="pose")
+        if item.data(0, ROLE_ID) == pose.id
+    )
+
+    with qtbot.waitSignal(panel.pose_selected, timeout=1000) as blocker:
+        panel._on_item_double_clicked(pose_node, 0)
+
+    assert blocker.args[0] == pose.id
+
+
+def test_selecting_analysis_selects_its_pose_and_case(app, qtbot):
+    service = ApplicationService()
+    service.new_workspace("Test")
+    ws = service._workspace
+    root_id = ws.root_case_ids[0]
+    engine = CascadingEngine(ws)
+    child_id = engine.fork_case(root_id, "Child")
+    child_pose = service.workspace.create_pose("Child pose", case_id=child_id)
+    analysis = service.workspace.create_analysis(
+        "Child analysis",
+        analysis_type="dynamic",
+        case_id=child_id,
+        workspace_pose_id=child_pose.id,
+    )
+    ws.selected_case_id = root_id
+    ws.selected_pose_id = None
+    ws.selected_analysis_id = None
+
+    panel = WorkflowTreePanel(service)
+    qtbot.addWidget(panel)
+    panel.refresh()
+    panel.analysis_selected.emit(analysis.id)
+    service.workspace.set_selected_analysis(analysis.id)
+
+    assert ws.selected_case_id == child_id
+    assert ws.selected_pose_id == child_pose.id
+    assert ws.selected_analysis_id == analysis.id
+
+
 def test_refresh_preserves_collapsed_state(app, qtbot):
     """Collapsing a node and then refreshing must not re-expand it."""
     from quino.gui.panels.workflow_tree_panel import ROLE_NODE_KIND

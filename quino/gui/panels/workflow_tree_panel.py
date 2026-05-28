@@ -516,8 +516,9 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         elif action == add_pose_action:
             name, ok = QtWidgets.QInputDialog.getText(self, "Add pose", "Pose name:")
             if ok and name.strip():
-                self._service.workspace.create_pose(name.strip(), case_id=case_id)
+                pose = self._service.workspace.create_pose(name.strip(), case_id=case_id)
                 self.refresh()
+                self.pose_selected.emit(pose.id)
         elif action == add_subcase_action:
             name, ok = QtWidgets.QInputDialog.getText(self, "Add subcase", "Subcase name:")
             if ok and name.strip():
@@ -555,8 +556,9 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         if action == add_action:
             name, ok = QtWidgets.QInputDialog.getText(self, "Add pose", "Pose name:")
             if ok and name.strip():
-                self._service.workspace.create_pose(name.strip(), case_id=case_id)
+                pose = self._service.workspace.create_pose(name.strip(), case_id=case_id)
                 self.refresh()
+                self.pose_selected.emit(pose.id)
 
     def _show_subcases_group_menu(self, global_pos: QtCore.QPoint, parent_case_id: str) -> None:
         menu = QtWidgets.QMenu(self)
@@ -624,8 +626,9 @@ class WorkflowTreePanel(QtWidgets.QWidget):
                 self, "Duplicate pose", "New name:", text=default_name
             )
             if ok and name.strip():
-                self._service.duplicate_pose_in_case(pose_id, new_name=name.strip())
+                pose = self._service.duplicate_pose_in_case(pose_id, new_name=name.strip())
                 self.refresh()
+                self.pose_selected.emit(pose.id)
         elif action == delete_action:
             extra = (f"This will also delete {n_analyses} analysis(es) and their runs."
                      if n_analyses else "")
@@ -715,13 +718,14 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         case_id = self._case_id_for_pose(pose_id)
         if not case_id:
             return
-        self._service.workspace.create_analysis(
+        analysis = self._service.workspace.create_analysis(
             name.strip(),
             analysis_type=atype,
             case_id=case_id,
             workspace_pose_id=pose_id,
         )
         self.refresh()
+        self.analysis_selected.emit(analysis.id)
 
     def _case_id_for_pose(self, pose_id: str) -> str | None:
         ws = self._service._workspace
