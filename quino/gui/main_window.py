@@ -84,6 +84,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.app_service._service_context.confirm_run_invalidation = (
             self._confirm_run_invalidation_dialog
         )
+        self.app_service._service_context.resolve_cascade_conflicts = (
+            self._resolve_cascade_conflicts_dialog
+        )
 
         self._selected_entity_id: str | None = None
         self._suspend_property_updates = False
@@ -336,7 +339,7 @@ class MainWindow(QtWidgets.QMainWindow):
         right_panel.addTab(inspector_widget, "Inspector")
 
         self.case_diffs_widget = CaseDiffsWidget(self.app_service)
-        right_panel.addTab(self.case_diffs_widget, "Case Diffs")
+        right_panel.addTab(self.case_diffs_widget, "Compare with parent")
 
         parameters_widget = QtWidgets.QWidget()
         parameters_layout = QtWidgets.QVBoxLayout(parameters_widget)
@@ -1521,7 +1524,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _update_window_title(self) -> None:
         project = self.app_service.project
-        project_name = project.name if project is not None else "No Project"
+        project_name = project.name if project is not None else "No Workspace"
         dirty_marker = "*" if self._project_dirty else ""
         path_hint = f" - {self._current_project_path.name}" if self._current_project_path else ""
         self.setWindowTitle(f"QUINO - {project_name}{dirty_marker}{path_hint}")
@@ -2325,10 +2328,14 @@ class MainWindow(QtWidgets.QMainWindow):
             return False
         return True
 
+    def _resolve_cascade_conflicts_dialog(self, conflicts: list) -> dict[str, str] | None:
+        from quino.gui.dialogs.cascade_conflicts_dialog import resolve_cascade_conflicts_modal
+        return resolve_cascade_conflicts_modal(conflicts, self)
+
     def _new_project(self) -> None:
         if not self._confirm_save_if_dirty():
             return
-        name, accepted = QtWidgets.QInputDialog.getText(self, "New Project", "Project name:", text="Untitled")
+        name, accepted = QtWidgets.QInputDialog.getText(self, "New Workspace", "Workspace name:", text="Untitled")
         if not accepted or not name:
             return
         self.app_service.new_project(name)
@@ -2347,9 +2354,9 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
-            "Open Project",
+            "Open Workspace",
             str(Path.cwd()),
-            "QUINO Project (*.quino.json);;JSON Files (*.json)",
+            "QUINO Workspace (*.quino.json);;JSON Files (*.json)",
         )
         if not path:
             return
@@ -2361,7 +2368,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._clear_simulation_state()
         self.messages.clear()
         self.validation_view.clear()
-        self._append_message(f"Opened project: {path}")
+        self._append_message(f"Opened workspace: {path}")
         self.canvas._view_scale = None
         self.refresh_all()
 
@@ -2376,9 +2383,9 @@ class MainWindow(QtWidgets.QMainWindow):
             return False
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self,
-            "Save Project As",
+            "Save Workspace As",
             str(self._default_save_path()),
-            "QUINO Project (*.quino.json);;JSON Files (*.json)",
+            "QUINO Workspace (*.quino.json);;JSON Files (*.json)",
         )
         if not path:
             return False
@@ -2392,7 +2399,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.app_service.save_project(str(final_path))
         self._current_project_path = final_path
         self._mark_project_clean()
-        self._append_message(f"Saved project: {final_path}")
+        self._append_message(f"Saved workspace: {final_path}")
         return True
 
     def _default_save_path(self) -> Path:
@@ -2415,7 +2422,7 @@ class MainWindow(QtWidgets.QMainWindow):
         answer = QtWidgets.QMessageBox.warning(
             self,
             "Unsaved Changes",
-            "The current project has unsaved changes.\n\nDo you want to save them before continuing?",
+            "The current workspace has unsaved changes.\n\nDo you want to save them before continuing?",
             (
                 QtWidgets.QMessageBox.StandardButton.Save
                 | QtWidgets.QMessageBox.StandardButton.Discard
@@ -2615,7 +2622,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tree.blockSignals(False)
 
     def _inject_case_override_hints(self, selected_entity_id: str | None) -> None:
-        """Render under each overridden property row a "Baseline: ..." (or
+        """Render under each overridden property row a "Root case: ..." (or
         "Inherited from <CaseName>: ...") hint, plus a Reset button when the
         override is local to the active case (hence resettable from here)."""
         if not selected_entity_id:
@@ -2647,9 +2654,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 if entry.shadows_inherited:
                     source_case = case_by_id.get(entry.source_case_id)
                     parent_label = source_case.name if source_case else "parent"
-                    hint = f"Baseline: {baseline_str}  ·  Local override shadows {parent_label}"
+                    hint = f"Root case: {baseline_str}  ·  Local override shadows {parent_label}"
                 else:
-                    hint = f"Baseline: {baseline_str}"
+                    hint = f"Root case: {baseline_str}"
                 self.inspector.set_property_hint(prop_path, hint, resettable=True)
             else:
                 source_case = case_by_id.get(entry.source_case_id)
@@ -3047,7 +3054,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _populate_canvas_summary(self, project) -> None:
         lines = [
-            f"Project: {project.name}",
+            f"Workspace: {project.name}",
             f"Backend: {self.app_service.simulation_runner.describe_backend()}",
             "",
             f"Bodies: {len(project.model.bodies)}",

@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import fields
 from typing import Type
 
+from quino.domain.blocks import BlockInstance
 from quino.domain.model import (
     Body,
     Driver,
@@ -16,7 +17,7 @@ from quino.domain.model import (
 )
 
 # Properties that are *never* cascadable, irrespective of type.
-_GLOBAL_EXCLUSIONS: set[str] = {"id"}
+_GLOBAL_EXCLUSIONS: set[str] = {"id", "instance_id"}
 
 # Per-class extra exclusions: fields that represent topology / contained
 # entities, not values that should propagate to children.
@@ -29,9 +30,10 @@ _PER_CLASS_EXCLUSIONS: dict[type, set[str]] = {
     Load: set(),
     Sensor: {"marker_ids"},
     Spring: set(),
+    BlockInstance: {"position", "internal_diagram", "input_ports", "output_ports"},
 }
 
-_SUPPORTED: tuple[type, ...] = (Body, Joint, Marker, Slider, Driver, Load, Sensor, Spring)
+_SUPPORTED: tuple[type, ...] = (Body, Joint, Marker, Slider, Driver, Load, Sensor, Spring, BlockInstance)
 
 
 def cascadable_properties(cls: Type) -> frozenset[str]:

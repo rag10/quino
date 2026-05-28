@@ -37,18 +37,18 @@ def _setup_divergence(service):
     return child_id
 
 
-def test_dock_lists_warnings_for_selected_case(qtbot):
+def test_dock_does_not_show_persistent_cascade_warnings(qtbot):
     QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     service = ApplicationService()
     child_id = _setup_divergence(service)
     dock = DivergencesDock(service)
     qtbot.addWidget(dock)
     dock.show_case(child_id)
-    rows = dock.row_count()
-    assert rows >= 1
+    assert dock.row_count() == 0
+    assert service._workspace.cases[child_id].metadata.get("divergence_warnings") is None
 
 
-def test_dock_keep_override_clears_warning(qtbot):
+def test_dock_keep_override_is_noop_without_persistent_warnings(qtbot):
     QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     service = ApplicationService()
     child_id = _setup_divergence(service)
@@ -57,4 +57,4 @@ def test_dock_keep_override_clears_warning(qtbot):
     dock.show_case(child_id)
     dock.keep_override(0)
     assert dock.row_count() == 0
-    assert service._workspace.cases[child_id].metadata.get("divergence_warnings", []) == []
+    assert service._workspace.cases[child_id].metadata.get("divergence_warnings") is None

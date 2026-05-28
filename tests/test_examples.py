@@ -101,6 +101,20 @@ def test_umbrella_mechanism_json_loads_and_roundtrips() -> None:
         assert len(app2.project.model.bodies) == 2
 
 
+def test_all_json_examples_load_and_validate_overlays() -> None:
+    from pathlib import Path
+    from quino.services.case_overlay_validator import validate_overlay
+
+    for path in sorted(Path("examples").glob("*.quino.json")):
+        app = ApplicationService()
+        app.load_workspace(path)
+        ws = app._workspace
+        assert ws is not None
+        for case in ws.cases.values():
+            parent = ws.cases.get(case.parent_case_id) if case.parent_case_id else None
+            validate_overlay(case, parent)
+
+
 def test_example_registry_skips_json_with_duplicate_name(tmp_path) -> None:
     from quino.application.example_registry import ExampleRegistry
 

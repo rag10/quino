@@ -9,6 +9,7 @@ from quino.domain.workspace import (
     Case,
     Run,
     Workspace,
+    create_default_pose,
 )
 
 
@@ -64,46 +65,41 @@ class WorkspaceCommands:
     ) -> Case:
         self._ctx.snapshot()
         ws = self._ensure_workspace()
+        if parent_case_id is not None:
+            return self.fork_case(parent_case_id, name)
         new_id = self._ctx.ids.new("case")
-        parent = ws.cases.get(parent_case_id) if parent_case_id else None
         from quino.domain.model import Model
         case = Case(
             id=new_id,
             name=name,
-            parent_case_id=parent_case_id,
             model=Model(),
+            poses=[create_default_pose(self._ctx.ids.new("pose"))],
         )
         ws.cases[new_id] = case
-        if new_id not in ws.root_case_ids and parent_case_id is None:
+        if new_id not in ws.root_case_ids:
             ws.root_case_ids.append(new_id)
         return case
 
     def fork_case(self, parent_case_id: str, name: str) -> Case:
         """Fork a case using CascadingEngine."""
         from quino.services.case_cascading import CascadingEngine
+        self._ctx.snapshot()
         ws = self._ensure_workspace()
         engine = CascadingEngine(ws)
         new_id = engine.fork_case(parent_case_id, name)
-        self._ctx.snapshot()
+        ws.selected_case_id = new_id
+        self._clear_invalid_selections(ws)
         return ws.cases[new_id]
 
     def duplicate_case(self, case_id: str, *, new_name: str | None = None) -> Case:
-        import copy as _copy
         self._ctx.snapshot()
         ws = self._ensure_workspace()
-        source = ws.cases.get(case_id)
-        if source is None:
-            raise ValueError(f"Case {case_id!r} not found")
-        target_name = new_name or f"{source.name} copy"
-        new_id = self._ctx.ids.new("case")
-        new_case = Case(
-            id=new_id,
-            name=target_name,
-            parent_case_id=source.parent_case_id,
-            model=_copy.deepcopy(source.model),
-        )
-        ws.cases[new_id] = new_case
-        return new_case
+        from quino.services.case_cascading import CascadingEngine
+        engine = CascadingEngine(ws)
+        new_id = engine.duplicate_case(case_id, new_name)
+        ws.selected_case_id = new_id
+        self._clear_invalid_selections(ws)
+        return ws.cases[new_id]
 
     def rename_case(self, case_id: str, name: str) -> None:
         self._ctx.snapshot()
@@ -135,6 +131,7 @@ class WorkspaceCommands:
         self._ctx.snapshot()
         ws = self._ensure_workspace()
         ws.selected_case_id = case_id
+        self._clear_invalid_selections(ws)
 
     # ------------------------------------------------------------------ pose (workspace-level)
 
@@ -303,6 +300,20 @@ class WorkspaceCommands:
         self._ctx.snapshot()
         ws = self._ensure_workspace()
         ws.selected_analysis_id = analysis_id
+
+    def _clear_invalid_selections(self, ws: Workspace) -> None:
+        case = ws.cases.get(ws.selected_case_id) if ws.selected_case_id is not None else None
+        if case is None:
+            ws.selected_pose_id = None
+            ws.selected_analysis_id = None
+            return
+        if ws.selected_pose_id is not None and all(p.id != ws.selected_pose_id for p in case.poses):
+            ws.selected_pose_id = None
+        if (
+            ws.selected_analysis_id is not None
+            and all(a.id != ws.selected_analysis_id for a in case.analyses)
+        ):
+            ws.selected_analysis_id = None
 
     def run_analysis(
         self,

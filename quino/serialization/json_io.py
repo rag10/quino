@@ -102,6 +102,13 @@ class JsonMapper:
                 f"This file uses schema version {version!r}. "
                 f"Only schema 0.3.0 is supported by this reader."
             )
+        required = {"id", "name", "root_case_ids", "cases"}
+        missing = required - set(data)
+        if missing:
+            raise UnsupportedSchemaError(
+                "This file declares schema 0.3.0 but is not a Workspace root. "
+                f"Missing required field(s): {', '.join(sorted(missing))}."
+            )
         return self._workspace_from_dict(data)
 
     # ------------------------------------------------------------------
@@ -179,6 +186,10 @@ class JsonMapper:
             "metrics": {k: self._metric_definition_to_dict(v) for k, v in c.metrics.items()},
             "metadata": dict(c.metadata),
         }
+        if c.sensor_outputs:
+            result["sensor_outputs"] = {
+                k: self._sensor_output_to_dict(v) for k, v in c.sensor_outputs.items()
+            }
         if c.reaction_outputs:
             result["reaction_outputs"] = {
                 k: self._reaction_output_to_dict(v) for k, v in c.reaction_outputs.items()
@@ -236,11 +247,6 @@ class JsonMapper:
             "deleted_inherited_connections": [
                 list(t) for t in sorted(o.deleted_inherited_connections)
             ],
-            "poses": {
-                k: {"origin": v.origin, "linked_properties": sorted(v.linked_properties)}
-                for k, v in o.poses.items()
-            },
-            "deleted_inherited_pose_ids": sorted(o.deleted_inherited_pose_ids),
         }
 
     def _overlay_from_dict(self, data: dict) -> CaseOverlay:
@@ -259,14 +265,6 @@ class JsonMapper:
             deleted_inherited_connections={
                 tuple(t) for t in data.get("deleted_inherited_connections", [])
             },
-            poses={
-                k: EntityOverlay(
-                    origin=v["origin"],
-                    linked_properties=set(v.get("linked_properties", [])),
-                )
-                for k, v in data.get("poses", {}).items()
-            },
-            deleted_inherited_pose_ids=set(data.get("deleted_inherited_pose_ids", [])),
         )
 
     # ------------------------------------------------------------------
@@ -292,7 +290,7 @@ class JsonMapper:
                 else None
             ),
         }
-        if model.control_graph is not None and model.control_graph.instances:
+        if model.control_graph is not None and (model.control_graph.instances or model.control_graph.connections):
             result["control_graph"] = self._block_diagram_to_dict(model.control_graph)
         return result
 

@@ -61,15 +61,42 @@ def test_fork_case_initializes_all_entities_as_inherited_fully_linked():
 
 
 def test_fork_case_does_not_copy_runs_or_analyses():
-    from quino.domain.workspace import Analysis, Run
+    from quino.domain.workspace import Analysis, Pose, Run
     ws, parent = _ws_with_root_case()
+    parent.poses.append(Pose(id="p-user", name="Pose"))
     parent.analyses.append(Analysis(id="a1", name="A", analysis_type="static"))
     parent.runs.append(Run(id="r1", analysis_id="a1", created_at="2026-05-26T00:00:00", status="ok"))
     engine = CascadingEngine(ws)
     child_id = engine.fork_case(parent.id, "Child")
     child = ws.cases[child_id]
+    assert len(child.poses) == 1
+    assert child.poses[0].is_default is True
+    assert child.poses[0].id != "p-user"
     assert child.analyses == []
     assert child.runs == []
+
+
+def test_duplicate_case_copies_local_package_without_runs_and_remaps_ids():
+    from quino.domain.workspace import Analysis, Pose, Run
+    ws, parent = _ws_with_root_case()
+    parent.poses = [
+        Pose(id="p-default", name="Reference", is_default=True),
+        Pose(id="p-user", name="Pose"),
+    ]
+    parent.analyses.append(Analysis(id="a1", name="A", analysis_type="static", pose_id="p-user"))
+    parent.runs.append(Run(id="r1", analysis_id="a1", created_at="2026-05-26T00:00:00", status="ok"))
+
+    engine = CascadingEngine(ws)
+    duplicate_id = engine.duplicate_case(parent.id, "Root copy")
+    duplicate = ws.cases[duplicate_id]
+
+    assert duplicate.parent_case_id == parent.parent_case_id
+    assert duplicate.model is not parent.model
+    assert duplicate.model.bodies[0] is not parent.model.bodies[0]
+    assert {pose.id for pose in duplicate.poses}.isdisjoint({pose.id for pose in parent.poses})
+    assert duplicate.analyses[0].id != parent.analyses[0].id
+    assert duplicate.analyses[0].pose_id in {pose.id for pose in duplicate.poses}
+    assert duplicate.runs == []
 
 
 def test_fork_case_copies_tolerances_and_metrics():
@@ -117,7 +144,7 @@ def test_edit_property_propagates_to_linked_descendant():
     assert "mass" in child.overlay.entities["b1"].linked_properties
 
 
-def test_edit_property_records_warning_when_descendant_has_override():
+def test_edit_property_returns_conflict_when_descendant_has_override():
     ws, parent = _ws_with_root_case()
     engine = CascadingEngine(ws)
     child_id = engine.fork_case(parent.id, "Child")
@@ -127,12 +154,53 @@ def test_edit_property_records_warning_when_descendant_has_override():
     engine.edit_property(child_id, "b1", "mass", ScalarProperty("3 kg", "kg", Dimension.MASS))
     assert "mass" not in child.overlay.entities["b1"].linked_properties
 
-    # Step 2: parent changes mass to 5 kg → child must NOT change, must record warning
-    engine.edit_property(parent.id, "b1", "mass", ScalarProperty("5 kg", "kg", Dimension.MASS))
+    # Step 2: parent changes mass to 5 kg -> child must NOT change; conflict is returned, not persisted
+    result = engine.edit_property(parent.id, "b1", "mass", ScalarProperty("5 kg", "kg", Dimension.MASS))
 
     assert child.model.bodies[0].mass.expression == "3 kg"
-    warnings = child.metadata.get("divergence_warnings", [])
-    assert any(w["path"].endswith("/mass") for w in warnings)
+    assert child.metadata.get("divergence_warnings") is None
+    assert any(conflict.case_id == child_id and conflict.path.endswith("/mass") for conflict in result.conflicts)
+
+
+def test_edit_property_eliminate_diff_relinks_and_applies_parent_change():
+    ws, parent = _ws_with_root_case()
+    engine = CascadingEngine(ws)
+    child_id = engine.fork_case(parent.id, "Child")
+    child = ws.cases[child_id]
+
+    engine.edit_property(child_id, "b1", "mass", ScalarProperty("3 kg", "kg", Dimension.MASS))
+    result = engine.edit_property(
+        parent.id,
+        "b1",
+        "mass",
+        ScalarProperty("5 kg", "kg", Dimension.MASS),
+        conflict_resolution={f"{child_id}:entities/b1/mass": "eliminate_diff"},
+    )
+
+    assert child.model.bodies[0].mass.expression == "5 kg"
+    assert "mass" in child.overlay.entities["b1"].linked_properties
+    assert any(conflict.case_id == child_id for conflict in result.conflicts)
+
+
+def test_edit_property_cancel_leaves_workspace_unchanged():
+    ws, parent = _ws_with_root_case()
+    before = copy.deepcopy(ws)
+    engine = CascadingEngine(ws)
+    child_id = engine.fork_case(parent.id, "Child")
+    engine.edit_property(child_id, "b1", "mass", ScalarProperty("3 kg", "kg", Dimension.MASS))
+    before_conflict = copy.deepcopy(ws)
+
+    with pytest.raises(Exception):
+        engine.edit_property(
+            parent.id,
+            "b1",
+            "mass",
+            ScalarProperty("5 kg", "kg", Dimension.MASS),
+            conflict_resolution={f"{child_id}:entities/b1/mass": "cancel"},
+        )
+
+    assert ws == before_conflict
+    assert ws != before
 
 
 def test_edit_property_in_owner_unlinks_from_parent():
@@ -164,7 +232,7 @@ def test_add_entity_in_case_marks_origin_local():
     assert parent.overlay is None
 
 
-def test_add_entity_in_child_marks_local_and_does_not_propagate_to_grandchild():
+def test_add_entity_in_child_marks_local_and_propagates_to_grandchild():
     ws, parent = _ws_with_root_case()
     engine = CascadingEngine(ws)
     child_id = engine.fork_case(parent.id, "Child")
@@ -180,8 +248,8 @@ def test_add_entity_in_child_marks_local_and_does_not_propagate_to_grandchild():
 
     assert any(b.id == "b9" for b in child.model.bodies)
     assert child.overlay.entities["b9"].origin == "local"
-    # Not retroactively added to grandchild
-    assert all(b.id != "b9" for b in grand.model.bodies)
+    assert any(b.id == "b9" for b in grand.model.bodies)
+    assert grand.overlay.entities["b9"].origin == "inherited"
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +294,7 @@ def test_remove_propagates_to_clean_descendant():
     assert all(b.id != "b1" for b in child.model.bodies)
 
 
-def test_remove_in_parent_keeps_customised_descendant_with_warning():
+def test_remove_in_parent_keeps_customised_descendant_with_conflict():
     ws, parent = _ws_with_root_case()
     engine = CascadingEngine(ws)
     child_id = engine.fork_case(parent.id, "Child")
@@ -235,13 +303,13 @@ def test_remove_in_parent_keeps_customised_descendant_with_warning():
     # Child customises mass first
     engine.edit_property(child_id, "b1", "mass", ScalarProperty("3 kg", "kg", Dimension.MASS))
 
-    # Parent removes b1 → child must keep it, mark origin=local, record warning
-    engine.remove_entity(parent.id, "b1")
+    # Parent removes b1 -> child must keep it, mark origin=local, return conflict
+    result = engine.remove_entity(parent.id, "b1")
     assert any(b.id == "b1" for b in child.model.bodies)
     assert child.overlay.entities["b1"].origin == "local"
     assert child.overlay.entities["b1"].linked_properties == set()
-    warnings = child.metadata.get("divergence_warnings", [])
-    assert any("deleted_in_parent" in w.get("kind", "") for w in warnings)
+    assert child.metadata.get("divergence_warnings") is None
+    assert any(conflict.case_id == child_id and "removal" in conflict.reason for conflict in result.conflicts)
 
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ from dataclasses import fields as _fields
 from typing import Iterable
 
 from quino.domain.model import Body, Driver, Joint, Load, Model, Sensor, Slider, Spring
+from quino.domain.types import MarkerType
 from quino.domain.workspace import Case, CaseOverlay, EntityOverlay
 from quino.services.cascade_property_registry import cascadable_properties
 
@@ -18,7 +19,8 @@ def _iter_model_entity_ids(case: Case) -> Iterable[str]:
     for body in m.bodies:
         yield body.id
         for marker in body.markers:
-            yield marker.id
+            if marker.type is MarkerType.STRUCTURAL:
+                yield marker.id
     for joint in m.joints:
         yield joint.id
     for slider in m.sliders:
@@ -48,8 +50,6 @@ def validate_overlay(case: Case, parent: Case | None) -> None:
             or case.overlay.deleted_inherited_entity_ids
             or case.overlay.inherited_connections
             or case.overlay.deleted_inherited_connections
-            or case.overlay.poses
-            or case.overlay.deleted_inherited_pose_ids
         ):
             raise OverlayInvariantError("Root case must have overlay=None or an empty overlay")
         return
@@ -91,22 +91,7 @@ def validate_overlay(case: Case, parent: Case | None) -> None:
                 f"does not exist in parent {parent.id!r}"
             )
 
-    # 5. Pose overlay bijection and inherited poses must exist in parent
-    pose_ids = {p.id for p in case.poses}
-    parent_pose_ids = {p.id for p in parent.poses}
-    p_missing = pose_ids - set(overlay.poses.keys())
-    p_extra = set(overlay.poses.keys()) - pose_ids
-    if p_missing or p_extra:
-        raise OverlayInvariantError(
-            f"Case {case.id!r}: overlay/poses mismatch. "
-            f"Missing overlay entries: {p_missing}. Extra overlay entries: {p_extra}."
-        )
-    for pid, entry in overlay.poses.items():
-        if entry.origin == "inherited" and pid not in parent_pose_ids:
-            raise OverlayInvariantError(
-                f"Case {case.id!r}: pose {pid!r} is origin='inherited' "
-                f"but does not exist in parent {parent.id!r}"
-            )
+    # Poses are case-local and intentionally absent from CaseOverlay.
 
 
 def _entity_lookup(case: Case) -> dict[str, tuple[object, type]]:
@@ -116,7 +101,8 @@ def _entity_lookup(case: Case) -> dict[str, tuple[object, type]]:
     for body in m.bodies:
         out[body.id] = (body, type(body))
         for marker in body.markers:
-            out[marker.id] = (marker, type(marker))
+            if marker.type is MarkerType.STRUCTURAL:
+                out[marker.id] = (marker, type(marker))
     for joint in m.joints:
         out[joint.id] = (joint, type(joint))
     for slider in m.sliders:
@@ -181,16 +167,5 @@ def rebuild_overlay(case: Case, parent: Case | None) -> None:
     for parent_id in parent_index.keys():
         if parent_id not in child_index:
             overlay.deleted_inherited_entity_ids.add(parent_id)
-
-    # Poses
-    parent_pose_ids = {p.id for p in parent.poses}
-    for pose in case.poses:
-        if pose.id in parent_pose_ids:
-            overlay.poses[pose.id] = EntityOverlay(origin="inherited")
-        else:
-            overlay.poses[pose.id] = EntityOverlay(origin="local")
-    for ppose in parent.poses:
-        if ppose.id not in {p.id for p in case.poses}:
-            overlay.deleted_inherited_pose_ids.add(ppose.id)
 
     case.overlay = overlay

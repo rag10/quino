@@ -28,6 +28,7 @@ class RunHandle:
 
 @dataclass(slots=True)
 class _QueuedJob:
+    case_id: str
     analysis_id: str
     run_id: str
     config_snapshot: dict
@@ -74,6 +75,7 @@ class RunExecutor(QtCore.QObject):
         self.app_service.pending_run_handles[run_id] = handle
         self._queue.put(
             _QueuedJob(
+                case_id=case.id,
                 analysis_id=analysis_id,
                 run_id=run_id,
                 config_snapshot=run.config_snapshot,
@@ -103,7 +105,7 @@ class RunExecutor(QtCore.QObject):
             self._run_one(job)
 
     def _run_one(self, job: _QueuedJob) -> None:
-        run = self._find_run(job.run_id)
+        run = self._find_run(job.case_id, job.run_id)
         if run is None:
             return
 
@@ -115,9 +117,9 @@ class RunExecutor(QtCore.QObject):
             ws = self.app_service._workspace
             if ws is None:
                 raise ValueError("No active workspace")
-            case = self.app_service.current_case()
+            case = ws.cases.get(job.case_id)
             if case is None:
-                raise ValueError("No active case")
+                raise ValueError(f"Case {job.case_id!r} not found")
             analysis = next((a for a in case.analyses if a.id == job.analysis_id), None)
             if analysis is None:
                 raise ValueError(f"Analysis {job.analysis_id!r} not found")
@@ -168,11 +170,11 @@ class RunExecutor(QtCore.QObject):
                 handle.done_event.set()
             self.run_finished.emit(job.run_id, run.status)
 
-    def _find_run(self, run_id: str) -> Run | None:
+    def _find_run(self, case_id: str, run_id: str) -> Run | None:
         ws = self.app_service._workspace
         if ws is None:
             return None
-        case = self.app_service.current_case()
+        case = ws.cases.get(case_id)
         if case is None:
             return None
         return next((r for r in case.runs if r.id == run_id), None)

@@ -1307,7 +1307,7 @@ def test_delete_circle_cascade_removes_on_circle_constraints() -> None:
 
 
 
-def test_sensor_outputs_not_persisted(tmp_path) -> None:
+def test_sensor_outputs_persisted(tmp_path) -> None:
     import json
     app = make_app()
     body = app.create_body("Link", [MarkerInput("0 mm", "0 mm", "A")])
@@ -1320,12 +1320,12 @@ def test_sensor_outputs_not_persisted(tmp_path) -> None:
     app.save_project(path)
     with open(path) as f:
         data = json.load(f)
-    # sensor_outputs must not appear anywhere in persisted JSON
+    # Case-local sensor outputs are part of the workspace JSON.
     for case_data in data.get("cases", {}).values():
-        assert "sensor_outputs" not in case_data
+        assert "sensor_outputs" in case_data
     app2 = ApplicationService()
     app2.load_project(path)
-    assert sensor_id not in app2.project.sensor_outputs
+    assert sensor_id in app2.project.sensor_outputs
 
 
 

@@ -1,126 +1,10 @@
 {
   "schema_version": "0.3.0",
-  "project": {
-    "id": "proj_001",
-    "name": "Controlled Mass PID",
-    "metadata": {}
-  },
-  "parameters": [],
+  "id": "ws_001",
+  "name": "Controlled Mass PID",
   "sketch": null,
-  "model": {
-    "bodies": [
-      {
-        "id": "body_001",
-        "name": "Mass",
-        "type": "point_mass",
-        "markers": [
-          {
-            "id": "marker_001",
-            "name": "P",
-            "type": "structural",
-            "x": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          }
-        ],
-        "edge_order": [
-          "marker_001"
-        ],
-        "closed_shape": true,
-        "mass": {
-          "expression": "1 kg",
-          "unit": "kg",
-          "expected_dimension": "mass"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {},
-        "com": {
-          "kind": "marker",
-          "data": {
-            "marker_id": "marker_001"
-          }
-        }
-      }
-    ],
-    "sliders": [
-      {
-        "id": "slider_001",
-        "name": "Guide",
-        "origin_x": {
-          "expression": "0 mm",
-          "unit": "mm",
-          "expected_dimension": "length"
-        },
-        "origin_y": {
-          "expression": "0 mm",
-          "unit": "mm",
-          "expected_dimension": "length"
-        },
-        "angle": {
-          "expression": "0 deg",
-          "unit": "deg",
-          "expected_dimension": "angle"
-        },
-        "travel_min": null,
-        "travel_max": null,
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {}
-      }
-    ],
-    "joints": [
-      {
-        "id": "joint_001",
-        "name": "SliderJoint",
-        "type": "revolute",
-        "endpoint_a": {
-          "kind": "marker",
-          "body_id": "body_001",
-          "marker_id": "marker_001"
-        },
-        "endpoint_b": {
-          "kind": "slider",
-          "slider_id": "slider_001"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {}
-      }
-    ],
-    "drivers": [],
-    "loads": [],
-    "sensors": [],
-    "springs": [],
-    "gravity": null
-  },
+  "parameters": [],
+  "parameter_catalog": {},
   "view_state": {
     "zoom": 1.0,
     "pan_x": 0.0,
@@ -131,200 +15,357 @@
     "show_com": false,
     "show_sliders": true
   },
-  "block_diagram": {
-    "instances": {
-      "sensor": {
-        "block_type": "MBSSensor",
-        "parameters": {
-          "body_id": "body_001",
-          "variable": "Position",
-          "component": "x"
-        },
-        "input_ports": [],
-        "output_ports": [
-          {
-            "name": "out",
-            "shape": [
-              1
-            ]
-          }
-        ],
-        "position": [
-          0.0,
-          0.0
-        ]
-      },
-      "ref": {
-        "block_type": "Constant",
-        "parameters": {
-          "value": 0.1
-        },
-        "input_ports": [],
-        "output_ports": [
-          {
-            "name": "out",
-            "shape": [
-              1
-            ]
-          }
-        ],
-        "position": [
-          0.0,
-          0.0
-        ]
-      },
-      "err": {
-        "block_type": "Adder",
-        "parameters": {
-          "signs": [
-            1,
-            -1
+  "gravity_default": null,
+  "root_case_ids": [
+    "case_001"
+  ],
+  "cases": {
+    "case_001": {
+      "id": "case_001",
+      "name": "Root",
+      "description": "",
+      "parent_case_id": null,
+      "model": {
+        "bodies": [],
+        "sliders": [],
+        "joints": [],
+        "drivers": [],
+        "loads": [],
+        "sensors": [],
+        "springs": [],
+        "gravity": null,
+        "control_graph": {
+          "instances": {
+            "blk_001": {
+              "id": "blk_001",
+              "block_type": "Step",
+              "parameters": {},
+              "input_ports": [],
+              "output_ports": [
+                {
+                  "name": "out",
+                  "shape": [
+                    1
+                  ]
+                }
+              ],
+              "position": [
+                20.0,
+                40.0
+              ]
+            },
+            "blk_002": {
+              "id": "blk_002",
+              "block_type": "PID",
+              "parameters": {
+                "kp": 12.0,
+                "ki": 2.0,
+                "kd": 0.5
+              },
+              "input_ports": [
+                {
+                  "name": "error",
+                  "shape": [
+                    1
+                  ]
+                }
+              ],
+              "output_ports": [
+                {
+                  "name": "out",
+                  "shape": [
+                    1
+                  ]
+                }
+              ],
+              "position": [
+                180.0,
+                40.0
+              ]
+            },
+            "blk_003": {
+              "id": "blk_003",
+              "block_type": "LoadCommand",
+              "parameters": {},
+              "input_ports": [
+                {
+                  "name": "in",
+                  "shape": [
+                    1
+                  ]
+                }
+              ],
+              "output_ports": [
+                {
+                  "name": "out",
+                  "shape": [
+                    1
+                  ]
+                }
+              ],
+              "position": [
+                340.0,
+                40.0
+              ]
+            }
+          },
+          "connections": [
+            {
+              "src_instance": "blk_001",
+              "src_port": "out",
+              "dst_instance": "blk_002",
+              "dst_port": "error"
+            },
+            {
+              "src_instance": "blk_002",
+              "src_port": "out",
+              "dst_instance": "blk_003",
+              "dst_port": "in"
+            }
           ]
+        }
+      },
+      "poses": [
+        {
+          "id": "pose_001",
+          "name": "Reference",
+          "body_poses": {},
+          "parent_pose_id": null,
+          "is_default": true,
+          "requires_recompute": true,
+          "solve_failed": false,
+          "metadata": {}
         },
-        "input_ports": [
-          {
-            "name": "in0",
-            "shape": [
-              1
+        {
+          "id": "pose_002",
+          "name": "Setup pose",
+          "body_poses": {},
+          "parent_pose_id": null,
+          "is_default": false,
+          "requires_recompute": true,
+          "solve_failed": false,
+          "metadata": {}
+        }
+      ],
+      "analyses": [
+        {
+          "id": "analysis_001",
+          "name": "Root static check",
+          "analysis_type": "static",
+          "pose_id": null,
+          "config": {
+            "gravity_enabled": true,
+            "tolerance": 1e-06,
+            "report_reactions": true,
+            "report_spring_energy": true,
+            "plots": [],
+            "metrics": []
+          },
+          "metadata": {}
+        }
+      ],
+      "runs": [],
+      "overlay": null,
+      "tolerances": {},
+      "metrics": {},
+      "metadata": {}
+    },
+    "case-b642a0d9": {
+      "id": "case-b642a0d9",
+      "name": "Retuned PID",
+      "description": "",
+      "parent_case_id": "case_001",
+      "model": {
+        "bodies": [],
+        "sliders": [],
+        "joints": [],
+        "drivers": [],
+        "loads": [],
+        "sensors": [],
+        "springs": [],
+        "gravity": null,
+        "control_graph": {
+          "instances": {
+            "blk_001": {
+              "id": "blk_001",
+              "block_type": "Step",
+              "parameters": {},
+              "input_ports": [],
+              "output_ports": [
+                {
+                  "name": "out",
+                  "shape": [
+                    1
+                  ]
+                }
+              ],
+              "position": [
+                20.0,
+                40.0
+              ]
+            },
+            "blk_002": {
+              "id": "blk_002",
+              "block_type": "PID",
+              "parameters": {
+                "kp": 12.0,
+                "ki": 2.0,
+                "kd": 0.5
+              },
+              "input_ports": [
+                {
+                  "name": "error",
+                  "shape": [
+                    1
+                  ]
+                }
+              ],
+              "output_ports": [
+                {
+                  "name": "out",
+                  "shape": [
+                    1
+                  ]
+                }
+              ],
+              "position": [
+                180.0,
+                40.0
+              ]
+            },
+            "blk_003": {
+              "id": "blk_003",
+              "block_type": "LoadCommand",
+              "parameters": {},
+              "input_ports": [
+                {
+                  "name": "in",
+                  "shape": [
+                    1
+                  ]
+                }
+              ],
+              "output_ports": [
+                {
+                  "name": "out",
+                  "shape": [
+                    1
+                  ]
+                }
+              ],
+              "position": [
+                340.0,
+                40.0
+              ]
+            }
+          },
+          "connections": [
+            {
+              "src_instance": "blk_001",
+              "src_port": "out",
+              "dst_instance": "blk_002",
+              "dst_port": "error"
+            },
+            {
+              "src_instance": "blk_002",
+              "src_port": "out",
+              "dst_instance": "blk_003",
+              "dst_port": "in"
+            }
+          ]
+        }
+      },
+      "poses": [
+        {
+          "id": "pose-c161e15e",
+          "name": "Reference",
+          "body_poses": {},
+          "parent_pose_id": null,
+          "is_default": true,
+          "requires_recompute": true,
+          "solve_failed": false,
+          "metadata": {}
+        },
+        {
+          "id": "pose_003",
+          "name": "Variant pose",
+          "body_poses": {},
+          "parent_pose_id": null,
+          "is_default": false,
+          "requires_recompute": true,
+          "solve_failed": false,
+          "metadata": {}
+        }
+      ],
+      "analyses": [
+        {
+          "id": "analysis_002",
+          "name": "Variant static check",
+          "analysis_type": "static",
+          "pose_id": null,
+          "config": {
+            "gravity_enabled": true,
+            "tolerance": 1e-06,
+            "report_reactions": true,
+            "report_spring_energy": true,
+            "plots": [],
+            "metrics": []
+          },
+          "metadata": {}
+        }
+      ],
+      "runs": [],
+      "overlay": {
+        "entities": {
+          "blk_001": {
+            "origin": "inherited",
+            "linked_properties": [
+              "block_type",
+              "parameters"
             ]
           },
-          {
-            "name": "in1",
-            "shape": [
-              1
+          "blk_002": {
+            "origin": "inherited",
+            "linked_properties": [
+              "block_type",
+              "parameters",
+              "parameters.kd",
+              "parameters.ki",
+              "parameters.kp"
+            ]
+          },
+          "blk_003": {
+            "origin": "inherited",
+            "linked_properties": [
+              "block_type",
+              "parameters"
             ]
           }
-        ],
-        "output_ports": [
-          {
-            "name": "out",
-            "shape": [
-              1
-            ]
-          }
-        ],
-        "position": [
-          0.0,
-          0.0
-        ]
-      },
-      "pid": {
-        "block_type": "PID",
-        "parameters": {
-          "kp": 20.0,
-          "ki": 2.0,
-          "kd": 4.0
         },
-        "input_ports": [
-          {
-            "name": "error",
-            "shape": [
-              1
-            ]
-          }
-        ],
-        "output_ports": [
-          {
-            "name": "out",
-            "shape": [
-              1
-            ]
-          }
-        ],
-        "position": [
-          0.0,
-          0.0
-        ]
-      },
-      "act": {
-        "block_type": "MBSActuator",
-        "parameters": {
-          "body_id": "body_001",
-          "direction": [
-            1.0,
-            0.0,
-            0.0
+        "deleted_inherited_entity_ids": [],
+        "inherited_connections": [
+          [
+            "blk_001",
+            "out",
+            "blk_002",
+            "error"
+          ],
+          [
+            "blk_002",
+            "out",
+            "blk_003",
+            "in"
           ]
-        },
-        "input_ports": [
-          {
-            "name": "in",
-            "shape": [
-              1
-            ]
-          }
         ],
-        "output_ports": [
-          {
-            "name": "out",
-            "shape": [
-              1
-            ]
-          }
-        ],
-        "position": [
-          0.0,
-          0.0
-        ]
-      }
-    },
-    "connections": [
-      {
-        "src_instance": "ref",
-        "src_port": "out",
-        "dst_instance": "err",
-        "dst_port": "in0"
+        "deleted_inherited_connections": []
       },
-      {
-        "src_instance": "sensor",
-        "src_port": "out",
-        "dst_instance": "err",
-        "dst_port": "in1"
-      },
-      {
-        "src_instance": "err",
-        "src_port": "out",
-        "dst_instance": "pid",
-        "dst_port": "error"
-      },
-      {
-        "src_instance": "pid",
-        "src_port": "out",
-        "dst_instance": "act",
-        "dst_port": "in"
-      }
-    ]
+      "tolerances": {},
+      "metrics": {},
+      "metadata": {}
+    }
   },
-  "workspace": {
-    "baselines": [
-      {
-        "id": "baseline_001",
-        "name": "Baseline",
-        "description": "",
-        "source_run_id": null,
-        "model_snapshot_id": null,
-        "model_hash": null,
-        "invariant_parameter_keys": [],
-        "approval_status": null,
-        "approved_run_id": null,
-        "tolerances": {},
-        "metrics": {},
-        "metadata": {}
-      }
-    ],
-    "active_baseline_id": "baseline_001",
-    "active_case_id": null,
-    "selected_pose_id": null,
-    "selected_analysis_id": null,
-    "cases": [],
-    "poses": [],
-    "analyses": [],
-    "case_groups": [],
-    "studies": [],
-    "runs": [],
-    "parameter_catalog": {},
-    "model_snapshots": {},
-    "promotion_history": [],
-    "next_sequence": 2
-  }
+  "selected_case_id": "case_001",
+  "selected_pose_id": null,
+  "selected_analysis_id": null,
+  "metadata": {}
 }

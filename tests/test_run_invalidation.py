@@ -234,10 +234,10 @@ def test_style_line_width_does_NOT_invalidate_runs():
     assert run.status == "ok"
 
 
-def test_parameter_create_invalidates_runs():
+def test_parameter_create_does_NOT_invalidate_unused_runs():
     app, _, run = _setup_app_with_ok_run()
     app.parameters.create("p1", "1 kg", "kg")
-    assert run.status == "stale"
+    assert run.status == "ok"
 
 
 def test_parameter_description_only_does_NOT_invalidate_runs():
@@ -246,3 +246,24 @@ def test_parameter_description_only_does_NOT_invalidate_runs():
     run.status = "ok"  # reset
     app.parameters.update(pid, description="just a comment")
     assert run.status == "ok"
+
+
+def test_parameter_value_change_invalidates_only_cases_that_use_it():
+    from quino.domain.inputs import PropertyValueInput
+    from quino.domain.workspace import Analysis, Run
+
+    app, body_id, run = _setup_app_with_ok_run()
+    pid = app.parameters.create("p1", "1 kg", "kg")
+    app.update_property(body_id, "mass", PropertyValueInput("expression", "p1"))
+    run.status = "ok"
+
+    ws = app._workspace
+    root = ws.cases[ws.root_case_ids[0]]
+    child = app.workspace.create_case("Unused")
+    child.analyses.append(Analysis(id="a2", name="A2", analysis_type="dynamic"))
+    child.runs.append(Run(id="r2", analysis_id="a2", created_at="2026-05-28T00:00:00", status="ok"))
+
+    app.parameters.update(pid, expression="2 kg")
+
+    assert root.runs[0].status == "stale"
+    assert child.runs[0].status == "ok"

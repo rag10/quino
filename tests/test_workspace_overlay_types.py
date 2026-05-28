@@ -18,8 +18,8 @@ def test_case_overlay_defaults_are_empty():
     assert overlay.deleted_inherited_entity_ids == set()
     assert overlay.inherited_connections == set()
     assert overlay.deleted_inherited_connections == set()
-    assert overlay.poses == {}
-    assert overlay.deleted_inherited_pose_ids == set()
+    assert not hasattr(overlay, "poses")
+    assert not hasattr(overlay, "deleted_inherited_pose_ids")
 
 
 from quino.domain.workspace import Pose as WorkspacePoseV2

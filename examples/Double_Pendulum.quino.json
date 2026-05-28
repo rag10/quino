@@ -1,329 +1,639 @@
 {
   "schema_version": "0.3.0",
-  "project": {
-    "id": "proj_001",
-    "name": "Double Pendulum",
-    "metadata": {}
-  },
-  "parameters": [],
+  "id": "ws_001",
+  "name": "Double Pendulum",
   "sketch": null,
-  "model": {
-    "bodies": [
-      {
-        "id": "body_001",
-        "name": "Arm1",
-        "type": "bar",
-        "markers": [
-          {
-            "id": "marker_001",
-            "name": "A",
-            "type": "structural",
-            "x": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "0 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          },
-          {
-            "id": "marker_002",
-            "name": "B",
-            "type": "structural",
-            "x": {
-              "expression": "70.71 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "70.71 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          }
-        ],
-        "edge_order": [
-          "marker_001",
-          "marker_002"
-        ],
-        "closed_shape": false,
-        "mass": {
-          "expression": "1 kg",
-          "unit": "kg",
-          "expected_dimension": "mass"
-        },
-        "inertia": null,
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 2.0,
-          "marker_size": 6.0
-        },
-        "metadata": {},
-        "com": {
-          "kind": "bar_percent",
-          "data": {
-            "percent": 50.0
-          }
-        }
-      },
-      {
-        "id": "body_002",
-        "name": "Arm2",
-        "type": "bar",
-        "markers": [
-          {
-            "id": "marker_004",
-            "name": "B",
-            "type": "structural",
-            "x": {
-              "expression": "70.71 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "70.71 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          },
-          {
-            "id": "marker_005",
-            "name": "C",
-            "type": "structural",
-            "x": {
-              "expression": "141.42 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "y": {
-              "expression": "141.42 mm",
-              "unit": "mm",
-              "expected_dimension": "length"
-            },
-            "visible": true,
-            "style": {
-              "color": "#000000",
-              "visible": true,
-              "line_width": 1.0,
-              "marker_size": 6.0
-            },
-            "metadata": {}
-          }
-        ],
-        "edge_order": [
-          "marker_004",
-          "marker_005"
-        ],
-        "closed_shape": false,
-        "mass": {
-          "expression": "0.5 kg",
-          "unit": "kg",
-          "expected_dimension": "mass"
-        },
-        "inertia": null,
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 2.0,
-          "marker_size": 6.0
-        },
-        "metadata": {},
-        "com": {
-          "kind": "bar_percent",
-          "data": {
-            "percent": 50.0
-          }
-        }
-      }
-    ],
-    "sliders": [],
-    "joints": [
-      {
-        "id": "joint_001",
-        "name": "Ground_A",
-        "type": "revolute",
-        "endpoint_a": {
-          "kind": "marker",
-          "body_id": "body_001",
-          "marker_id": "marker_001"
-        },
-        "endpoint_b": {
-          "kind": "ground"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {}
-      },
-      {
-        "id": "joint_002",
-        "name": "Joint_B",
-        "type": "revolute",
-        "endpoint_a": {
-          "kind": "marker",
-          "body_id": "body_001",
-          "marker_id": "marker_002"
-        },
-        "endpoint_b": {
-          "kind": "marker",
-          "body_id": "body_002",
-          "marker_id": "marker_004"
-        },
-        "style": {
-          "color": "#000000",
-          "visible": true,
-          "line_width": 1.0,
-          "marker_size": 6.0
-        },
-        "metadata": {}
-      }
-    ],
-    "drivers": [],
-    "sensors": [],
-    "gravity": {
-      "magnitude": 9.81,
-      "direction_x": 0.0,
-      "direction_y": -1.0
-    },
-    "loads": [],
-    "springs": []
-  },
+  "parameters": [],
+  "parameter_catalog": {},
   "view_state": {
     "zoom": 1.0,
     "pan_x": 0.0,
     "pan_y": 0.0,
     "show_grid": true,
+    "show_sensors": true,
     "show_markers": true,
     "show_com": false,
-    "show_sliders": true,
-    "show_sensors": true
+    "show_sliders": true
   },
-  "workspace": {
-    "baselines": [
-      {
-        "id": "baseline_001",
-        "name": "Baseline",
-        "description": "Standard double pendulum (1 kg + 0.5 kg arms)",
-        "source_run_id": null,
-        "model_snapshot_id": null,
-        "model_hash": null,
-        "invariant_parameter_keys": [],
-        "approval_status": null,
-        "approved_run_id": null,
-        "tolerances": {},
-        "metrics": {},
-        "metadata": {}
-      }
-    ],
-    "active_baseline_id": "baseline_001",
-    "active_case_id": null,
-    "selected_pose_id": null,
-    "selected_analysis_id": null,
-    "cases": [
-      {
-        "id": "case_001",
-        "name": "Heavy Arms",
-        "baseline_id": "baseline_001",
-        "parent_case_id": null,
-        "model_snapshot_id": null,
-        "invariant_values": {
-          "bodies/body_001/mass": {
-            "value": 2.0,
-            "unit": "kg"
+  "gravity_default": null,
+  "root_case_ids": [
+    "case_001"
+  ],
+  "cases": {
+    "case_001": {
+      "id": "case_001",
+      "name": "Root",
+      "description": "",
+      "parent_case_id": null,
+      "model": {
+        "bodies": [
+          {
+            "id": "body_001",
+            "name": "Arm1",
+            "type": "bar",
+            "markers": [
+              {
+                "id": "marker_001",
+                "name": "A",
+                "type": "structural",
+                "x": {
+                  "expression": "0 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "0 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              },
+              {
+                "id": "marker_002",
+                "name": "B",
+                "type": "structural",
+                "x": {
+                  "expression": "70.71 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "70.71 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              }
+            ],
+            "edge_order": [
+              "marker_001",
+              "marker_002"
+            ],
+            "closed_shape": false,
+            "mass": {
+              "expression": "1 kg",
+              "unit": "kg",
+              "expected_dimension": "mass"
+            },
+            "com": {
+              "kind": "bar_percent",
+              "data": {
+                "percent": 50.0
+              }
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
           },
-          "bodies/body_002/mass": {
-            "value": 1.0,
-            "unit": "kg"
+          {
+            "id": "body_002",
+            "name": "Arm2",
+            "type": "bar",
+            "markers": [
+              {
+                "id": "marker_004",
+                "name": "B",
+                "type": "structural",
+                "x": {
+                  "expression": "70.71 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "70.71 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              },
+              {
+                "id": "marker_005",
+                "name": "C",
+                "type": "structural",
+                "x": {
+                  "expression": "141.42 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "141.42 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              }
+            ],
+            "edge_order": [
+              "marker_004",
+              "marker_005"
+            ],
+            "closed_shape": false,
+            "mass": {
+              "expression": "0.5 kg",
+              "unit": "kg",
+              "expected_dimension": "mass"
+            },
+            "com": {
+              "kind": "bar_percent",
+              "data": {
+                "percent": 50.0
+              }
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          }
+        ],
+        "sliders": [],
+        "joints": [
+          {
+            "id": "joint_001",
+            "name": "Ground_A",
+            "type": "revolute",
+            "endpoint_a": {
+              "kind": "marker",
+              "body_id": "body_001",
+              "marker_id": "marker_001"
+            },
+            "endpoint_b": {
+              "kind": "ground"
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "joint_002",
+            "name": "Joint_B",
+            "type": "revolute",
+            "endpoint_a": {
+              "kind": "marker",
+              "body_id": "body_001",
+              "marker_id": "marker_002"
+            },
+            "endpoint_b": {
+              "kind": "marker",
+              "body_id": "body_002",
+              "marker_id": "marker_004"
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          }
+        ],
+        "drivers": [],
+        "loads": [],
+        "sensors": [],
+        "springs": [],
+        "gravity": null
+      },
+      "poses": [
+        {
+          "id": "pose_001",
+          "name": "Reference",
+          "body_poses": {},
+          "parent_pose_id": null,
+          "is_default": true,
+          "requires_recompute": true,
+          "solve_failed": false,
+          "metadata": {}
+        },
+        {
+          "id": "pose_002",
+          "name": "Setup pose",
+          "body_poses": {},
+          "parent_pose_id": null,
+          "is_default": false,
+          "requires_recompute": true,
+          "solve_failed": false,
+          "metadata": {}
+        }
+      ],
+      "analyses": [
+        {
+          "id": "analysis_001",
+          "name": "Root static check",
+          "analysis_type": "static",
+          "pose_id": null,
+          "config": {
+            "gravity_enabled": true,
+            "tolerance": 1e-06,
+            "report_reactions": true,
+            "report_spring_energy": true,
+            "plots": [],
+            "metrics": []
+          },
+          "metadata": {}
+        }
+      ],
+      "runs": [],
+      "overlay": null,
+      "tolerances": {},
+      "metrics": {},
+      "metadata": {}
+    },
+    "case-def898cc": {
+      "id": "case-def898cc",
+      "name": "Lightweight variant",
+      "description": "",
+      "parent_case_id": "case_001",
+      "model": {
+        "bodies": [
+          {
+            "id": "body_001",
+            "name": "Arm1",
+            "type": "bar",
+            "markers": [
+              {
+                "id": "marker_001",
+                "name": "A",
+                "type": "structural",
+                "x": {
+                  "expression": "0 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "0 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              },
+              {
+                "id": "marker_002",
+                "name": "B",
+                "type": "structural",
+                "x": {
+                  "expression": "70.71 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "70.71 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              }
+            ],
+            "edge_order": [
+              "marker_001",
+              "marker_002"
+            ],
+            "closed_shape": false,
+            "mass": {
+              "expression": "0.75 kg",
+              "unit": "kg",
+              "expected_dimension": "mass"
+            },
+            "com": {
+              "kind": "bar_percent",
+              "data": {
+                "percent": 50.0
+              }
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "body_002",
+            "name": "Arm2",
+            "type": "bar",
+            "markers": [
+              {
+                "id": "marker_004",
+                "name": "B",
+                "type": "structural",
+                "x": {
+                  "expression": "70.71 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "70.71 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              },
+              {
+                "id": "marker_005",
+                "name": "C",
+                "type": "structural",
+                "x": {
+                  "expression": "141.42 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "y": {
+                  "expression": "141.42 mm",
+                  "unit": "mm",
+                  "expected_dimension": "length"
+                },
+                "visible": true,
+                "style": {
+                  "color": "#000000",
+                  "visible": true,
+                  "line_width": 1.0,
+                  "marker_size": 6.0
+                },
+                "metadata": {}
+              }
+            ],
+            "edge_order": [
+              "marker_004",
+              "marker_005"
+            ],
+            "closed_shape": false,
+            "mass": {
+              "expression": "0.5 kg",
+              "unit": "kg",
+              "expected_dimension": "mass"
+            },
+            "com": {
+              "kind": "bar_percent",
+              "data": {
+                "percent": 50.0
+              }
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          }
+        ],
+        "sliders": [],
+        "joints": [
+          {
+            "id": "joint_001",
+            "name": "Ground_A",
+            "type": "revolute",
+            "endpoint_a": {
+              "kind": "marker",
+              "body_id": "body_001",
+              "marker_id": "marker_001"
+            },
+            "endpoint_b": {
+              "kind": "ground"
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          },
+          {
+            "id": "joint_002",
+            "name": "Joint_B",
+            "type": "revolute",
+            "endpoint_a": {
+              "kind": "marker",
+              "body_id": "body_001",
+              "marker_id": "marker_002"
+            },
+            "endpoint_b": {
+              "kind": "marker",
+              "body_id": "body_002",
+              "marker_id": "marker_004"
+            },
+            "style": {
+              "color": "#000000",
+              "visible": true,
+              "line_width": 1.0,
+              "marker_size": 6.0
+            },
+            "metadata": {}
+          }
+        ],
+        "drivers": [],
+        "loads": [],
+        "sensors": [],
+        "springs": [],
+        "gravity": null
+      },
+      "poses": [
+        {
+          "id": "pose-9672f3f6",
+          "name": "Reference",
+          "body_poses": {},
+          "parent_pose_id": null,
+          "is_default": true,
+          "requires_recompute": true,
+          "solve_failed": false,
+          "metadata": {}
+        },
+        {
+          "id": "pose_003",
+          "name": "Variant pose",
+          "body_poses": {},
+          "parent_pose_id": null,
+          "is_default": false,
+          "requires_recompute": true,
+          "solve_failed": false,
+          "metadata": {}
+        }
+      ],
+      "analyses": [
+        {
+          "id": "analysis_002",
+          "name": "Variant static check",
+          "analysis_type": "static",
+          "pose_id": null,
+          "config": {
+            "gravity_enabled": true,
+            "tolerance": 1e-06,
+            "report_reactions": true,
+            "report_spring_energy": true,
+            "plots": [],
+            "metrics": []
+          },
+          "metadata": {}
+        }
+      ],
+      "runs": [],
+      "overlay": {
+        "entities": {
+          "body_001": {
+            "origin": "inherited",
+            "linked_properties": [
+              "closed_shape",
+              "com",
+              "metadata",
+              "name",
+              "style",
+              "type"
+            ]
+          },
+          "marker_001": {
+            "origin": "inherited",
+            "linked_properties": [
+              "metadata",
+              "name",
+              "style",
+              "type",
+              "visible",
+              "x",
+              "y"
+            ]
+          },
+          "marker_002": {
+            "origin": "inherited",
+            "linked_properties": [
+              "metadata",
+              "name",
+              "style",
+              "type",
+              "visible",
+              "x",
+              "y"
+            ]
+          },
+          "body_002": {
+            "origin": "inherited",
+            "linked_properties": [
+              "closed_shape",
+              "com",
+              "mass",
+              "metadata",
+              "name",
+              "style",
+              "type"
+            ]
+          },
+          "marker_004": {
+            "origin": "inherited",
+            "linked_properties": [
+              "metadata",
+              "name",
+              "style",
+              "type",
+              "visible",
+              "x",
+              "y"
+            ]
+          },
+          "marker_005": {
+            "origin": "inherited",
+            "linked_properties": [
+              "metadata",
+              "name",
+              "style",
+              "type",
+              "visible",
+              "x",
+              "y"
+            ]
+          },
+          "joint_001": {
+            "origin": "inherited",
+            "linked_properties": [
+              "endpoint_a",
+              "endpoint_b",
+              "metadata",
+              "name",
+              "style",
+              "type"
+            ]
+          },
+          "joint_002": {
+            "origin": "inherited",
+            "linked_properties": [
+              "endpoint_a",
+              "endpoint_b",
+              "metadata",
+              "name",
+              "style",
+              "type"
+            ]
           }
         },
-        "metadata": {}
+        "deleted_inherited_entity_ids": [],
+        "inherited_connections": [],
+        "deleted_inherited_connections": []
       },
-      {
-        "id": "case_002",
-        "name": "Light Arms",
-        "baseline_id": "baseline_001",
-        "parent_case_id": null,
-        "model_snapshot_id": null,
-        "invariant_values": {
-          "bodies/body_001/mass": {
-            "value": 0.25,
-            "unit": "kg"
-          },
-          "bodies/body_002/mass": {
-            "value": 0.1,
-            "unit": "kg"
-          }
-        },
-        "metadata": {}
-      }
-    ],
-    "poses": [
-      {
-        "id": "wpose_001",
-        "name": "Hanging (default)",
-        "baseline_id": "baseline_001",
-        "case_id": null,
-        "project_pose_id": null,
-        "is_default": true,
-        "metadata": {}
-      },
-      {
-        "id": "wpose_002",
-        "name": "Hanging (default)",
-        "baseline_id": "baseline_001",
-        "case_id": "case_001",
-        "project_pose_id": null,
-        "is_default": true,
-        "metadata": {}
-      },
-      {
-        "id": "wpose_003",
-        "name": "Hanging (default)",
-        "baseline_id": "baseline_001",
-        "case_id": "case_002",
-        "project_pose_id": null,
-        "is_default": true,
-        "metadata": {}
-      }
-    ],
-    "analyses": [],
-    "case_groups": [],
-    "studies": [],
-    "runs": [],
-    "parameter_catalog": {},
-    "model_snapshots": {},
-    "promotion_history": [],
-    "next_sequence": 4
-  }
+      "tolerances": {},
+      "metrics": {},
+      "metadata": {}
+    }
+  },
+  "selected_case_id": "case_001",
+  "selected_pose_id": null,
+  "selected_analysis_id": null,
+  "metadata": {}
 }

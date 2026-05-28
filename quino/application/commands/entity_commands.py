@@ -564,8 +564,18 @@ class EntityCommands:
         if case is not None:
             engine = self._ctx.cascade_provider()
             if engine is not None:
+                preview = engine.preview_edit_property(case.id, entity_id, property_path, scalar)
+                resolution = self._ctx.cascade_resolution_for(preview.conflicts)
+                if resolution is None:
+                    return
                 self._ctx.snapshot()
-                engine.edit_property(case.id, entity_id, property_path, scalar)
+                engine.edit_property(
+                    case.id,
+                    entity_id,
+                    property_path,
+                    scalar,
+                    conflict_resolution=resolution,
+                )
                 return
         self._ctx.snapshot()
         self._assign_scalar_property(entity, property_path, scalar)
@@ -654,43 +664,49 @@ class EntityCommands:
         engine = self._ctx.cascade_provider()
 
         if entity_type == "body":
-            body = self._bodies._find_body(entity_id)
-            marker_ids = {marker.id for marker in body.markers}
-            removed_joint_ids = {
-                joint.id
-                for joint in project.model.joints
-                if joint.endpoint_a.marker_id in marker_ids or joint.endpoint_b.marker_id in marker_ids
-            }
-            project.model.joints = [
-                joint
-                for joint in project.model.joints
-                if joint.endpoint_a.marker_id not in marker_ids and joint.endpoint_b.marker_id not in marker_ids
-            ]
-            project.model.drivers = [
-                driver for driver in project.model.drivers if driver.target_joint_id not in removed_joint_ids
-            ]
-            project.model.loads = [
-                load for load in project.model.loads if load.target_marker_id not in marker_ids
-            ]
-            project.model.bodies = [item for item in project.model.bodies if item.id != entity_id]
+            if engine is not None and case is not None:
+                engine.remove_entity(case.id, entity_id)
+            else:
+                body = self._bodies._find_body(entity_id)
+                marker_ids = {marker.id for marker in body.markers}
+                removed_joint_ids = {
+                    joint.id
+                    for joint in project.model.joints
+                    if joint.endpoint_a.marker_id in marker_ids or joint.endpoint_b.marker_id in marker_ids
+                }
+                project.model.joints = [
+                    joint
+                    for joint in project.model.joints
+                    if joint.endpoint_a.marker_id not in marker_ids and joint.endpoint_b.marker_id not in marker_ids
+                ]
+                project.model.drivers = [
+                    driver for driver in project.model.drivers if driver.target_joint_id not in removed_joint_ids
+                ]
+                project.model.loads = [
+                    load for load in project.model.loads if load.target_marker_id not in marker_ids
+                ]
+                project.model.bodies = [item for item in project.model.bodies if item.id != entity_id]
             self._ctx.invalidate_pose_state()
             return
 
         if entity_type == "slider":
-            slider_joint_ids = {
-                joint.id
-                for joint in project.model.joints
-                if joint.endpoint_a.slider_id == entity_id or joint.endpoint_b.slider_id == entity_id
-            }
-            project.model.joints = [
-                joint
-                for joint in project.model.joints
-                if joint.endpoint_a.slider_id != entity_id and joint.endpoint_b.slider_id != entity_id
-            ]
-            project.model.drivers = [
-                driver for driver in project.model.drivers if driver.target_joint_id not in slider_joint_ids
-            ]
-            project.model.sliders = [item for item in project.model.sliders if item.id != entity_id]
+            if engine is not None and case is not None:
+                engine.remove_entity(case.id, entity_id)
+            else:
+                slider_joint_ids = {
+                    joint.id
+                    for joint in project.model.joints
+                    if joint.endpoint_a.slider_id == entity_id or joint.endpoint_b.slider_id == entity_id
+                }
+                project.model.joints = [
+                    joint
+                    for joint in project.model.joints
+                    if joint.endpoint_a.slider_id != entity_id and joint.endpoint_b.slider_id != entity_id
+                ]
+                project.model.drivers = [
+                    driver for driver in project.model.drivers if driver.target_joint_id not in slider_joint_ids
+                ]
+                project.model.sliders = [item for item in project.model.sliders if item.id != entity_id]
             self._ctx.invalidate_pose_state()
             return
 

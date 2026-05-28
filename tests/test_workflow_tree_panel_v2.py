@@ -247,17 +247,20 @@ def test_analyses_hang_directly_off_pose(app, qtbot):
 
 
 def test_fork_case_regenerates_pose_ids(app, qtbot):
-    """Forked subcases must have unique pose ids — sharing ids with the parent
-    makes 'which case owns this pose' lookups ambiguous."""
+    """Forked subcases get only a fresh local reference pose."""
     service = ApplicationService()
     service.new_workspace("Test")
+    service.workspace.create_pose("User Pose")
     ws = service._workspace
     root_id = ws.root_case_ids[0]
     engine = CascadingEngine(ws)
     child_id = engine.fork_case(root_id, "Child")
 
     root_pose_ids = {p.id for p in ws.cases[root_id].poses}
-    child_pose_ids = {p.id for p in ws.cases[child_id].poses}
+    child_poses = ws.cases[child_id].poses
+    child_pose_ids = {p.id for p in child_poses}
+    assert len(child_poses) == 1
+    assert child_poses[0].is_default is True
     assert root_pose_ids.isdisjoint(child_pose_ids)
 
 

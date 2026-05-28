@@ -15,6 +15,12 @@ class BlockCommands:
             project.model.control_graph = BlockDiagram()
         return project.model.control_graph
 
+    def _active_case_id(self) -> str:
+        case = self._ctx.current_case()
+        if case is None:
+            raise ValueError("No active case")
+        return case.id
+
     def add_block(
         self,
         *,
@@ -40,8 +46,12 @@ class BlockCommands:
                 output_ports=output_ports,
                 position=position,
             )
-            diagram = self._ensure_diagram()
-            diagram.instances[block_id] = inst
+            engine = self._ctx.cascade_provider()
+            if engine is not None:
+                engine.add_entity(self._active_case_id(), inst, "blocks")
+            else:
+                diagram = self._ensure_diagram()
+                diagram.instances[block_id] = inst
         return block_id
 
     def add_connection(
@@ -60,8 +70,12 @@ class BlockCommands:
                 dst_instance=dst_instance,
                 dst_port=dst_port,
             )
-            diagram = self._ensure_diagram()
-            diagram.connections.append(conn)
+            engine = self._ctx.cascade_provider()
+            if engine is not None:
+                engine.add_connection(self._active_case_id(), conn)
+            else:
+                diagram = self._ensure_diagram()
+                diagram.connections.append(conn)
 
     def set_block_parameter(self, instance_id: str, key: str, value: Any) -> None:
         # Block parameter edits change simulation results — confirm first.
@@ -73,22 +87,36 @@ class BlockCommands:
             inst = diagram.instances.get(instance_id)
             if inst is None:
                 raise KeyError(f"Block instance {instance_id!r} not found")
-            inst.parameters[key] = value
+            engine = self._ctx.cascade_provider()
+            if engine is not None:
+                case_id = self._active_case_id()
+                path = f"parameters.{key}"
+                preview = engine.preview_edit_property(case_id, instance_id, path, value)
+                resolution = self._ctx.cascade_resolution_for(preview.conflicts)
+                if resolution is None:
+                    return
+                engine.edit_property(case_id, instance_id, path, value, conflict_resolution=resolution)
+            else:
+                inst.parameters[key] = value
 
     def remove_block(self, instance_id: str) -> None:
         """Remove a block instance and any connections that reference it."""
         self._ctx.discard_runs_for_active_case()
         with self._ctx.operation():
-            diagram = self._ensure_diagram()
-            diagram.instances.pop(instance_id, None)
-            object.__setattr__(
-                diagram,
-                "connections",
-                [
-                    c for c in diagram.connections
-                    if c.src_instance != instance_id and c.dst_instance != instance_id
-                ],
-            )
+            engine = self._ctx.cascade_provider()
+            if engine is not None:
+                engine.remove_entity(self._active_case_id(), instance_id)
+            else:
+                diagram = self._ensure_diagram()
+                diagram.instances.pop(instance_id, None)
+                object.__setattr__(
+                    diagram,
+                    "connections",
+                    [
+                        c for c in diagram.connections
+                        if c.src_instance != instance_id and c.dst_instance != instance_id
+                    ],
+                )
 
     def remove_connection(
         self,
@@ -101,15 +129,19 @@ class BlockCommands:
         self._ctx.discard_runs_for_active_case()
         with self._ctx.operation():
             key = (src_instance, src_port, dst_instance, dst_port)
-            diagram = self._ensure_diagram()
-            object.__setattr__(
-                diagram,
-                "connections",
-                [
-                    c for c in diagram.connections
-                    if (c.src_instance, c.src_port, c.dst_instance, c.dst_port) != key
-                ],
-            )
+            engine = self._ctx.cascade_provider()
+            if engine is not None:
+                engine.remove_connection(self._active_case_id(), key)
+            else:
+                diagram = self._ensure_diagram()
+                object.__setattr__(
+                    diagram,
+                    "connections",
+                    [
+                        c for c in diagram.connections
+                        if (c.src_instance, c.src_port, c.dst_instance, c.dst_port) != key
+                    ],
+                )
 
     def set_block_position(self, instance_id: str, position: tuple[float, float]) -> None:
         """Update a block's visual position."""
@@ -118,7 +150,7 @@ class BlockCommands:
             inst = diagram.instances.get(instance_id)
             if inst is None:
                 raise KeyError(f"Block instance {instance_id!r} not found")
-            inst.parameters["_position"] = [float(position[0]), float(position[1])]
+            inst.position = (float(position[0]), float(position[1]))
 
     def set_block_name(self, instance_id: str, new_name: str) -> None:
         """Rename a block instance (stored as parameters["__name__"])."""

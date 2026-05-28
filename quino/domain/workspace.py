@@ -173,8 +173,11 @@ class CaseOverlay:
     deleted_inherited_entity_ids: set[str] = field(default_factory=set)
     inherited_connections: set[tuple[str, str, str, str]] = field(default_factory=set)
     deleted_inherited_connections: set[tuple[str, str, str, str]] = field(default_factory=set)
-    poses: dict[str, EntityOverlay] = field(default_factory=dict)
-    deleted_inherited_pose_ids: set[str] = field(default_factory=set)
+
+
+def create_default_pose(pose_id: str, name: str = "Reference") -> Pose:
+    """Create the local default pose every case owns independently."""
+    return Pose(id=pose_id, name=name, is_default=True)
 
 
 # ---------------------------------------------------------------------------

@@ -38,7 +38,6 @@ class ParameterCommands:
         project = self._project
         self._ctx.validation.ensure_unique_name(project.parameters, name)
         self._validate_parameter_definition(expression, unit)
-        self._ctx.discard_runs_for_active_case()
         self._ctx.snapshot()
         parameter = Parameter(
             id=self._ctx.ids.new("param"),
@@ -66,7 +65,7 @@ class ParameterCommands:
         self._validate_parameter_definition(new_expression, new_unit, parameter_id=parameter_id)
         # Only invalidate when the value-affecting fields actually change.
         if new_expression != parameter.expression or new_unit != parameter.unit:
-            self._ctx.discard_runs_for_active_case()
+            self._mark_cases_using_parameter_stale(parameter.name, "parameter edited")
         self._ctx.snapshot()
         parameter.expression = new_expression
         parameter.unit = new_unit
@@ -105,7 +104,7 @@ class ParameterCommands:
             or parameter.name != name
         )
         if value_changed:
-            self._ctx.discard_runs_for_active_case()
+            self._mark_cases_using_parameter_stale(parameter.name, "parameter edited")
         self._ctx.snapshot()
         parameter.name = name
         parameter.expression = expression
@@ -115,6 +114,14 @@ class ParameterCommands:
 
     def delete(self, parameter_id: str) -> None:
         project = self._project
-        self._ctx.discard_runs_for_active_case()
+        parameter = self._find_parameter(parameter_id)
+        self._mark_cases_using_parameter_stale(parameter.name, "parameter deleted")
         self._ctx.snapshot()
         project.parameters = [parameter for parameter in project.parameters if parameter.id != parameter_id]
+
+    def _mark_cases_using_parameter_stale(self, parameter_name: str, reason: str) -> None:
+        ws = self._ctx.workspace_provider()
+        if ws is None:
+            return
+        from quino.services.run_invalidation import mark_runs_stale_for_parameter
+        mark_runs_stale_for_parameter(ws, parameter_name, reason=reason)

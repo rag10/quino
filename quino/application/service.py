@@ -27,7 +27,7 @@ from quino.domain.model import (
     ValidationReport,
     ViewState,
 )
-from quino.domain.workspace import Workspace, Case, Pose
+from quino.domain.workspace import Workspace, Case, create_default_pose
 from quino.application._context import ServiceContext
 from quino.application.commands.parameter_commands import ParameterCommands
 from quino.application.commands.force_commands import ForceCommands
@@ -209,7 +209,7 @@ class ApplicationService:
         self._service_context.ids = self.id_service
         root_id = self.id_service.new("case")
         ws_id = self.id_service.new("ws")
-        default_pose = Pose(id=self.id_service.new("pose"), name="Reference", is_default=True)
+        default_pose = create_default_pose(self.id_service.new("pose"))
         root = Case(id=root_id, name="Root", model=Model(), poses=[default_pose])
         self._workspace = Workspace(
             id=ws_id,
@@ -818,7 +818,7 @@ class ApplicationService:
         for case in ws.cases.values():
             if not any(p.is_default for p in case.poses):
                 pose_id = self.id_service.new("pose")
-                case.poses.insert(0, Pose(id=pose_id, name="Reference", is_default=True))
+                case.poses.insert(0, create_default_pose(pose_id))
 
     def _find_body(self, body_id: str) -> Body:
         case = self.current_case()

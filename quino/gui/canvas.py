@@ -1208,7 +1208,7 @@ class MechanismCanvas(QtWidgets.QWidget):
         painter.setFont(font)
         metrics = painter.fontMetrics()
         pad = 6
-        x = 8
+        x = 42
         y = 8
         for text, color_hex in badges:
             text_rect = metrics.boundingRect(text)

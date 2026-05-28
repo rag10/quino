@@ -224,6 +224,8 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         engine = CascadingEngine(ws)
         new_id = engine.fork_case(parent_case_id, name)
         ws.selected_case_id = new_id
+        ws.selected_pose_id = None
+        ws.selected_analysis_id = None
         self.case_selected.emit(new_id)
         return new_id
 
@@ -287,9 +289,9 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         if default_pose is None:
             # Auto-create the reference pose if missing (workspaces saved before
             # the load-time migration was added).
-            from quino.domain.workspace import Pose
+            from quino.domain.workspace import create_default_pose
             pose_id = self._service.id_service.new("pose")
-            default_pose = Pose(id=pose_id, name="Reference", is_default=True)
+            default_pose = create_default_pose(pose_id)
             case.poses.insert(0, default_pose)
         non_default_poses = [p for p in case.poses if not p.is_default]
         total_poses = 1 + len(non_default_poses)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import dataclasses
+import re
 
 from quino.domain.workspace import Case, Workspace
 
@@ -36,6 +38,15 @@ def mark_all_runs_stale(workspace: Workspace, *, reason: str) -> int:
     return total
 
 
+def mark_runs_stale_for_parameter(workspace: Workspace, parameter_name: str, *, reason: str) -> int:
+    """Stale only cases whose model expressions reference *parameter_name*."""
+    total = 0
+    for case in workspace.cases.values():
+        if _case_uses_parameter(case, parameter_name):
+            total += mark_runs_stale_for_case(case, reason=reason)
+    return total
+
+
 def mark_runs_stale_for_pose(workspace: Workspace, pose_id: str, *, reason: str) -> int:
     """Stale runs of analyses whose pose_id matches."""
     total = 0
@@ -43,6 +54,32 @@ def mark_runs_stale_for_pose(workspace: Workspace, pose_id: str, *, reason: str)
         analysis_ids = {a.id for a in case.analyses if a.pose_id == pose_id}
         total += _mark_set_stale(case, analysis_ids, reason)
     return total
+
+
+def _case_uses_parameter(case: Case, parameter_name: str) -> bool:
+    token = re.compile(rf"\b{re.escape(parameter_name)}\b")
+    return _contains_parameter_token(case.model, token)
+
+
+def _contains_parameter_token(value, token: re.Pattern[str]) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(token.search(value))
+    if isinstance(value, (int, float, bool)):
+        return False
+    expression = getattr(value, "expression", None)
+    if isinstance(expression, str) and token.search(expression):
+        return True
+    if isinstance(value, dict):
+        return any(_contains_parameter_token(item, token) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_parameter_token(item, token) for item in value)
+    if dataclasses.is_dataclass(value):
+        for field in dataclasses.fields(value):
+            if _contains_parameter_token(getattr(value, field.name), token):
+                return True
+    return False
 
 
 def delete_run(workspace: Workspace, project_dir, run_id: str) -> bool:
