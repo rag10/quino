@@ -27,7 +27,7 @@ from quino.domain.model import (
 )
 from quino.domain.types import SketchConstraintType
 from quino.services.expressions import ExpressionService
-from quino.services.sketch_solving.base import SketchSolveResult
+from quino.services.sketch_solving.base import DofResult, SketchSolveResult
 from quino.services.units import UnitService
 
 

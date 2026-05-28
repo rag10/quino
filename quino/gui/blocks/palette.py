@@ -34,6 +34,7 @@ class BlockPalette(QtWidgets.QTreeWidget):
         apply_browser_tree_style(self, icon_size=16, indentation=18, show_header=False)
         self.setDragEnabled(True)
         self.setMaximumWidth(220)
+        self.setExpandsOnDoubleClick(False)
         self.itemActivated.connect(self._emit_block_request)
         self._populate()
 

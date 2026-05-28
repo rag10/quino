@@ -22,6 +22,7 @@ class RunComparisonDialog(QtWidgets.QDialog):
         split = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal, self)
         self.run_tree = QtWidgets.QTreeWidget(split)
         self.run_tree.setHeaderLabels(["Analysis / Run"])
+        self.run_tree.setExpandsOnDoubleClick(False)
         self.channel_list = QtWidgets.QListWidget(split)
         split.addWidget(self.run_tree)
         split.addWidget(self.channel_list)

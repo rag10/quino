@@ -163,6 +163,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tree_delegate.visibility_toggled.connect(self._on_tree_visibility_toggled)
         self.tree.currentItemChanged.connect(self._on_tree_selection_changed)
         self.tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
+        self.tree.setExpandsOnDoubleClick(False)
 
         self.left_column = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.left_column.setChildrenCollapsible(False)

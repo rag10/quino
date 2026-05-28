@@ -20,15 +20,21 @@ class SketchSolveResult:
 
 @dataclass
 class DofResult:
-    """Per-point DOF analysis derived from Solvespace via perturbation testing.
+    """Sketch DOF analysis.
 
     point_dof maps each SketchPoint.id to its remaining degrees of freedom (0, 1, or 2).
-    fully_constrained_point_ids is the set of points with dof==0.
-    fully_constrained_entity_ids is the set of entities (line/circle/arc) whose
-    referenced points are all fully constrained.
-    total_free_dof is the sum of point_dof values.
+    fully_constrained_point_ids is intentionally reserved for points that are
+    constrained relative to an anchored component.  Points that are rigidly
+    defined but belong to a floating component are reported separately so the
+    GUI can still let the user drag that component.
     """
     point_dof: dict[str, int]
     fully_constrained_point_ids: set[str]
     fully_constrained_entity_ids: set[str]
     total_free_dof: int
+    fixed_point_ids: set[str] = field(default_factory=set)
+    floating_point_ids: set[str] = field(default_factory=set)
+    floating_entity_ids: set[str] = field(default_factory=set)
+    component_ids_by_point: dict[str, int] = field(default_factory=dict)
+    component_has_fix: dict[int, bool] = field(default_factory=dict)
+    total_system_dof: int | None = None

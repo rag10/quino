@@ -146,6 +146,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         self._tree.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
         self._tree.itemClicked.connect(self._on_item_clicked)
         self._tree.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self._tree.setExpandsOnDoubleClick(False)
         self._tree.customContextMenuRequested.connect(self._on_context_menu_requested)
         self._case_delegate = _CaseFrameDelegate(self._tree)
         self._tree.setItemDelegate(self._case_delegate)

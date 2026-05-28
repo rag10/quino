@@ -145,6 +145,7 @@ class CaseDiffsWidget(QtWidgets.QWidget):
         self._tree.header().setStretchLastSection(True)
         self._tree.setRootIsDecorated(True)
         self._tree.setAlternatingRowColors(True)
+        self._tree.setExpandsOnDoubleClick(False)
         layout.addWidget(self._tree, stretch=1)
 
     # ------------------------------------------------------------------
