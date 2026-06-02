@@ -228,8 +228,8 @@ class StaticModeController(AnalysisModeController):
         if case is None or self._current_analysis is None:
             return None
         runs = [
-            run for run in case.runs
-            if run.analysis_id == self._current_analysis.id and run.status in {"ok", "partial"} and run.result_ref is not None
+            a for a in case.analyses
+            if a.id == self._current_analysis.id and a.status in {"ok", "partial"} and a.result_ref is not None
         ]
         return runs[-1] if runs else None
 
@@ -238,7 +238,11 @@ class StaticModeController(AnalysisModeController):
             return
         rows = []
         if run is not None:
-            rows = [[key, _fmt(value, 6)] for key, value in sorted(run.metrics.items())]
+            for metric in getattr(run, "metrics", []):
+                result = getattr(metric, "result", None)
+                if result is None or result.status != "ok":
+                    continue
+                rows.append([metric.name, _fmt(result.value, 6)])
         self.report.replace_table_tab("Metrics", ["Key", "Value"], rows)
 
     def _populate_report_tabs(self, data: dict) -> None:

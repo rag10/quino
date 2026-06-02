@@ -54,7 +54,6 @@ from quino.simulation.sensor_expressions import safe_sensor_var, sensor_channel_
 from quino.viewer.plot_window import PlotWindow
 from quino.gui.widgets.inspector_widget import InspectorPropertyWidget
 from quino.gui.blocks import BlockEditorWidget
-from quino.gui.widgets.divergences_dock import DivergencesDock
 from quino.gui.widgets.case_diffs_widget import CaseDiffsWidget
 from quino.gui.theme import (
     BLUE,
@@ -83,9 +82,6 @@ class MainWindow(QtWidgets.QMainWindow):
         # losing run data on a non-cosmetic edit.
         self.app_service._service_context.confirm_run_invalidation = (
             self._confirm_run_invalidation_dialog
-        )
-        self.app_service._service_context.resolve_cascade_conflicts = (
-            self._resolve_cascade_conflicts_dialog
         )
 
         self._selected_entity_id: str | None = None
@@ -187,12 +183,6 @@ class MainWindow(QtWidgets.QMainWindow):
         executor.run_queued.connect(self._on_executor_run_queued)
         executor.run_started.connect(self._on_executor_run_started)
         executor.run_finished.connect(self._on_executor_run_finished)
-
-        self._divergences_dock_widget = DivergencesDock(self.app_service)
-        self._divergences_dock = QtWidgets.QDockWidget("Divergences", self)
-        self._divergences_dock.setWidget(self._divergences_dock_widget)
-        self.addDockWidget(QtCore.Qt.DockWidgetArea.BottomDockWidgetArea, self._divergences_dock)
-        self._divergences_dock.hide()
 
         center_panel = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.canvas = MechanismCanvas(self.app_service)
@@ -1403,11 +1393,10 @@ class MainWindow(QtWidgets.QMainWindow):
         case = self.app_service.current_case()
         if case is None:
             return
-        run = next((r for r in case.runs if r.id == run_id), None)
+        run = next((a for a in case.analyses if a.id == run_id), None)
         if run is None:
             return
-        analysis = next((a for a in case.analyses if a.id == run.analysis_id), None)
-        label = analysis.name if analysis is not None else run_id
+        label = run.name or run_id
         pending = self.app_service.executor.pending_count() if self.app_service.executor is not None else 0
         self.run_status.show_running(run_id, label, pending=pending)
         if self._active_mode_controller is not None:
@@ -1420,13 +1409,9 @@ class MainWindow(QtWidgets.QMainWindow):
         analysis_label = run_id
         case = self.app_service.current_case()
         if case is not None:
-            run = next((r for r in case.runs if r.id == run_id), None)
-            if run is not None:
-                analysis = next(
-                    (a for a in case.analyses if a.id == run.analysis_id), None
-                )
-                if analysis is not None:
-                    analysis_label = analysis.name
+            run = next((a for a in case.analyses if a.id == run_id), None)
+            if run is not None and run.name:
+                analysis_label = run.name
         if run is not None and status == "failed":
             error_text = run.error_message or "(no error message)"
             self.run_status.show_finished(status, analysis_label, error=error_text)
@@ -1478,10 +1463,6 @@ class MainWindow(QtWidgets.QMainWindow):
         ws.selected_analysis_id = None
         self.app_service.poses.clear_current()
         self.case_diffs_widget.refresh()
-        self._divergences_dock_widget.show_case(case_id)
-        case = ws.cases.get(case_id)
-        if case and case.metadata.get("divergence_warnings"):
-            self._divergences_dock.show()
         self.canvas.update()
 
     def _on_case_activated(self, case_id: str) -> None:
@@ -1503,10 +1484,11 @@ class MainWindow(QtWidgets.QMainWindow):
         case = self.app_service.current_case()
         if case is None:
             return
-        run = next((r for r in case.runs if r.id == run_id), None)
+        # ``run_id`` is now an analysis id (the standalone Run entity was removed).
+        run = next((a for a in case.analyses if a.id == run_id), None)
         if run is None:
             return
-        self._on_run_analysis_requested(run.analysis_id)
+        self._on_run_analysis_requested(run.id)
 
     def _on_working_context_changed(self) -> None:
         project = self.app_service.display_project
@@ -1824,10 +1806,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if case is None:
             return None
         runs = [
-            run for run in case.runs
-            if run.analysis_id == analysis.id
-            and run.result_ref is not None
-            and run.status in {"ok", "partial"}
+            a for a in case.analyses
+            if a.id == analysis.id
+            and a.result_ref is not None
+            and a.status in {"ok", "partial"}
         ]
         return runs[-1] if runs else None
 
@@ -2372,10 +2354,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if case is None:
             return True
         ctx = self.app_service._service_context
-        analysis_ids = ctx._affected_analysis_ids_for_active_scope()
+        analysis_ids = ctx.affected_analysis_ids()
         affected_runs = [
-            r for r in case.runs
-            if r.analysis_id in analysis_ids and r.status in {"ok", "partial"}
+            a for a in case.analyses
+            if a.id in analysis_ids and a.status in {"ok", "partial"}
         ]
         if not affected_runs:
             return True
@@ -2400,10 +2382,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self._append_message("Editing is only available at t=0")
             return False
         return True
-
-    def _resolve_cascade_conflicts_dialog(self, conflicts: list) -> dict[str, str] | None:
-        from quino.gui.dialogs.cascade_conflicts_dialog import resolve_cascade_conflicts_modal
-        return resolve_cascade_conflicts_modal(conflicts, self)
 
     def _new_project(self) -> None:
         if not self._confirm_save_if_dirty():
@@ -2695,69 +2673,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tree.blockSignals(False)
 
     def _inject_case_override_hints(self, selected_entity_id: str | None) -> None:
-        """Render link-state hints under each property row of the selected entity,
-        derived from ``case.overlay``.
-
-        - If the entity is local to the active case: every cascadable property gets a
-          "Local to this case" hint (not resettable; nothing to restore).
-        - If the entity is inherited and the property is unlinked (override):
-          hint shows the parent value, with a Reset button to re-link.
-        - If the entity is inherited and the property is still linked, no hint.
-        """
-        if not selected_entity_id:
-            return
-        ws = self.app_service._workspace
-        if ws is None or not ws.selected_case_id:
-            return
-        case = ws.cases.get(ws.selected_case_id)
-        if case is None or case.overlay is None:
-            return
-        entry = case.overlay.entities.get(selected_entity_id)
-        if entry is None:
-            return
-        parent_case = ws.cases.get(case.parent_case_id) if case.parent_case_id else None
-        parent_label = parent_case.name if parent_case is not None else "parent"
-
-        from quino.services.cascade_property_registry import cascadable_properties
-        from quino.services.case_overlay_validator import _entity_lookup
-
-        lookup = _entity_lookup(case)
-        ent_info = lookup.get(selected_entity_id)
-        if ent_info is None:
-            return
-        entity, cls = ent_info
-        try:
-            base_props = set(cascadable_properties(cls))
-        except ValueError:
-            base_props = set()
-        # Include dynamic paths the engine cascades (parameters.*, metadata.values.*).
-        dyn_props: set[str] = set()
-        parameters = getattr(entity, "parameters", None)
-        if isinstance(parameters, dict):
-            dyn_props.update(f"parameters.{k}" for k in parameters)
-        metadata = getattr(entity, "metadata", None)
-        values = getattr(metadata, "values", None) if metadata is not None else None
-        if isinstance(values, dict):
-            dyn_props.update(f"metadata.values.{k}" for k in values)
-
-        if entry.origin == "local":
-            for prop in sorted(base_props | dyn_props):
-                self.inspector.set_property_hint(prop, "Local to this case", resettable=False)
-            return
-
-        parent_entity = None
-        if parent_case is not None:
-            parent_entity = _entity_lookup(parent_case).get(selected_entity_id, (None, None))[0]
-        for prop in sorted(base_props | dyn_props):
-            if prop in entry.linked_properties or prop.split(".", 1)[0] in entry.linked_properties:
-                continue
-            parent_val_str = self._format_property_value(parent_entity, prop) if parent_entity is not None else None
-            hint = (
-                f"Overrides {parent_label}: {parent_val_str}"
-                if parent_val_str is not None
-                else f"Overrides {parent_label}"
-            )
-            self.inspector.set_property_hint(prop, hint, resettable=True)
+        # Case overlays were removed; per-property inheritance hints no longer apply.
+        return
 
     def _on_inspector_override_reset(self, path: str) -> None:
         """Handle the inspector's Reset-override button.
@@ -2904,100 +2821,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return None
 
     def _apply_case_delta_highlights(self) -> None:
-        """Highlight model tree items for entities changed in the active case.
-
-        Color semantics:
-          - dark blue: property override added by THIS case (local)
-          - light blue (italic): property override inherited from an ancestor
-          - dark green: entity added by THIS case (local)
-          - light green (italic): entity added by an ancestor case (inherited)
-          - red: entity removed by THIS case
-          - light red (italic): entity removed by an ancestor case
-        Tooltips spell out which case set the override / addition / removal.
-        """
-        # First, clear all foreground overrides + font italics on entity items
-        it = QtWidgets.QTreeWidgetItemIterator(self.tree)
-        while it.value():
-            item = it.value()
-            item.setForeground(0, QtGui.QBrush())
-            item.setToolTip(0, "")
-            font = item.font(0)
-            font.setItalic(False)
-            item.setFont(0, font)
-            it += 1
-
-        ws = self.app_service._workspace
-        if ws is None or ws.selected_case_id is None:
-            return
-        case = ws.cases.get(ws.selected_case_id)
-        if case is None or case.overlay is None:
-            return
-
-        from quino.gui._palette import (
-            ADDED_GREEN,
-            OVERRIDE_ORANGE,
-            REMOVED_RED,
-        )
-
-        # entity_id -> (color_hex, italic, tooltip)
-        per_entity: dict[str, tuple[str, bool, str]] = {}
-
-        # Local entities (added in this case).
-        for ent_id, entry in case.overlay.entities.items():
-            if entry.origin == "local":
-                per_entity[ent_id] = (ADDED_GREEN, False, "Added in this case")
-            elif entry.linked_properties is not None and entry.origin == "inherited":
-                # Any unlinked cascadable property means the row has an override.
-                # We use a coarse signal here: if any linked prop is missing vs the
-                # full cascadable set the engine would assign at fork, flag it.
-                # Cheaper proxy: highlight when linked_properties is not "everything".
-                # That is acceptable as a visual cue; precise per-prop diff goes in
-                # the inspector hint.
-                pass
-
-        # Inherited entities deleted by this case.
-        for ent_id in case.overlay.deleted_inherited_entity_ids:
-            per_entity[ent_id] = (REMOVED_RED, True, "Deleted from parent in this case")
-
-        # Inherited entities with overrides (any unlinked cascadable prop).
-        from quino.services.cascade_property_registry import cascadable_properties
-        from quino.services.case_overlay_validator import _entity_lookup
-        lookup = _entity_lookup(case)
-        for ent_id, entry in case.overlay.entities.items():
-            if entry.origin != "inherited" or ent_id in per_entity:
-                continue
-            ent_info = lookup.get(ent_id)
-            if ent_info is None:
-                continue
-            _ent, cls = ent_info
-            try:
-                full = set(cascadable_properties(cls))
-            except ValueError:
-                full = set()
-            base_linked = {p.split(".", 1)[0] for p in entry.linked_properties}
-            if not full.issubset(base_linked):
-                per_entity[ent_id] = (
-                    OVERRIDE_ORANGE, False, "Property override in this case",
-                )
-
-        # Walk tree and apply.
-        it = QtWidgets.QTreeWidgetItemIterator(self.tree)
-        while it.value():
-            item = it.value()
-            data = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
-            entity_id: str | None = None
-            if isinstance(data, (tuple, list)) and len(data) > 1:
-                entity_id = data[1]
-            elif isinstance(data, str):
-                entity_id = data
-            if entity_id and entity_id in per_entity:
-                color, italic, tip = per_entity[entity_id]
-                item.setForeground(0, QtGui.QBrush(QtGui.QColor(color)))
-                font = item.font(0)
-                font.setItalic(italic)
-                item.setFont(0, font)
-                item.setToolTip(0, tip)
-            it += 1
+        # Case overlays were removed; model-tree delta highlights no longer apply.
+        return
 
     def _collect_expanded_tree_keys(self) -> set[str]:
         keys: set[str] = set()

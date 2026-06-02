@@ -259,8 +259,8 @@ class KinematicModeController(AnalysisModeController):
         if case is None or self._current_analysis is None:
             return None
         runs = [
-            run for run in case.runs
-            if run.analysis_id == self._current_analysis.id and run.status in {"ok", "partial"} and run.result_ref is not None
+            a for a in case.analyses
+            if a.id == self._current_analysis.id and a.status in {"ok", "partial"} and a.result_ref is not None
         ]
         if not runs:
             return None
@@ -298,5 +298,14 @@ class KinematicModeController(AnalysisModeController):
             return
         rows = []
         if run is not None:
-            rows = [[key, f"{value:.6g}"] for key, value in sorted(run.metrics.items())]
+            for metric in getattr(run, "metrics", []):
+                result = getattr(metric, "result", None)
+                if result is None or result.status != "ok":
+                    continue
+                value = result.value
+                try:
+                    text = f"{float(value):.6g}"
+                except (TypeError, ValueError):
+                    text = str(value)
+                rows.append([metric.name, text])
         self._report.replace_table_tab("Metrics", ["Key", "Value"], rows)

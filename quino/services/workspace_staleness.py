@@ -11,7 +11,8 @@ def mark_descendants_stale(workspace: Workspace, root_case_id: str) -> int:
         case = workspace.cases.get(cid)
         if case is None:
             continue
-        for run in case.runs:
+        # The standalone Run entity was removed; run state now lives on Analysis.
+        for run in case.analyses:
             if run.status in {"ok", "partial"}:
                 run.status = "stale"
                 if "ancestor edited" not in run.warnings:

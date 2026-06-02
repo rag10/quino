@@ -51,14 +51,6 @@ class ServiceContext:
     confirm_run_invalidation: Callable[[], bool] = field(
         default_factory=lambda: (lambda: True)
     )
-    resolve_cascade_conflicts: Callable[[list], dict[str, str] | None] = field(
-        default_factory=lambda: (lambda conflicts: {f"{c.case_id}:{c.path}": "accept" for c in conflicts})
-    )
-
-    def cascade_resolution_for(self, conflicts: list) -> dict[str, str] | None:
-        if not conflicts:
-            return {}
-        return self.resolve_cascade_conflicts(conflicts)
 
     # ------------------------------------------------------------------
     # Back-compat: command-services use cascade_provider() for mutations,

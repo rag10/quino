@@ -40,24 +40,24 @@ class RunComparisonDialog(QtWidgets.QDialog):
         ws = self.app_service._workspace
         if ws is None:
             return
+        # The standalone Run entity was removed: each Analysis now carries its own
+        # run state, so an analysis with a result_ref IS a comparable run.
         by_name: dict[str, list] = defaultdict(list)
         for case in ws.cases.values():
-            analyses = {a.id: a for a in case.analyses}
-            for run in case.runs:
-                analysis = analyses.get(run.analysis_id)
-                if analysis is None:
+            for analysis in case.analyses:
+                if analysis.result_ref is None:
                     continue
-                by_name[analysis.name].append((analysis, run))
+                by_name[analysis.name].append(analysis)
         for analysis_name, items in by_name.items():
             root = QtWidgets.QTreeWidgetItem([analysis_name])
             self.run_tree.addTopLevelItem(root)
-            for analysis, run in items:
-                item = QtWidgets.QTreeWidgetItem([f"{run.id} ({analysis.analysis_type})"])
-                item.setData(0, QtCore.Qt.ItemDataRole.UserRole, (analysis.name, run.id))
+            for analysis in items:
+                item = QtWidgets.QTreeWidgetItem([f"{analysis.id} ({analysis.analysis_type})"])
+                item.setData(0, QtCore.Qt.ItemDataRole.UserRole, (analysis.name, analysis.id))
                 item.setFlags(item.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
                 item.setCheckState(0, QtCore.Qt.CheckState.Unchecked)
                 root.addChild(item)
-                self._run_items[(analysis.name, run.id)] = item
+                self._run_items[(analysis.name, analysis.id)] = item
             root.setExpanded(True)
 
     def _on_item_changed(self, item: QtWidgets.QTreeWidgetItem, column: int) -> None:
@@ -99,7 +99,7 @@ class RunComparisonDialog(QtWidgets.QDialog):
         ws = self.app_service._workspace
         if ws is None:
             return []
-        runs = {run.id: run for case in ws.cases.values() for run in case.runs}
+        runs = {a.id: a for case in ws.cases.values() for a in case.analyses}
         out: list[tuple[str, dict]] = []
         for (analysis_name, run_id), item in self._run_items.items():
             if item.checkState(0) != QtCore.Qt.CheckState.Checked:

@@ -153,8 +153,8 @@ class DynamicModeController(AnalysisModeController):
         case = self.main_window.app_service.current_case()
         if case is None:
             return
-        run = next((item for item in case.runs if item.id == run_id), None)
-        if run is None or run.analysis_id != self._current_analysis.id:
+        run = next((a for a in case.analyses if a.id == run_id), None)
+        if run is None or run.id != self._current_analysis.id:
             return
         self.on_run_selected(run)
 
@@ -163,7 +163,16 @@ class DynamicModeController(AnalysisModeController):
             return
         rows = []
         if run is not None:
-            rows = [[key, f"{value:.6g}"] for key, value in sorted(run.metrics.items())]
+            for metric in getattr(run, "metrics", []):
+                result = getattr(metric, "result", None)
+                if result is None or result.status != "ok":
+                    continue
+                value = result.value
+                try:
+                    text = f"{float(value):.6g}"
+                except (TypeError, ValueError):
+                    text = str(value)
+                rows.append([metric.name, text])
         self._metrics_panel.replace_table_tab("Metrics", ["Key", "Value"], rows)
 
     def _latest_run(self):
@@ -171,10 +180,10 @@ class DynamicModeController(AnalysisModeController):
         if case is None or self._current_analysis is None:
             return None
         runs = [
-            run for run in case.runs
-            if run.analysis_id == self._current_analysis.id
-            and run.status in {"ok", "partial"}
-            and run.result_ref is not None
+            a for a in case.analyses
+            if a.id == self._current_analysis.id
+            and a.status in {"ok", "partial"}
+            and a.result_ref is not None
         ]
         return runs[-1] if runs else None
 

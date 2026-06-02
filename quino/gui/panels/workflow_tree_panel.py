@@ -245,61 +245,6 @@ class WorkflowTreePanel(QtWidgets.QWidget):
     # Tree builders
     # ------------------------------------------------------------------
 
-    def _overlay_has_unlinked_props(self, case: Case) -> bool:
-        """True if any inherited entity has at least one unlinked cascadable property."""
-        overlay = case.overlay
-        if overlay is None:
-            return False
-        from quino.services.cascade_property_registry import cascadable_properties
-        from quino.services.case_overlay_validator import _entity_lookup
-        lookup = _entity_lookup(case)
-        for ent_id, entry in overlay.entities.items():
-            if entry.origin != "inherited":
-                continue
-            ent_info = lookup.get(ent_id)
-            if ent_info is None:
-                continue
-            _ent, cls = ent_info
-            try:
-                full = set(cascadable_properties(cls))
-            except ValueError:
-                continue
-            base_linked = {p.split(".", 1)[0] for p in entry.linked_properties}
-            if not full.issubset(base_linked):
-                return True
-        return False
-
-    def _case_badges(self, case: Case) -> tuple[str, str]:
-        """Return (label_suffix, tooltip_extension) describing overlay state.
-
-        ``★`` flags any local edit vs. parent (local entities, deleted-inherited,
-        or unlinked properties). ``⚠ N`` shows divergence warnings count.
-        """
-        suffix_parts: list[str] = []
-        tooltip_parts: list[str] = []
-        overlay = getattr(case, "overlay", None)
-        if overlay is not None:
-            has_local_entity = any(e.origin == "local" for e in overlay.entities.values())
-            has_deleted = bool(overlay.deleted_inherited_entity_ids)
-            has_unlinked = self._overlay_has_unlinked_props(case)
-            if has_local_entity or has_deleted or has_unlinked:
-                suffix_parts.append("★")
-                local_pieces = []
-                if has_local_entity:
-                    local_pieces.append("local entities")
-                if has_deleted:
-                    local_pieces.append("deleted inherited entities")
-                if has_unlinked:
-                    local_pieces.append("property overrides")
-                tooltip_parts.append(f"Diverges from parent: {', '.join(local_pieces)}")
-        warnings = case.metadata.get("divergence_warnings") if case.metadata else None
-        if isinstance(warnings, list) and warnings:
-            suffix_parts.append(f"⚠ {len(warnings)}")
-            tooltip_parts.append(f"{len(warnings)} unresolved divergence warning(s)")
-        suffix = ("  " + " ".join(suffix_parts)) if suffix_parts else ""
-        tooltip = " · ".join(tooltip_parts)
-        return suffix, tooltip
-
     def _build_case_item(self, case: Case, ws) -> QtWidgets.QTreeWidgetItem:
         is_active = ws.selected_case_id == case.id
         is_root = case.parent_case_id is None
@@ -326,23 +271,18 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         text_color = "#ffffff" if is_active else BLUE_DARK
         item.setForeground(0, QtGui.QBrush(QtGui.QColor(text_color)))
 
-        # Compose overlay/divergence badges as a label suffix and tooltip extension.
-        badge_suffix, badge_tooltip = self._case_badges(case)
-        if badge_suffix:
-            item.setText(0, f"{label_prefix}{case.name}{badge_suffix}")
         tooltip = f"{'Case' if is_root else 'Subcase'}: {case.name}"
         if is_active:
             tooltip += " (active)"
-        if badge_tooltip:
-            tooltip += f"\n{badge_tooltip}"
         item.setToolTip(0, tooltip)
 
         analyses_by_pose: dict[str | None, list] = {}
         for analysis in case.analyses:
             analyses_by_pose.setdefault(analysis.pose_id, []).append(analysis)
+        # The standalone ``Run`` entity / ``Case.runs`` were removed; run state now
+        # lives on each Analysis. Run-as-Analysis rendering is handled in task 4.3;
+        # for now no separate run rows are produced.
         runs_by_analysis: dict[str, list] = {}
-        for run in case.runs:
-            runs_by_analysis.setdefault(run.analysis_id, []).append(run)
         known_pose_ids = {p.id for p in case.poses}
 
         # --- Poses group (default first, then user poses) ---
