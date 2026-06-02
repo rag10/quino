@@ -303,16 +303,33 @@ class WorkspaceCommands:
             new_analysis = _copy.deepcopy(src)
             new_analysis.id = self._ctx.ids.new("analysis")
             new_analysis.name = new_name or f"{src.name} copy"
+            # Reset run state so the duplicate starts clean.
+            new_analysis.status = "to_be_run"
+            new_analysis.created_at = None
+            new_analysis.finished_at = None
+            new_analysis.result_ref = None
+            new_analysis.artifacts = []
+            new_analysis.warnings = []
+            new_analysis.error_message = ""
+            new_analysis.config_snapshot = {}
+            for _metric in new_analysis.metrics:
+                _metric.result = None
             case.analyses.append(new_analysis)
             return new_analysis
         raise ValueError(f"Analysis {analysis_id!r} not found")
 
     def delete_run(self, run_id: str) -> None:
-        # Fase 1.10: the ``Run`` entity and ``Case.runs`` were removed; run state
-        # now lives flattened on ``Analysis``. Standalone run deletion no longer
-        # applies; the migrated semantics (resetting an analysis' run state) are
-        # deferred to a later Fase. No-op for now to keep the API importable.
-        return None
+        """Reset the run state of the analysis ``run_id`` (analysis id).
+
+        Run state is flattened onto Analysis, so "deleting a run" means clearing
+        the analysis' results back to to_be_run.
+        """
+        from quino.services.run_invalidation import delete_run as _reset_run_state
+        ws = self._ensure_workspace()
+        self._ctx.snapshot()
+        project_dir = getattr(self._ctx, "project_dir", None)
+        # project_dir may not be on ctx; pass None if unavailable (artifact unlink skipped).
+        _reset_run_state(ws, None, run_id)
 
     def set_selected_analysis(self, analysis_id: str | None) -> None:
         self._ctx.snapshot()
