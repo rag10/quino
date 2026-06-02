@@ -3,14 +3,6 @@ from __future__ import annotations
 import threading
 import time
 
-import pytest
-
-pytest.skip(
-    "overlay removed; Run entity and case.runs replaced by flattened Analysis run "
-    "state. RunExecutor still appends to case.runs; migration deferred to Fase 2/3.",
-    allow_module_level=True,
-)
-
 from PySide6 import QtWidgets
 
 from quino.application.service import ApplicationService
@@ -19,7 +11,7 @@ from quino.gui.widgets.run_status_widget import RunStatusWidget
 from quino.services.run_executor import RunExecutor, RunHandle
 
 
-def _bootstrap() -> tuple[ApplicationService, object]:
+def _bootstrap():
     svc = ApplicationService()
     svc.new_project("t")
     ws = svc._workspace
@@ -29,27 +21,31 @@ def _bootstrap() -> tuple[ApplicationService, object]:
     return svc, analysis
 
 
-def test_enqueue_returns_handle_with_run_id(monkeypatch) -> None:
+def _analysis(svc, analysis_id):
+    case = svc.current_case()
+    return next(a for a in case.analyses if a.id == analysis_id)
+
+
+def test_enqueue_runs_and_sets_status_on_analysis(monkeypatch):
     svc, analysis = _bootstrap()
 
     class FakeRunner:
         def run(self, project, analysis, **kwargs):
             return AnalysisResult(analysis_id=analysis.id, analysis_type=analysis.analysis_type, status="ok")
 
-    monkeypatch.setattr("quino.services.run_executor.get_runner_for_type", lambda _kind: FakeRunner())
-
+    monkeypatch.setattr("quino.services.run_executor.get_runner_for_type", lambda _k: FakeRunner())
     ex = RunExecutor(svc)
-    handle = ex.enqueue(analysis.id)
     try:
+        handle = ex.enqueue(analysis.id)
         assert isinstance(handle, RunHandle)
-        assert handle.run_id is not None
-        run = next(r for r in svc.current_case().runs if r.id == handle.run_id)
-        assert run.status in {"queued", "running", "ok", "failed"}
+        assert handle.analysis_id == analysis.id
+        handle.done_event.wait(timeout=10)
+        assert _analysis(svc, analysis.id).status == "ok"
     finally:
         ex.shutdown()
 
 
-def test_cancel_during_run_returns_to_be_run(monkeypatch) -> None:
+def test_cancel_during_run_returns_to_be_run(monkeypatch):
     svc, analysis = _bootstrap()
     started = threading.Event()
 
@@ -59,62 +55,76 @@ def test_cancel_during_run_returns_to_be_run(monkeypatch) -> None:
             deadline = time.time() + 2.0
             while time.time() < deadline:
                 if cancel_event is not None and cancel_event.is_set():
-                    return AnalysisResult(
-                        analysis_id=analysis.id,
-                        analysis_type=analysis.analysis_type,
-                        status="to_be_run",
-                        error_message="Cancelled by user",
-                    )
+                    return AnalysisResult(analysis_id=analysis.id, analysis_type=analysis.analysis_type,
+                                          status="to_be_run", error_message="Cancelled by user")
                 time.sleep(0.02)
             return AnalysisResult(analysis_id=analysis.id, analysis_type=analysis.analysis_type, status="ok")
 
-    monkeypatch.setattr("quino.services.run_executor.get_runner_for_type", lambda _kind: FakeRunner())
-
+    monkeypatch.setattr("quino.services.run_executor.get_runner_for_type", lambda _k: FakeRunner())
     ex = RunExecutor(svc)
-    handle = ex.enqueue(analysis.id)
     try:
-        assert started.wait(timeout=1.0)
+        handle = ex.enqueue(analysis.id)
+        assert started.wait(timeout=2.0)
         handle.cancel()
-        deadline = time.time() + 3.0
-        while time.time() < deadline:
-            run = next(r for r in svc.current_case().runs if r.id == handle.run_id)
-            if run.status not in {"queued", "running"}:
-                break
-            time.sleep(0.02)
-        assert run.status == "to_be_run"
-        assert run.result_ref is None
+        handle.done_event.wait(timeout=5)
+        assert _analysis(svc, analysis.id).status == "to_be_run"
     finally:
         ex.shutdown()
 
 
-def test_multiple_queued_runs_execute_serially_in_enqueue_order(monkeypatch) -> None:
+def test_partial_over_ok_defers_and_keeps_previous(monkeypatch):
     svc, analysis = _bootstrap()
-    start_order: list[str] = []
-    finish_order: list[str] = []
+    # First make it "ok" by hand to simulate a prior successful run.
+    _analysis(svc, analysis.id).status = "ok"
 
-    class FakeRunner:
-        def run(self, project, analysis, *, run=None, **kwargs):
-            start_order.append(run.id)
-            time.sleep(0.05)
-            finish_order.append(run.id)
-            return AnalysisResult(analysis_id=analysis.id, analysis_type=analysis.analysis_type, status="ok")
+    class PartialRunner:
+        def run(self, project, analysis, **kwargs):
+            return AnalysisResult(analysis_id=analysis.id, analysis_type=analysis.analysis_type,
+                                  status="partial", error_message="solver crashed mid-run")
 
-    monkeypatch.setattr("quino.services.run_executor.get_runner_for_type", lambda _kind: FakeRunner())
+    monkeypatch.setattr("quino.services.run_executor.get_runner_for_type", lambda _k: PartialRunner())
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    ex = RunExecutor(svc)
+    asked: list[str] = []
+    ex.run_needs_confirmation.connect(lambda aid: asked.append(aid))
+    try:
+        handle = ex.enqueue(analysis.id)
+        handle.done_event.wait(timeout=10)
+        # previous OK preserved, confirmation requested
+        assert _analysis(svc, analysis.id).status == "ok"
+        # The signal is emitted from the worker thread; pump the Qt event loop
+        # so the queued cross-thread connection delivers it.
+        deadline = time.time() + 2.0
+        while analysis.id not in asked and time.time() < deadline:
+            app.processEvents()
+            time.sleep(0.02)
+        assert analysis.id in asked
+        # reject overwrite -> stays ok
+        ex.confirm_partial(analysis.id, overwrite=False)
+        assert _analysis(svc, analysis.id).status == "ok"
+    finally:
+        ex.shutdown()
 
+
+def test_partial_over_non_ok_applies_directly(monkeypatch):
+    svc, analysis = _bootstrap()  # starts to_be_run
+
+    class PartialRunner:
+        def run(self, project, analysis, **kwargs):
+            return AnalysisResult(analysis_id=analysis.id, analysis_type=analysis.analysis_type,
+                                  status="partial", error_message="partial frames")
+
+    monkeypatch.setattr("quino.services.run_executor.get_runner_for_type", lambda _k: PartialRunner())
     ex = RunExecutor(svc)
     try:
-        h1 = ex.enqueue(analysis.id)
-        h2 = ex.enqueue(analysis.id)
-        deadline = time.time() + 3.0
-        while time.time() < deadline and len(finish_order) < 2:
-            time.sleep(0.02)
-        assert start_order == [h1.run_id, h2.run_id]
-        assert finish_order == [h1.run_id, h2.run_id]
+        handle = ex.enqueue(analysis.id)
+        handle.done_event.wait(timeout=10)
+        assert _analysis(svc, analysis.id).status == "partial"
     finally:
         ex.shutdown()
 
 
-def test_ensure_executor_idempotent() -> None:
+def test_ensure_executor_idempotent():
     svc, _ = _bootstrap()
     a = svc.ensure_executor()
     b = svc.ensure_executor()
@@ -123,7 +133,9 @@ def test_ensure_executor_idempotent() -> None:
     svc.executor = None
 
 
-def test_status_widget_reflects_running_and_idle(qtbot) -> None:
+# ---- RunStatusWidget tests (unchanged) ----
+
+def test_status_widget_reflects_running_and_idle(qtbot):
     _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     widget = RunStatusWidget()
     qtbot.addWidget(widget)
@@ -133,7 +145,7 @@ def test_status_widget_reflects_running_and_idle(qtbot) -> None:
     assert widget._label.text() == "Idle"
 
 
-def test_status_widget_keeps_failed_error_in_tooltip(qtbot) -> None:
+def test_status_widget_keeps_failed_error_in_tooltip(qtbot):
     _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     widget = RunStatusWidget()
     qtbot.addWidget(widget)
@@ -143,7 +155,7 @@ def test_status_widget_keeps_failed_error_in_tooltip(qtbot) -> None:
     assert long_error in widget._label.toolTip()
 
 
-def test_status_label_does_not_force_wide_layout(qtbot) -> None:
+def test_status_label_does_not_force_wide_layout(qtbot):
     _app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     widget = RunStatusWidget()
     qtbot.addWidget(widget)
