@@ -305,8 +305,13 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         # "Analyses" group node).
         dp_analyses = analyses_by_pose.get(dp_pose_id, []) if dp_pose_id else []
         for analysis in dp_analyses:
-            dp_item.addChild(self._build_analysis_item(analysis, ws))
+            a_child = self._build_analysis_item(analysis, ws)
+            if is_active:
+                self._tint_active(a_child)
+            dp_item.addChild(a_child)
         dp_item.setExpanded(True)
+        if is_active:
+            self._tint_active(dp_item)
         item.addChild(dp_item)
 
         for pose in non_default_poses:
@@ -326,8 +331,15 @@ class WorkflowTreePanel(QtWidgets.QWidget):
                 pose_item.setBackground(0, QtGui.QBrush(QtGui.QColor(BLUE_SOFT)))
             pose_item.setToolTip(0, f"Pose: {pose.name}")
             for analysis in pose_analyses:
-                pose_item.addChild(self._build_analysis_item(analysis, ws))
+                a_child = self._build_analysis_item(analysis, ws)
+                if is_active and not is_selected_pose:
+                    self._tint_active(a_child)
+                pose_item.addChild(a_child)
             pose_item.setExpanded(True)
+            # Active-case tint, unless the pose is the explicitly-selected one
+            # (which already carries the stronger BLUE_SOFT highlight).
+            if is_active and not is_selected_pose:
+                self._tint_active(pose_item)
             item.addChild(pose_item)
 
         # --- Orphaned analyses (no pose / pose missing) ---
@@ -355,7 +367,21 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         sub_group.setExpanded(bool(child_cases))
         item.addChild(sub_group)
 
+        # When this is the active case, auto-expand it so its poses/analyses are
+        # visible. The subcases group is intentionally NOT tinted (only the
+        # active case's own poses/analyses are highlighted).
+        if is_active:
+            item.setExpanded(True)
+
         return item
+
+    def _tint_active(self, item: QtWidgets.QTreeWidgetItem) -> None:
+        """Paint the soft-blue active-case background on a pose/analysis row.
+
+        Applied to the poses and analyses that hang off the active case
+        (excluding subcases) so the active scope reads at a glance.
+        """
+        item.setBackground(0, QtGui.QBrush(QtGui.QColor(BLUE_SOFT)))
 
     def _build_analysis_item(self, analysis, ws) -> QtWidgets.QTreeWidgetItem:
         type_badge = _ANALYSIS_TYPE_LABELS.get(analysis.analysis_type, analysis.analysis_type[:3].capitalize())
