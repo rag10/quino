@@ -24,7 +24,7 @@ from quino.domain.model import (
     Style,
 )
 from quino.domain.workspace import Case
-from quino.services.case_overlay_validator import _entity_lookup
+from quino.services.case_entities import entity_lookup as _entity_lookup
 from quino.services.cascade_property_category import PropertyCategory, classify
 
 
