@@ -70,12 +70,12 @@ from quino.domain.types import (
 
 
 class UnsupportedSchemaError(ValueError):
-    """Raised when a JSON file has a schema version other than 0.3.0."""
+    """Raised when a JSON file has a schema version other than 0.4.0."""
 
 
 class JsonMapper:
     # ------------------------------------------------------------------
-    # Public API — schema 0.3.0 Workspace
+    # Public API — schema 0.4.0 Workspace
     # ------------------------------------------------------------------
 
     def save(self, workspace: Workspace, path: str | Path) -> None:
@@ -85,23 +85,23 @@ class JsonMapper:
             json.dump(data, fh, indent=2, sort_keys=False)
 
     def load(self, path: str | Path) -> Workspace:
-        """Load a schema 0.3.0 workspace from *path*.
+        """Load a schema 0.4.0 workspace from *path*.
 
         Raises ``UnsupportedSchemaError`` for any other schema version.
         """
         raw = Path(path).read_text(encoding="utf-8")
         data = json.loads(raw)
         version = data.get("schema_version")
-        if version != "0.3.0":
+        if version != "0.4.0":
             raise UnsupportedSchemaError(
                 f"This file uses schema version {version!r}. "
-                f"Only schema 0.3.0 is supported by this reader."
+                f"Only schema 0.4.0 is supported by this reader."
             )
         required = {"id", "name", "root_case_ids", "cases"}
         missing = required - set(data)
         if missing:
             raise UnsupportedSchemaError(
-                "This file declares schema 0.3.0 but is not a Workspace root. "
+                "This file declares schema 0.4.0 but is not a Workspace root. "
                 f"Missing required field(s): {', '.join(sorted(missing))}."
             )
         return self._workspace_from_dict(data)

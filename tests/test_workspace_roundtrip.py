@@ -9,7 +9,15 @@ def test_load_rejects_old_schema_with_clear_message(tmp_path):
     mapper = JsonMapper()
     with pytest.raises(UnsupportedSchemaError) as exc:
         mapper.load(old)
-    assert "0.3.0" in str(exc.value)
+    assert "0.4.0" in str(exc.value)
+
+
+def test_load_rejects_0_3_0(tmp_path):
+    p = tmp_path / "old.quino.json"
+    p.write_text(json.dumps({"schema_version": "0.3.0", "id": "w", "name": "x",
+                             "root_case_ids": [], "cases": {}}))
+    with pytest.raises(UnsupportedSchemaError):
+        JsonMapper().load(p)
 
 
 from quino.domain.model import Body, Marker, Model, ScalarProperty

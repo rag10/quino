@@ -54,7 +54,7 @@ from quino.services.case_cascading import CascadingEngine
 
 
 class ApplicationService:
-    schema_version = "0.3.0"
+    schema_version = "0.4.0"
 
     def __init__(self) -> None:
         self.id_service = IdService()
