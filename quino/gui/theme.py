@@ -420,9 +420,65 @@ QToolButton:checked:disabled {{
 """
 
 
+_CHEVRON_PATH: str | None = None
+
+
+def _ensure_chevron_png() -> str:
+    """Render a chevron-down PNG once and return its path as a forward-slash string."""
+    global _CHEVRON_PATH
+    if _CHEVRON_PATH is not None:
+        return _CHEVRON_PATH
+
+    import tempfile
+    from pathlib import Path
+
+    tmp = Path(tempfile.mkdtemp(prefix="quino_chevron_v1_"))
+    size = 12
+    pix = QtGui.QPixmap(size, size)
+    pix.fill(QtCore.Qt.GlobalColor.transparent)
+    painter = QtGui.QPainter(pix)
+    painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
+    painter.setPen(QtCore.Qt.PenStyle.NoPen)
+    color = QtGui.QColor("#66727e")
+    painter.setBrush(QtGui.QBrush(color))
+    # Downward-pointing triangle polygon
+    cx = size / 2
+    cy = size / 2
+    margin = 2.0
+    triangle = QtGui.QPolygonF([
+        QtCore.QPointF(margin, margin + 1),
+        QtCore.QPointF(size - margin, margin + 1),
+        QtCore.QPointF(cx, size - margin),
+    ])
+    painter.drawPolygon(triangle)
+    painter.end()
+    out = tmp / "chevron_down.png"
+    pix.save(str(out), "PNG")
+    _CHEVRON_PATH = out.as_posix()
+    return _CHEVRON_PATH
+
+
+def app_stylesheet() -> str:
+    """Return the full app QSS string, including the combobox down-arrow rule.
+
+    The down-arrow rule requires a runtime-generated PNG path, so it cannot be
+    baked into the module-level ``APP_QSS`` constant.  Call this function (or
+    ``apply_modern_engineering_theme``) to get the complete stylesheet.
+    """
+    chevron = _ensure_chevron_png()
+    down_arrow_rule = (
+        f"\nQComboBox::down-arrow {{\n"
+        f"    image: url({chevron});\n"
+        f"    width: 12px;\n"
+        f"    height: 12px;\n"
+        f"}}\n"
+    )
+    return APP_QSS + down_arrow_rule
+
+
 def apply_modern_engineering_theme(app: QtWidgets.QApplication) -> None:
     app.setStyle("Fusion")
-    app.setStyleSheet(APP_QSS)
+    app.setStyleSheet(app_stylesheet())
     font = QtGui.QFont("Segoe UI", 9)
     app.setFont(font)
 
@@ -441,6 +497,8 @@ def apply_browser_tree_style(
     tree.setIconSize(QtCore.QSize(icon_size, icon_size))
     tree.setIndentation(indentation)
     tree.setRootIsDecorated(True)
+    tree.setExpandsOnDoubleClick(False)
+    tree.setItemsExpandable(True)
     if show_header is not None:
         tree.setHeaderHidden(not show_header)
     tree.setStyleSheet(BROWSER_TREE_QSS + tree_branch_stylesheet())
