@@ -253,6 +253,153 @@ class CascadingEngine:
             missing.update(ref for ref in entity.marker_ids if ref not in ids)
         return missing
 
+    # ------------------------------------------------------------------ cases
+
+    def fork_case(self, parent_case_id: str, name: str) -> str:
+        if parent_case_id not in self._ws.cases:
+            raise KeyError(f"Parent case {parent_case_id!r} not found")
+        parent = self._ws.cases[parent_case_id]
+        new_id = _new_case_id()
+        child = Case(
+            id=new_id,
+            name=name,
+            parent_case_id=parent_case_id,
+            model=copy.deepcopy(parent.model),
+            poses=self._clone_poses(parent),
+            analyses=self._clone_analyses_reset(parent),
+            sensor_outputs={},
+            reaction_outputs={},
+        )
+        self._ws.cases[new_id] = child
+        return new_id
+
+    def duplicate_case(self, source_case_id: str, name: str | None = None) -> str:
+        if source_case_id not in self._ws.cases:
+            raise KeyError(f"Case {source_case_id!r} not found")
+        source = self._ws.cases[source_case_id]
+        new_id = _new_case_id()
+        duplicate = Case(
+            id=new_id,
+            name=name or f"{source.name} copy",
+            description=source.description,
+            parent_case_id=source.parent_case_id,
+            model=copy.deepcopy(source.model),
+            poses=self._clone_poses(source),
+            analyses=self._clone_analyses_reset(source),
+            sensor_outputs={},
+            reaction_outputs={},
+            metadata=copy.deepcopy(source.metadata),
+        )
+        self._ws.cases[new_id] = duplicate
+        if duplicate.parent_case_id is None and new_id not in self._ws.root_case_ids:
+            self._ws.root_case_ids.append(new_id)
+        return new_id
+
+    def _clone_poses(self, source: Case):
+        cloned = copy.deepcopy(source.poses)
+        for pose in cloned:
+            pose.id = _new_pose_id()
+        if not any(p.is_default for p in cloned):
+            cloned.insert(0, create_default_pose(_new_pose_id()))
+        return cloned
+
+    def _clone_analyses_reset(self, source: Case) -> list[Analysis]:
+        cloned: list[Analysis] = copy.deepcopy(source.analyses)
+        for analysis in cloned:
+            analysis.id = _new_analysis_id()
+            analysis.pose_id = None
+            analysis.status = "to_be_run"
+            analysis.created_at = None
+            analysis.finished_at = None
+            analysis.result_ref = None
+            analysis.artifacts = []
+            analysis.warnings = []
+            analysis.error_message = ""
+            analysis.config_snapshot = {}
+            for metric in analysis.metrics:
+                metric.result = None
+        return cloned
+
+    def reparent_case(self, case_id: str, new_parent_case_id: str | None) -> OperationResult:
+        result = OperationResult()
+        case = self._ws.cases[case_id]
+        if new_parent_case_id is not None and self._would_form_cycle(case_id, new_parent_case_id):
+            raise ValueError(f"Reparenting {case_id!r} under {new_parent_case_id!r} would form a cycle")
+        old_parent = case.parent_case_id
+        case.parent_case_id = new_parent_case_id
+        if old_parent is None and case_id in self._ws.root_case_ids:
+            self._ws.root_case_ids.remove(case_id)
+        if new_parent_case_id is None and case_id not in self._ws.root_case_ids:
+            self._ws.root_case_ids.append(case_id)
+        for cid in {case_id, *self._all_descendants(case_id)}:
+            self._mark_modified(result, cid, model_affecting=True)
+        self._apply_staleness(result, "case reparented")
+        return result
+
+    def _would_form_cycle(self, case_id: str, candidate_parent_id: str) -> bool:
+        current: str | None = candidate_parent_id
+        seen: set[str] = set()
+        while current is not None:
+            if current == case_id or current in seen:
+                return True
+            seen.add(current)
+            current = self._ws.cases[current].parent_case_id
+        return False
+
+    # --------------------------------------------------------------- blocks
+
+    def add_connection(self, case_id: str, connection: Connection) -> OperationResult:
+        result = OperationResult()
+        case = self._ws.cases[case_id]
+        self._ensure_diagram(case).connections.append(connection)
+        self._mark_modified(result, case_id, model_affecting=True)
+        result.applied_changes.append(f"{case_id}:add_connection:{_connection_key(connection)}")
+        for child_id in self._direct_children(case_id):
+            self._propagate_connection_add(child_id, connection, result)
+        self._apply_staleness(result, "block connection added")
+        return result
+
+    def remove_connection(self, case_id: str, key: ConnectionKey) -> OperationResult:
+        result = OperationResult()
+        case = self._ws.cases[case_id]
+        diagram = case.model.control_graph
+        if diagram is None:
+            return result
+        object.__setattr__(diagram, "connections",
+                           [c for c in diagram.connections if _connection_key(c) != key])
+        self._mark_modified(result, case_id, model_affecting=True)
+        result.applied_changes.append(f"{case_id}:remove_connection:{key}")
+        for child_id in self._direct_children(case_id):
+            self._propagate_connection_remove(child_id, key, result)
+        self._apply_staleness(result, "block connection removed")
+        return result
+
+    def _propagate_connection_add(self, case_id, connection, result) -> None:
+        case = self._ws.cases[case_id]
+        diagram = case.model.control_graph
+        if diagram is None or connection.src_instance not in diagram.instances or \
+                connection.dst_instance not in diagram.instances:
+            return
+        key = _connection_key(connection)
+        if key not in {_connection_key(c) for c in diagram.connections}:
+            diagram.connections.append(copy.deepcopy(connection))
+            self._mark_modified(result, case_id, model_affecting=True)
+        for gc_id in self._direct_children(case_id):
+            self._propagate_connection_add(gc_id, connection, result)
+
+    def _propagate_connection_remove(self, case_id, key, result) -> None:
+        case = self._ws.cases[case_id]
+        diagram = case.model.control_graph
+        if diagram is None:
+            return
+        if key not in {_connection_key(c) for c in diagram.connections}:
+            return
+        object.__setattr__(diagram, "connections",
+                           [c for c in diagram.connections if _connection_key(c) != key])
+        self._mark_modified(result, case_id, model_affecting=True)
+        for gc_id in self._direct_children(case_id):
+            self._propagate_connection_remove(gc_id, key, result)
+
     # ---------------------------------------------------------------- helpers
 
     def _find_entity(self, case: Case, entity_id: str) -> object | None:
