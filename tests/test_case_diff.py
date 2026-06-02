@@ -153,10 +153,6 @@ def test_added_entity_emits_added_entry():
     child = ws.cases[child_id]
     new_body = _body(id_="b2", name="link", mass="1 kg")
     child.model.bodies.append(new_body)
-    if child.overlay is not None:
-        from quino.domain.workspace import EntityOverlay
-        child.overlay.entities["b2"] = EntityOverlay(origin="local")
-        child.overlay.entities["m1"]  # touch nothing — no-op
 
     diffs = [d for d in diff_case_against(root, child) if d.entity_id == "b2"]
     # The new body and its two structural markers all count as "added" in child.

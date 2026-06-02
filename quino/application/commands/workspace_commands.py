@@ -7,7 +7,6 @@ from quino.application._context import ServiceContext
 from quino.domain.workspace import (
     Analysis,
     Case,
-    Run,
     Workspace,
     create_default_pose,
 )
@@ -175,10 +174,7 @@ class WorkspaceCommands:
             return
         if getattr(pose, "is_default", False):
             raise ValueError("Cannot delete the reference pose")
-        owner_case = next(
-            (c for c in ws.cases.values() if any(p.id == pose_id for p in c.poses)),
-            None,
-        )
+        owner_case = self._find_case_for_pose(pose_id)
         if owner_case is None:
             return
         bound_analyses = [a for a in owner_case.analyses if a.pose_id == pose_id]
@@ -191,7 +187,6 @@ class WorkspaceCommands:
         if cascade:
             removed_analysis_ids = {a.id for a in bound_analyses}
             owner_case.analyses = [a for a in owner_case.analyses if a.id not in removed_analysis_ids]
-            owner_case.runs = [r for r in owner_case.runs if r.analysis_id not in removed_analysis_ids]
         owner_case.poses = [p for p in owner_case.poses if p.id != pose_id]
         if ws.selected_pose_id == pose_id:
             fallback = next((p.id for p in owner_case.poses if not p.is_default), None)
@@ -205,11 +200,8 @@ class WorkspaceCommands:
 
     def duplicate_pose(self, pose_id: str, *, new_name: str | None = None):
         import copy as _copy
-        ws = self._ensure_workspace()
-        owner_case = next(
-            (c for c in ws.cases.values() if any(p.id == pose_id for p in c.poses)),
-            None,
-        )
+        self._ensure_workspace()
+        owner_case = self._find_case_for_pose(pose_id)
         if owner_case is None:
             raise ValueError(f"Pose {pose_id!r} not found")
         src = next(p for p in owner_case.poses if p.id == pose_id)
@@ -294,8 +286,8 @@ class WorkspaceCommands:
             before = len(case.analyses)
             case.analyses = [a for a in case.analyses if a.id != analysis_id]
             if len(case.analyses) < before:
-                # Also remove runs of the deleted analysis.
-                case.runs = [r for r in case.runs if r.analysis_id != analysis_id]
+                # Run state lives on the Analysis itself, so removing the
+                # analysis already drops its run state.
                 if ws.selected_analysis_id == analysis_id:
                     ws.selected_analysis_id = None
                 break
@@ -316,13 +308,11 @@ class WorkspaceCommands:
         raise ValueError(f"Analysis {analysis_id!r} not found")
 
     def delete_run(self, run_id: str) -> None:
-        self._ctx.snapshot()
-        ws = self._ensure_workspace()
-        for case in ws.cases.values():
-            before = len(case.runs)
-            case.runs = [r for r in case.runs if r.id != run_id]
-            if len(case.runs) < before:
-                break
+        # Fase 1.10: the ``Run`` entity and ``Case.runs`` were removed; run state
+        # now lives flattened on ``Analysis``. Standalone run deletion no longer
+        # applies; the migrated semantics (resetting an analysis' run state) are
+        # deferred to a later Fase. No-op for now to keep the API importable.
+        return None
 
     def set_selected_analysis(self, analysis_id: str | None) -> None:
         self._ctx.snapshot()
@@ -354,7 +344,7 @@ class WorkspaceCommands:
         analysis_id: str,
         simulation_runner=None,
         project_dir: Path | None = None,
-    ) -> Run:
+    ) -> Analysis:
         raise NotImplementedError(
             "WorkspaceCommands.run_analysis is not yet implemented in the case-as-model redesign"
         )
@@ -376,6 +366,14 @@ class WorkspaceCommands:
         ws = self._workspace
         if ws is None:
             return None
+        # Prefer the active case if it owns the pose, otherwise fall back to
+        # global search. This protects against legacy workspaces with colliding
+        # pose IDs across cases (id_service didn't observe pose ids before).
+        active = ws.cases.get(ws.selected_case_id) if ws.selected_case_id else None
+        if active is not None:
+            for p in active.poses:
+                if p.id == pose_id:
+                    return p
         for case in ws.cases.values():
             for p in case.poses:
                 if p.id == pose_id:

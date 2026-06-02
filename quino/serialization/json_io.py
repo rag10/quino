@@ -10,20 +10,15 @@ from quino.domain.workspace import (
     Analysis,
     ArtifactRef,
     Case,
-    CaseOverlay,
     DynamicConfig,
-    EntityOverlay,
     EquilibriumConfig,
     KinematicConfig,
-    MetricDefinition,
     ParameterDescriptor,
     Pose,
     ResultRef,
-    Run,
     ScalarValue,
     StaticConfig,
     SweepDef,
-    Tolerance,
     Workspace,
 )
 from quino.domain.model import (
@@ -180,10 +175,6 @@ class JsonMapper:
             "model": self._model_to_dict(c.model),
             "poses": [self._pose_to_dict(p) for p in c.poses],
             "analyses": [self._analysis_to_dict(a) for a in c.analyses],
-            "runs": [self._run_to_dict(r) for r in c.runs],
-            "overlay": self._overlay_to_dict(c.overlay) if c.overlay is not None else None,
-            "tolerances": {k: self._tolerance_to_dict(v) for k, v in c.tolerances.items()},
-            "metrics": {k: self._metric_definition_to_dict(v) for k, v in c.metrics.items()},
             "metadata": dict(c.metadata),
         }
         if c.sensor_outputs:
@@ -205,7 +196,6 @@ class JsonMapper:
             model=self._model_from_dict(data.get("model", {})),
             poses=[self._pose_from_dict(p) for p in data.get("poses", [])],
             analyses=[self._analysis_from_dict(a) for a in data.get("analyses", [])],
-            runs=[self._run_from_dict(r) for r in data.get("runs", [])],
             sensor_outputs={
                 k: self._sensor_output_from_dict(v)
                 for k, v in data.get("sensor_outputs", {}).items()
@@ -214,57 +204,7 @@ class JsonMapper:
                 k: self._reaction_output_from_dict(v)
                 for k, v in data.get("reaction_outputs", {}).items()
             },
-            overlay=(
-                self._overlay_from_dict(data["overlay"])
-                if data.get("overlay") is not None
-                else None
-            ),
-            tolerances={
-                k: self._tolerance_from_dict(v)
-                for k, v in data.get("tolerances", {}).items()
-            },
-            metrics={
-                k: self._metric_definition_from_dict(v)
-                for k, v in data.get("metrics", {}).items()
-            },
             metadata=dict(data.get("metadata", {})),
-        )
-
-    # ------------------------------------------------------------------
-    # CaseOverlay / EntityOverlay
-    # ------------------------------------------------------------------
-
-    def _overlay_to_dict(self, o: CaseOverlay) -> dict:
-        return {
-            "entities": {
-                k: {"origin": v.origin, "linked_properties": sorted(v.linked_properties)}
-                for k, v in o.entities.items()
-            },
-            "deleted_inherited_entity_ids": sorted(o.deleted_inherited_entity_ids),
-            "inherited_connections": [
-                list(t) for t in sorted(o.inherited_connections)
-            ],
-            "deleted_inherited_connections": [
-                list(t) for t in sorted(o.deleted_inherited_connections)
-            ],
-        }
-
-    def _overlay_from_dict(self, data: dict) -> CaseOverlay:
-        return CaseOverlay(
-            entities={
-                k: EntityOverlay(
-                    origin=v["origin"],
-                    linked_properties=set(v.get("linked_properties", [])),
-                )
-                for k, v in data.get("entities", {}).items()
-            },
-            deleted_inherited_entity_ids=set(data.get("deleted_inherited_entity_ids", [])),
-            inherited_connections={
-                tuple(t) for t in data.get("inherited_connections", [])
-            },
-            deleted_inherited_connections={
-                tuple(t) for t in data.get("deleted_inherited_connections", [])
-            },
         )
 
     # ------------------------------------------------------------------
@@ -451,47 +391,8 @@ class JsonMapper:
         )
 
     # ------------------------------------------------------------------
-    # Run / artifacts
+    # Result / artifacts
     # ------------------------------------------------------------------
-
-    def _run_to_dict(self, run: Run) -> dict:
-        out: dict[str, Any] = {
-            "id": run.id,
-            "analysis_id": run.analysis_id,
-            "created_at": run.created_at,
-            "finished_at": run.finished_at,
-            "status": run.status,
-            "note": run.note,
-            "metrics": dict(run.metrics),
-            "warnings": list(run.warnings),
-            "error_message": run.error_message,
-            "config_snapshot": dict(run.config_snapshot),
-        }
-        if run.result_ref is not None:
-            out["result_ref"] = self._result_ref_to_dict(run.result_ref)
-        if run.artifacts:
-            out["artifacts"] = [self._artifact_ref_to_dict(a) for a in run.artifacts]
-        return out
-
-    def _run_from_dict(self, data: dict) -> Run:
-        return Run(
-            id=data["id"],
-            analysis_id=data["analysis_id"],
-            created_at=data["created_at"],
-            finished_at=data.get("finished_at"),
-            status=data.get("status", "to_be_run"),
-            note=data.get("note", ""),
-            result_ref=(
-                self._result_ref_from_dict(data["result_ref"])
-                if data.get("result_ref")
-                else None
-            ),
-            artifacts=[self._artifact_ref_from_dict(a) for a in data.get("artifacts", [])],
-            metrics=dict(data.get("metrics", {})),
-            warnings=list(data.get("warnings", [])),
-            error_message=data.get("error_message", ""),
-            config_snapshot=dict(data.get("config_snapshot", {})),
-        )
 
     def _result_ref_to_dict(self, ref: ResultRef) -> dict:
         return {
@@ -566,39 +467,8 @@ class JsonMapper:
         )
 
     # ------------------------------------------------------------------
-    # Tolerance / MetricDefinition / ParameterDescriptor / ScalarValue
+    # ParameterDescriptor / ScalarValue
     # ------------------------------------------------------------------
-
-    def _tolerance_to_dict(self, tolerance: Tolerance) -> dict:
-        result: dict = {"metric_key": tolerance.metric_key}
-        if tolerance.absolute is not None:
-            result["absolute"] = tolerance.absolute
-        if tolerance.relative is not None:
-            result["relative"] = tolerance.relative
-        return result
-
-    def _tolerance_from_dict(self, data: dict) -> Tolerance:
-        return Tolerance(
-            metric_key=data["metric_key"],
-            absolute=data.get("absolute"),
-            relative=data.get("relative"),
-        )
-
-    def _metric_definition_to_dict(self, metric: MetricDefinition) -> dict:
-        return {
-            "key": metric.key,
-            "name": metric.name,
-            "extractor": metric.extractor,
-            "unit": metric.unit,
-        }
-
-    def _metric_definition_from_dict(self, data: dict) -> MetricDefinition:
-        return MetricDefinition(
-            key=data["key"],
-            name=data["name"],
-            extractor=data["extractor"],
-            unit=data.get("unit", ""),
-        )
 
     def _parameter_descriptor_to_dict(self, descriptor: ParameterDescriptor) -> dict:
         return {

@@ -564,18 +564,8 @@ class EntityCommands:
         if case is not None:
             engine = self._ctx.cascade_provider()
             if engine is not None:
-                preview = engine.preview_edit_property(case.id, entity_id, property_path, scalar)
-                resolution = self._ctx.cascade_resolution_for(preview.conflicts)
-                if resolution is None:
-                    return
                 self._ctx.snapshot()
-                engine.edit_property(
-                    case.id,
-                    entity_id,
-                    property_path,
-                    scalar,
-                    conflict_resolution=resolution,
-                )
+                engine.edit_property(case.id, entity_id, property_path, scalar)
                 return
         self._ctx.snapshot()
         self._assign_scalar_property(entity, property_path, scalar)

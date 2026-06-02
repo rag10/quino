@@ -19,7 +19,7 @@ from quino.analysis.kinematic_sweeps import (
     strategy_for,
 )
 from quino.analysis.runner import AnalysisResult, AnalysisRunner
-from quino.domain.workspace import KinematicConfig, Pose, ResultRef, Run
+from quino.domain.workspace import Analysis, KinematicConfig, Pose, ResultRef
 from quino.pose.geometry import create_reference_pose
 from quino.pose.model import PoseSolveSettings
 from quino.services.sensor_extraction_kinematic import extract_sensors_from_pose
@@ -70,7 +70,10 @@ class KinematicAnalysisRunner(AnalysisRunner):
         for strategy in strategies:
             self._bind_strategy(strategy, project)
 
-        pose = initial_pose or self._initial_pose(project)
+        if initial_pose is None or not initial_pose.body_poses:
+            pose = self._initial_pose(project)
+        else:
+            pose = initial_pose
         base_values = [
             compute_sweep_base_value(project, sweep, pose)
             for sweep in cfg.sweeps
@@ -113,6 +116,7 @@ class KinematicAnalysisRunner(AnalysisRunner):
             targets = [axis["values"][indices[i]] for i, axis in enumerate(axes)]
             cell_pose = last_pose
             cell_success = True
+            cell_perturbed = False
             ramp_steps = list(
                 self._ramp(
                     targets,
@@ -125,6 +129,9 @@ class KinematicAnalysisRunner(AnalysisRunner):
                 for strategy, value in zip(strategies, ramp_targets):
                     constraints.extend(strategy.constraints(value))
                 result = pose_runner.solve(project, cell_pose, constraints, settings)
+                if (not result.success or result.pose is None) and cell_pose is not pose:
+                    # Last-known-good pose is corrupted: retry from the original initial pose.
+                    result = pose_runner.solve(project, pose, constraints, settings)
                 if not result.success or result.pose is None:
                     cell_success = False
                     if first_failure_reason is None:
@@ -133,9 +140,16 @@ class KinematicAnalysisRunner(AnalysisRunner):
                             or (getattr(result, "messages", None) or ["pose solve failed"])[-1]
                         )
                     break
+                if self._result_was_perturbed(result):
+                    cell_perturbed = True
                 cell_pose = result.pose
             if cell_success and cell_pose is not None:
-                last_pose = cell_pose
+                # If the solver needed a perturbed initial guess, the resulting
+                # pose may have residual drift that breaks the next solve. Keep
+                # the previous clean last_pose so the next cell restarts from
+                # known-good geometry.
+                if not cell_perturbed:
+                    last_pose = cell_pose
                 last_targets = targets
                 extracted = extract_sensors_from_pose(project, cell_pose)
                 for sensor in project.model.sensors:
@@ -189,7 +203,7 @@ class KinematicAnalysisRunner(AnalysisRunner):
             run.metrics = evaluate_metrics(list(analysis.config.metrics), artifact)
         return result
 
-    def _persist_artifact(self, project_dir: Path, run: Run, result: KinematicResult) -> Path:
+    def _persist_artifact(self, project_dir: Path, run: Analysis, result: KinematicResult) -> Path:
         artifact_dir = project_dir / "artifacts" / f"run_{run.id}"
         artifact_dir.mkdir(parents=True, exist_ok=True)
         path = artifact_dir / "result.json"
@@ -252,6 +266,11 @@ class KinematicAnalysisRunner(AnalysisRunner):
         if kind == "distance":
             return ["d"]
         return ["theta"]
+
+    @staticmethod
+    def _result_was_perturbed(result) -> bool:
+        warnings = getattr(result, "warnings", None) or []
+        return any("perturbed initial guess" in w for w in warnings)
 
     def _pose_blob(self, pose: Pose) -> dict:
         return {

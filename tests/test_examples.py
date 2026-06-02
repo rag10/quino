@@ -101,18 +101,16 @@ def test_umbrella_mechanism_json_loads_and_roundtrips() -> None:
         assert len(app2.project.model.bodies) == 2
 
 
-def test_all_json_examples_load_and_validate_overlays() -> None:
+def test_all_json_examples_load() -> None:
+    # Overlay validation was removed in Fase 1.10; this now only asserts that
+    # every example workspace still loads cleanly.
     from pathlib import Path
-    from quino.services.case_overlay_validator import validate_overlay
 
     for path in sorted(Path("examples").glob("*.quino.json")):
         app = ApplicationService()
         app.load_workspace(path)
         ws = app._workspace
         assert ws is not None
-        for case in ws.cases.values():
-            parent = ws.cases.get(case.parent_case_id) if case.parent_case_id else None
-            validate_overlay(case, parent)
 
 
 def test_example_registry_skips_json_with_duplicate_name(tmp_path) -> None:
@@ -127,16 +125,14 @@ def test_example_registry_skips_json_with_duplicate_name(tmp_path) -> None:
     assert names.count("Four Bar") == 1
 
 
-def test_all_example_files_load_and_overlays_validate() -> None:
-    """Every examples/*.quino.json must load as a Workspace at schema 0.3.0
-    and every child case must satisfy validate_overlay against its parent.
+def test_all_example_files_load_at_schema_0_3_0() -> None:
+    """Every examples/*.quino.json must load as a Workspace at schema 0.3.0.
 
-    Acceptance criterion from docs/PLAN-02.md §5.
+    (Overlay validation was removed in Fase 1.10.)
     """
     from pathlib import Path
 
     from quino.serialization.json_io import JsonMapper
-    from quino.services.case_overlay_validator import validate_overlay
 
     repo_root = Path(__file__).resolve().parents[1]
     examples_dir = repo_root / "examples"
@@ -151,10 +147,4 @@ def test_all_example_files_load_and_overlays_validate() -> None:
             failures.append(f"{path.name}: load failed — {exc}")
             continue
         assert ws.schema_version == "0.3.0", f"{path.name}: not 0.3.0"
-        for case in ws.cases.values():
-            parent = ws.cases.get(case.parent_case_id) if case.parent_case_id else None
-            try:
-                validate_overlay(case, parent)
-            except Exception as exc:
-                failures.append(f"{path.name} :: case {case.id}: {exc}")
-    assert not failures, "Example/overlay validation failed:\n" + "\n".join(failures)
+    assert not failures, "Example load failed:\n" + "\n".join(failures)

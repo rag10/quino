@@ -12,9 +12,31 @@ from quino.domain.workspace import (
     ArtifactRef,
     Case,
     ResultRef,
-    Run,
     Workspace,
 )
+
+# NOTE (Fase 1.10): the ``Run`` domain entity and ``Case.runs`` were removed;
+# run state now lives flattened on ``Analysis``. This run-execution machinery
+# still constructs ``Run`` objects and appends to ``case.runs`` and has NOT yet
+# been migrated to the Analysis-based model. A minimal local placeholder keeps
+# the module importable; full migration is deferred to a later Fase.
+from dataclasses import field as _field
+
+
+@dataclass
+class Run:  # pragma: no cover - deferred run-machinery placeholder
+    id: str
+    analysis_id: str
+    created_at: str
+    finished_at: str | None = None
+    status: str = "to_be_run"
+    note: str = ""
+    result_ref: "ResultRef | None" = None
+    artifacts: list = _field(default_factory=list)
+    metrics: dict = _field(default_factory=dict)
+    warnings: list = _field(default_factory=list)
+    error_message: str = ""
+    config_snapshot: dict = _field(default_factory=dict)
 
 
 @dataclass

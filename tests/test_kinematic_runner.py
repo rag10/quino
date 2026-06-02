@@ -85,6 +85,119 @@ def test_unreachable_cells_write_nan_and_partial(monkeypatch) -> None:
     assert any(math.isnan(value) for value in result.sensors[sensor_id]["values"])
 
 
+def test_empty_pose_falls_back_to_reference(monkeypatch) -> None:
+    svc, body_id, marker_a, marker_b = _bar_project()
+    case = svc.workspace.create_case("C")
+    empty_pose = Pose(id="empty", name="Empty", body_poses={})
+    case.poses.append(empty_pose)
+    analysis = svc.workspace.create_analysis(
+        "Sweep", analysis_type="kinematic", case_id=case.id, workspace_pose_id=empty_pose.id
+    )
+    analysis.config.sweeps.append(
+        SweepDef(
+            id="sw1",
+            variable_kind="marker_x",
+            target_ids=[marker_b.id],
+            mode="linear",
+            start=-10.0,
+            end=10.0,
+            steps=3,
+            reference_mode="relative",
+        )
+    )
+
+    received_initial_poses = []
+
+    class FakePoseRunner:
+        def __init__(self, adapter) -> None:
+            pass
+
+        def solve(self, project, initial_pose, temporary_constraints=None, settings=None):
+            received_initial_poses.append(initial_pose)
+            pose = Pose(
+                id="ok",
+                name="ok",
+                body_poses={body_id: BodyPose(body_id=body_id, x=0.0, y=0.0, angle=0.0)},
+            )
+            return type("R", (), {"success": True, "pose": pose})()
+
+    monkeypatch.setattr("quino.pose.runner.PoseRunner", FakePoseRunner)
+    result = KinematicAnalysisRunner().run(svc.project, analysis, initial_pose=empty_pose)
+    assert result.status == "ok"
+    assert received_initial_poses[0] is not None
+    assert received_initial_poses[0].body_poses, "Empty pose should be replaced with reference pose"
+    # Base value should come from the reference pose: marker_b is at x=100 in reference.
+    assert result.sweep_axes[0]["values"] == [90.0, 100.0, 110.0]
+
+
+def test_perturbed_solution_does_not_corrupt_next_cell(monkeypatch) -> None:
+    svc, body_id, marker_a, marker_b = _bar_project()
+    case = svc.workspace.create_case("C")
+    pose = Pose(
+        id="p1",
+        name="P1",
+        body_poses={body_id: BodyPose(body_id=body_id, x=0.0, y=0.0, angle=0.0)},
+    )
+    case.poses.append(pose)
+    analysis = svc.workspace.create_analysis(
+        "Sweep", analysis_type="kinematic", case_id=case.id, workspace_pose_id=pose.id
+    )
+    analysis.config.sweeps.append(
+        SweepDef(
+            id="sw1",
+            variable_kind="marker_x",
+            target_ids=[marker_b.id],
+            mode="linear",
+            start=100.0,
+            end=104.0,
+            steps=3,
+        )
+    )
+
+    # Fake solver: first call returns a "perturbed" pose with a 50 mm drift.
+    # Subsequent calls succeed only if the initial pose is the clean one,
+    # not the drifted one — simulating Exudyn refusing to converge from a
+    # pose with residual constraint violations.
+    call_count = {"n": 0}
+    clean_pose = Pose(
+        id="ok",
+        name="ok",
+        body_poses={body_id: BodyPose(body_id=body_id, x=0.0, y=0.0, angle=0.0)},
+    )
+    drifted_pose = Pose(
+        id="drift",
+        name="drift",
+        body_poses={body_id: BodyPose(body_id=body_id, x=50.0, y=0.0, angle=0.5)},
+    )
+
+    class FakePoseRunner:
+        def __init__(self, adapter) -> None:
+            pass
+
+        def solve(self, project, initial_pose, temporary_constraints=None, settings=None):
+            call_count["n"] += 1
+            # First solve: returns drifted pose with a perturbed-guess warning.
+            if call_count["n"] == 1:
+                return type("R", (), {
+                    "success": True,
+                    "pose": drifted_pose,
+                    "warnings": ["Pose solve required a perturbed initial guess near a singular configuration"],
+                })()
+            # Subsequent solves: succeed only when given the clean pose.
+            ok = initial_pose is not None and abs(initial_pose.body_poses[body_id].x) < 1.0
+            return type("R", (), {
+                "success": ok,
+                "pose": clean_pose if ok else None,
+                "warnings": [],
+                "error": None if ok else "diverged",
+            })()
+
+    monkeypatch.setattr("quino.pose.runner.PoseRunner", FakePoseRunner)
+    result = KinematicAnalysisRunner().run(svc.project, analysis, initial_pose=pose)
+    assert result.status == "ok", f"expected ok, got {result.status} (failed_mask={result.failed_mask})"
+    assert not any(result.failed_mask)
+
+
 def test_relative_mode_offsets_values_by_base(monkeypatch) -> None:
     svc, body_id, marker_a, marker_b = _bar_project()
     case = svc.workspace.create_case("C")

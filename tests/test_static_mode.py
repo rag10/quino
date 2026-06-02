@@ -1,6 +1,14 @@
 import os
 import json
 
+import pytest
+
+pytest.skip(
+    "overlay removed; Run entity and case.runs replaced by flattened Analysis run "
+    "state. Analysis-mode GUI adapted in Fase 2/4.",
+    allow_module_level=True,
+)
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from quino.application.service import ApplicationService

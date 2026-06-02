@@ -49,7 +49,7 @@ from quino.pose.geometry import assembled_reference_mechanism, marker_world_posi
 from quino.pose.kinematics import _pose_at_angle, build_drag_initial_pose, get_drag_driver, has_ground_revolute
 from quino.pose.model import PoseConstraint, PoseSolveResult, PoseSolveSettings
 from quino.services.expressions import DimensionMismatchError
-from quino.services.plot_renderer import load_artifact, render_plot
+from quino.services.plot_renderer import load_artifact
 from quino.simulation.sensor_expressions import safe_sensor_var, sensor_channel_keys
 from quino.viewer.plot_window import PlotWindow
 from quino.gui.widgets.inspector_widget import InspectorPropertyWidget
@@ -1527,12 +1527,23 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         owner = None
         pose = None
-        for case in ws.cases.values():
-            found = next((p for p in case.poses if p.id == pose_id), None)
+        # Prefer the currently active case if it owns the clicked pose. This
+        # guards against pose IDs that happen to collide across cases (e.g.
+        # workspaces saved before pose-id observation was wired up) — the tree
+        # item the user clicked lives under the case it visually belongs to.
+        active = ws.cases.get(ws.selected_case_id) if ws.selected_case_id else None
+        if active is not None:
+            found = next((p for p in active.poses if p.id == pose_id), None)
             if found is not None:
-                owner = case
+                owner = active
                 pose = found
-                break
+        if owner is None:
+            for case in ws.cases.values():
+                found = next((p for p in case.poses if p.id == pose_id), None)
+                if found is not None:
+                    owner = case
+                    pose = found
+                    break
         if owner is None or pose is None:
             return
         # Default poses show the model geometry in a read-only viewport,
@@ -1771,21 +1782,54 @@ class MainWindow(QtWidgets.QMainWindow):
         self.create_plot_window()
 
     def _open_plot_editor_for_analysis(self, analysis) -> None:
-        from quino.gui.dialogs.plot_editor_dialog import PlotEditorDialog
+        """Open the interactive PlotWindow seeded with this analysis's latest run.
 
+        Dynamic analyses route through the existing live-simulation path because
+        their data is already in project.sensor_outputs; the other analysis
+        types (kinematic / static / equilibrium) load the latest persisted run
+        artifact and feed it through RunArtifactDataset.
+        """
         project = self.app_service.display_project
         if project is None:
             return
-        dialog = PlotEditorDialog(
-            analysis_type=analysis.analysis_type,
-            project=project,
-            sweeps=getattr(analysis.config, "sweeps", []),
-            parent=self,
-        )
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted or dialog.result_plot is None:
+        if analysis.analysis_type == "dynamic":
+            self.create_plot_window()
             return
-        analysis.config.plots.append(dialog.result_plot)
-        self._render_plot_for_analysis(analysis, dialog.result_plot)
+        run = self._latest_plottable_run(analysis)
+        if run is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "No plottable run",
+                "Run this analysis at least once before opening the plot window.",
+            )
+            return
+        artifact = load_artifact(self.app_service.current_project_dir, run)
+        if not artifact:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Artifact missing",
+                "The selected run has no artifact on disk.",
+            )
+            return
+        win = PlotWindow(app_service=self.app_service, parent=self)
+        win.window_closed.connect(
+            lambda: self._plot_windows.remove(win) if win in self._plot_windows else None
+        )
+        self._plot_windows.append(win)
+        win.show()
+        win.load_run_artifact(project, artifact, run_label=run.id, select_all=True)
+
+    def _latest_plottable_run(self, analysis):
+        case = self.app_service.current_case()
+        if case is None:
+            return None
+        runs = [
+            run for run in case.runs
+            if run.analysis_id == analysis.id
+            and run.result_ref is not None
+            and run.status in {"ok", "partial"}
+        ]
+        return runs[-1] if runs else None
 
     def _open_metrics_manager_for_analysis(self, analysis) -> None:
         from quino.gui.dialogs.metrics_manager_dialog import MetricsManagerDialog
@@ -1795,21 +1839,6 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         dialog = MetricsManagerDialog(project, analysis, parent=self)
         dialog.exec()
-
-    def _render_plot_for_analysis(self, analysis, plot_def) -> None:
-        case = self.app_service.current_case()
-        if case is None:
-            return
-        runs = [
-            run for run in case.runs
-            if run.analysis_id == analysis.id and run.result_ref is not None and run.status in {"ok", "partial"}
-        ]
-        if not runs:
-            self._append_message("No persisted runs available for this analysis yet.")
-            return
-        artifacts = [(run.id, load_artifact(self.app_service.current_project_dir, run)) for run in runs[-1:]]
-        figure = render_plot(plot_def, artifacts)
-        figure.show()
 
     def _open_compare_runs_dialog(self) -> None:
         from quino.gui.dialogs.run_comparison_dialog import RunComparisonDialog

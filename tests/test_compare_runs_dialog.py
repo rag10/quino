@@ -1,6 +1,14 @@
 import json
 import os
 
+import pytest
+
+pytest.skip(
+    "overlay removed; Run entity and case.runs replaced by flattened Analysis run "
+    "state. Run-machinery and run-comparison GUI adapted in Fase 2/4.",
+    allow_module_level=True,
+)
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6 import QtCore

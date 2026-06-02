@@ -28,21 +28,6 @@ class ScalarValue:
 
 
 @dataclass(slots=True)
-class Tolerance:
-    metric_key: str
-    absolute: float | None = None
-    relative: float | None = None
-
-
-@dataclass(slots=True)
-class MetricDefinition:
-    key: str
-    name: str
-    extractor: str
-    unit: str = ""
-
-
-@dataclass(slots=True)
 class MetricResult:
     value: Any
     status: str  # "ok" | "error" | "no_data"
@@ -169,30 +154,6 @@ class Pose:
     metadata: Metadata = field(default_factory=Metadata)
 
 
-# ---------------------------------------------------------------------------
-# Entity / Case overlay helpers
-# ---------------------------------------------------------------------------
-
-@dataclass(slots=True)
-class EntityOverlay:
-    origin: str = "local"  # "inherited" | "local"
-    linked_properties: set[str] = field(default_factory=set)
-
-    def __post_init__(self) -> None:
-        if self.origin not in {"inherited", "local"}:
-            raise ValueError(f"EntityOverlay.origin must be 'inherited' or 'local', got {self.origin!r}")
-        if self.origin == "local" and self.linked_properties:
-            raise ValueError("EntityOverlay with origin='local' must have empty linked_properties")
-
-
-@dataclass(slots=True)
-class CaseOverlay:
-    entities: dict[str, EntityOverlay] = field(default_factory=dict)
-    deleted_inherited_entity_ids: set[str] = field(default_factory=set)
-    inherited_connections: set[tuple[str, str, str, str]] = field(default_factory=set)
-    deleted_inherited_connections: set[tuple[str, str, str, str]] = field(default_factory=set)
-
-
 def create_default_pose(pose_id: str, name: str = "Reference") -> Pose:
     """Create the local default pose every case owns independently."""
     return Pose(id=pose_id, name=name, is_default=True)
@@ -254,26 +215,6 @@ class Analysis:
             raise ValueError(f"Analysis status {self.status!r} is not allowed")
 
 
-@dataclass(slots=True)
-class Run:
-    id: str
-    analysis_id: str
-    created_at: str
-    finished_at: str | None = None
-    status: str = "to_be_run"
-    note: str = ""
-    result_ref: ResultRef | None = None
-    artifacts: list[ArtifactRef] = field(default_factory=list)
-    metrics: dict[str, float] = field(default_factory=dict)
-    warnings: list[str] = field(default_factory=list)
-    error_message: str = ""
-    config_snapshot: dict[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if self.status not in _RUN_STATUSES:
-            raise ValueError(f"Run status {self.status!r} is not allowed")
-
-
 # ---------------------------------------------------------------------------
 # Case (case-as-model: each case owns a full Model)
 # ---------------------------------------------------------------------------
@@ -287,12 +228,8 @@ class Case:
     model: Model = field(default_factory=Model)
     poses: list[Pose] = field(default_factory=list)
     analyses: list[Analysis] = field(default_factory=list)
-    runs: list[Run] = field(default_factory=list)
     sensor_outputs: dict[str, SensorOutput] = field(default_factory=dict)
     reaction_outputs: dict[str, ReactionOutput] = field(default_factory=dict)
-    overlay: CaseOverlay | None = None
-    tolerances: dict[str, Tolerance] = field(default_factory=dict)
-    metrics: dict[str, MetricDefinition] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

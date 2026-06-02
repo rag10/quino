@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from quino.analysis.runner import AnalysisResult, AnalysisRunner
-from quino.domain.workspace import ResultRef, Run
+from quino.domain.workspace import Analysis, ResultRef
 from quino.services.metric_evaluator import evaluate_metrics
 from quino.services.mechanism_dof import compute_mechanism_dof
 from quino.services.static_solver import solve_static
@@ -66,7 +66,7 @@ class StaticAnalysisRunner(AnalysisRunner):
             status="ok",
         )
 
-    def _persist_artifact(self, project_dir: Path, run: Run, report: dict) -> Path:
+    def _persist_artifact(self, project_dir: Path, run: Analysis, report: dict) -> Path:
         artifact_dir = project_dir / "artifacts" / f"run_{run.id}"
         artifact_dir.mkdir(parents=True, exist_ok=True)
         path = artifact_dir / "result.json"

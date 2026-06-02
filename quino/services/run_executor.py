@@ -10,9 +10,13 @@ from pathlib import Path
 from PySide6 import QtCore
 
 from quino.analysis.registry import get_runner_for_type
-from quino.domain.workspace import Run
 from quino.pose.geometry import create_reference_pose
-from quino.services.workspace_runner import _CaseAsProject, _next_run_id
+# NOTE (Fase 1.10): the ``Run`` domain entity and ``Case.runs`` were removed; run
+# state now lives flattened on ``Analysis``. This executor still constructs ``Run``
+# objects and appends to ``case.runs`` and has NOT yet been migrated. It imports the
+# deferred placeholder ``Run`` from workspace_runner to stay importable; full
+# migration to the Analysis-based run model is deferred to a later Fase.
+from quino.services.workspace_runner import Run, _CaseAsProject, _next_run_id
 
 
 @dataclass(slots=True)

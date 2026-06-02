@@ -244,6 +244,7 @@ class ApplicationService:
         self.id_service = IdService()
         self._service_context.ids = self.id_service
         self._sync_id_service()
+        self._dedupe_pose_and_analysis_ids()
         self._sync_all_special_com_markers()
         self._ensure_default_poses()
         case = self.current_case()
@@ -834,14 +835,75 @@ class ApplicationService:
         return self.bodies.sync_all_special_com_markers()
 
     def _ensure_default_poses(self) -> None:
-        """Guarantee every case has exactly one is_default=True pose (load-time migration)."""
+        """Guarantee every case has exactly one is_default=True pose (load-time migration).
+
+        Also migrates legacy workspaces that overloaded `pose.is_default` to flag
+        the simulation-initial pose: any user pose (body_poses non-empty) carrying
+        is_default=True is moved to Case.metadata["simulation_initial_pose_id"] and
+        its flag is cleared.
+        """
         ws = self._workspace
         if ws is None:
             return
         for case in ws.cases.values():
+            # Migrate legacy is_default=True user poses -> metadata field.
+            for pose in case.poses:
+                if pose.is_default and pose.body_poses:
+                    case.metadata.setdefault("simulation_initial_pose_id", pose.id)
+                    pose.is_default = False
             if not any(p.is_default for p in case.poses):
                 pose_id = self.id_service.new("pose")
                 case.poses.insert(0, create_default_pose(pose_id))
+
+    def _dedupe_pose_and_analysis_ids(self) -> None:
+        """Heal legacy workspaces that have colliding pose / analysis IDs across
+        cases. Before id_service learned to observe pose/analysis IDs at load
+        time, creating new poses on a loaded workspace minted IDs that already
+        existed in another case. The result: any code that searches "the case
+        owning pose X" by iterating cases hits the first match and acts on the
+        wrong pose (e.g. refuses to delete a user pose because it found a
+        Reference pose with the same ID first).
+
+        For every duplicate occurrence (keeping the first), mint a fresh ID and
+        re-target the analyses/runs/metadata that pointed at the old one
+        *within the same case*.
+        """
+        ws = self._workspace
+        if ws is None:
+            return
+        seen_poses: set[str] = set()
+        for case in ws.cases.values():
+            id_map: dict[str, str] = {}
+            for pose in case.poses:
+                if pose.id in seen_poses:
+                    new_id = self.id_service.new("pose")
+                    id_map[pose.id] = new_id
+                    pose.id = new_id
+                seen_poses.add(pose.id)
+            if id_map:
+                for analysis in case.analyses:
+                    if analysis.pose_id in id_map:
+                        analysis.pose_id = id_map[analysis.pose_id]
+                sim_id = case.metadata.get("simulation_initial_pose_id")
+                if sim_id in id_map:
+                    case.metadata["simulation_initial_pose_id"] = id_map[sim_id]
+        seen_analyses: set[str] = set()
+        for case in ws.cases.values():
+            for analysis in case.analyses:
+                if analysis.id in seen_analyses:
+                    analysis.id = self.id_service.new("analysis")
+                seen_analyses.add(analysis.id)
+        # Selected ids may now be ambiguous between cases; if the currently
+        # selected pose / analysis no longer resolves to an entity in the
+        # selected case, clear the selection rather than letting it cross-bind.
+        if ws.selected_pose_id is not None:
+            active = ws.cases.get(ws.selected_case_id) if ws.selected_case_id else None
+            if active is None or not any(p.id == ws.selected_pose_id for p in active.poses):
+                ws.selected_pose_id = None
+        if ws.selected_analysis_id is not None:
+            active = ws.cases.get(ws.selected_case_id) if ws.selected_case_id else None
+            if active is None or not any(a.id == ws.selected_analysis_id for a in active.analyses):
+                ws.selected_analysis_id = None
 
     def _find_body(self, body_id: str) -> Body:
         case = self.current_case()
@@ -978,6 +1040,10 @@ class ApplicationService:
                 self.id_service.observe(driver.id)
             for sensor in model.sensors:
                 self.id_service.observe(sensor.id)
+            for pose in case.poses:
+                self.id_service.observe(pose.id)
+            for analysis in case.analyses:
+                self.id_service.observe(analysis.id)
 
     def update_slider_geometry(
         self,

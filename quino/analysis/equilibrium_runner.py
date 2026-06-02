@@ -6,7 +6,7 @@ from pathlib import Path
 
 from quino.analysis.runner import AnalysisResult, AnalysisRunner
 from quino.analysis.static_runner import _effective_dof
-from quino.domain.workspace import ResultRef, Run
+from quino.domain.workspace import Analysis, ResultRef
 from quino.services.metric_evaluator import evaluate_metrics
 from quino.services.equilibrium_finder import find_stable_equilibria
 
@@ -56,7 +56,7 @@ class EquilibriumAnalysisRunner(AnalysisRunner):
             status="ok" if equilibria else "partial",
         )
 
-    def _persist_artifact(self, project_dir: Path, run: Run, equilibria: list[dict]) -> Path:
+    def _persist_artifact(self, project_dir: Path, run: Analysis, equilibria: list[dict]) -> Path:
         artifact_dir = project_dir / "artifacts" / f"run_{run.id}"
         artifact_dir.mkdir(parents=True, exist_ok=True)
         path = artifact_dir / "result.json"

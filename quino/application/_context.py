@@ -113,8 +113,8 @@ class ServiceContext:
         if not analysis_ids:
             return True
         has_ok_run = any(
-            r.analysis_id in analysis_ids and r.status in {"ok", "partial"}
-            for r in case.runs
+            a.id in analysis_ids and a.status in {"ok", "partial"}
+            for a in case.analyses
         )
         if not has_ok_run:
             return True
@@ -188,9 +188,10 @@ class _WorkspaceProjectProxy:
 
     @property
     def runs(self):
-        if self._case is None:
-            return []
-        return self._case.runs
+        # Fase 1.10: the ``Run`` entity and ``Case.runs`` were removed; run state
+        # now lives flattened on ``Analysis``. Legacy callers asking for ``runs``
+        # get an empty list until they are migrated to read analysis run state.
+        return []
 
     @property
     def analyses(self):
@@ -212,29 +213,29 @@ class _WorkspaceProjectProxy:
 
     @property
     def simulation_initial_pose_id(self) -> "str | None":
-        # Old model had this on Project; derive from Case.poses.
-        # The auto-created reference pose (is_default=True with no body_poses)
-        # is not a simulation initial pose — only a pose explicitly marked as
-        # default AND containing body data acts as the simulation initial.
+        # Stored in Case.metadata to avoid overloading Pose.is_default
+        # (which is reserved for the auto-created Reference pose).
         if self._case is None:
             return None
-        for p in self._case.poses:
-            if getattr(p, "is_default", False) and p.body_poses:
-                return p.id
+        pose_id = self._case.metadata.get("simulation_initial_pose_id")
+        if pose_id is None:
+            return None
+        if any(p.id == pose_id for p in self._case.poses):
+            return pose_id
+        # Stale reference (pose was deleted); clear it.
+        self._case.metadata.pop("simulation_initial_pose_id", None)
         return None
 
     @simulation_initial_pose_id.setter
     def simulation_initial_pose_id(self, value):
-        # Mark the target user pose as is_default; clear it on other user poses.
-        # The auto-created reference pose (body_poses == {}) is left untouched —
-        # it is always is_default=True and is never a simulation initial pose.
         if self._case is None:
             return
-        for p in self._case.poses:
-            if not p.body_poses:
-                # Reference pose: keep its is_default flag intact.
-                continue
-            p.is_default = (p.id == value)
+        if value is None:
+            self._case.metadata.pop("simulation_initial_pose_id", None)
+            return
+        if not any(p.id == value for p in self._case.poses):
+            return
+        self._case.metadata["simulation_initial_pose_id"] = value
 
     @property
     def id(self) -> str:

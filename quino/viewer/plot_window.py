@@ -165,6 +165,69 @@ class PlotWindow(QtWidgets.QMainWindow):
         """Called by main_window immediately after show() to offer sensor import."""
         self._import_from_simulation()
 
+    def load_run_artifact(
+        self,
+        project,
+        artifact: dict,
+        *,
+        run_label: str | None = None,
+        select_all: bool = True,
+    ) -> int:
+        """Hydrate the plot widget directly from a persisted run artifact.
+
+        Returns the number of matrices loaded. Used by the analysis modes'
+        Plot button to seed the powerful plot window with the latest run
+        without forcing the user through an extra selection dialog.
+        """
+        from quino.viewer.dataset import RunArtifactDataset
+
+        dataset = RunArtifactDataset(project, artifact)
+        if not dataset.has_data():
+            QtWidgets.QMessageBox.information(
+                self,
+                "No plottable data",
+                "This run's artifact does not expose any sensor channels.",
+            )
+            return 0
+        self.plot_widget.set_dataset(dataset)
+        names = dataset.get_matrix_names()
+        if not select_all:
+            selected = self._prompt_select_names(names)
+            if not selected:
+                return 0
+            names = selected
+        for name in names:
+            self.plot_widget.load_sensor(name)
+        suffix = f" — {run_label}" if run_label else ""
+        self.setWindowTitle(f"QUINO — Plot{suffix}")
+        self.statusBar().showMessage(
+            f"Loaded {len(names)} matrix(ces) from run{suffix}"
+        )
+        return len(names)
+
+    def _prompt_select_names(self, names: list[str]) -> list[str]:
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Select sensors to load")
+        dialog.resize(300, 380)
+        lay = QtWidgets.QVBoxLayout(dialog)
+        lay.addWidget(QtWidgets.QLabel("Select sensors:"))
+        lw = QtWidgets.QListWidget()
+        lw.addItems(names)
+        lw.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.MultiSelection)
+        for i in range(lw.count()):
+            lw.item(i).setSelected(True)
+        lay.addWidget(lw)
+        btns = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(dialog.accept)
+        btns.rejected.connect(dialog.reject)
+        lay.addWidget(btns)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return []
+        return [item.text() for item in lw.selectedItems()]
+
     def update_coord_label(self, text: str) -> None:
         """Called by SensorPlotWidget when crosshair moves."""
         self.coord_label.setText(text)

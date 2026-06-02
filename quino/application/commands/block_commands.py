@@ -91,11 +91,7 @@ class BlockCommands:
             if engine is not None:
                 case_id = self._active_case_id()
                 path = f"parameters.{key}"
-                preview = engine.preview_edit_property(case_id, instance_id, path, value)
-                resolution = self._ctx.cascade_resolution_for(preview.conflicts)
-                if resolution is None:
-                    return
-                engine.edit_property(case_id, instance_id, path, value, conflict_resolution=resolution)
+                engine.edit_property(case_id, instance_id, path, value)
             else:
                 inst.parameters[key] = value
 

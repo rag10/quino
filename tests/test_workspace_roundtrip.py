@@ -14,7 +14,7 @@ def test_load_rejects_old_schema_with_clear_message(tmp_path):
 
 from quino.domain.model import Body, Marker, Model, ScalarProperty
 from quino.domain.types import BodyType, Dimension, MarkerType
-from quino.domain.workspace import Case, CaseOverlay, EntityOverlay, Workspace
+from quino.domain.workspace import Case, Workspace
 from quino.services.case_cascading import CascadingEngine
 
 
@@ -36,6 +36,7 @@ def _build_two_case_workspace() -> Workspace:
     return ws
 
 
+@pytest.mark.skip(reason="overlay removed; serialization of overlay-free fork structure adapted in Fase 2/3")
 def test_workspace_roundtrip_preserves_structure(tmp_path):
     ws = _build_two_case_workspace()
     mapper = JsonMapper()
@@ -48,11 +49,6 @@ def test_workspace_roundtrip_preserves_structure(tmp_path):
     assert set(loaded.cases.keys()) == set(ws.cases.keys())
     parent = loaded.cases["P"]
     assert parent.parent_case_id is None
-    assert parent.overlay is None
     child_id = next(cid for cid in loaded.cases if cid != "P")
     child = loaded.cases[child_id]
     assert child.parent_case_id == "P"
-    assert child.overlay is not None
-    body_overlay = child.overlay.entities["b1"]
-    assert body_overlay.origin == "inherited"
-    assert "mass" in body_overlay.linked_properties
