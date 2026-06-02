@@ -1271,10 +1271,12 @@ git commit -m "refactor(domain): eliminar overlays, Run, tolerances y metrics de
 ## Task 2.1: Servicio de evaluación de métricas (exec restringido)
 
 **Files:**
-- Create: `quino/services/metric_evaluator.py`
-- Test: `tests/test_metric_evaluator.py`
+- Replace: `quino/services/metric_evaluator.py` (YA EXISTE con el sistema viejo `MetricDef`/`evaluate_metric`/`evaluate_metrics`/`_series`. Lo reescribimos por completo. Sus importadores — los 4 runners y `plot_renderer.py` — se adaptan en la Task 2.3b, así que tras esta tarea el repo queda temporalmente roto en esos imports; es esperado y se cierra en 2.3b antes de seguir.)
+- Replace test: `tests/test_metric_evaluator.py` (YA EXISTE, prueba el sistema viejo `evaluate_metric`; se reemplaza entero por el de abajo.)
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Replace the test file (failing test)**
+
+Sobrescribir `tests/test_metric_evaluator.py` entero con:
 
 ```python
 # tests/test_metric_evaluator.py
@@ -1428,51 +1430,74 @@ git commit -m "feat(metrics): evaluador de métricas Python con exec restringido
 
 ## Task 2.2: Construcción de `data`/`meta` desde `sensor_outputs`
 
+`SensorOutput` (en `quino/domain/model.py`) tiene esta forma real:
+
+```python
+@dataclass(slots=True)
+class SensorOutput:
+    sensor_id: str
+    time: list[float]
+    columns: list[str]            # nombres de canal: p.ej. ["x", "y", "angle"]
+    data: list[list[float]]       # filas × columnas (data[fila][col])
+```
+
+El builder indexa por `data[:, col]` (transponiendo filas→columna) y nombra
+`"<nombre_sensor>.<columna>"`.
+
 **Files:**
 - Create: `quino/services/metric_data.py`
 - Test: `tests/test_metric_data.py`
 
-- [ ] **Step 1: Inspect SensorOutput shape**
-
-Run: `git grep -n "class SensorOutput" quino/domain/model.py` y leer la dataclass para conocer sus campos (series por canal, tiempos). Ajustar el builder a esos campos reales. El test asume `SensorOutput` con un mapping de canal→serie y un eje de tiempo; **adaptar nombres a los reales** tras leer la clase.
-
-- [ ] **Step 2: Write the failing test**
+- [ ] **Step 1: Write the failing test**
 
 ```python
 # tests/test_metric_data.py
 import numpy as np
 
+from quino.domain.model import SensorOutput
 from quino.services.metric_data import build_metric_data
 
 
-def test_build_keys_by_sensor_name_and_channel():
-    # Minimal fakes matching the SensorOutput contract used by build_metric_data.
-    class FakeOut:
-        def __init__(self):
-            self.channels = {"x": [1.0, 2.0, 3.0], "y": [0.0, 0.0, 1.0]}
-            self.time = [0.0, 0.1, 0.2]
-    sensor_name_by_id = {"sen1": "thigh"}
-    outputs = {"sen1": FakeOut()}
-    data, meta = build_metric_data(outputs, sensor_name_by_id, analysis_meta={"dt": 0.1})
+def test_build_keys_by_sensor_name_and_column():
+    out = SensorOutput(
+        sensor_id="sen1",
+        time=[0.0, 0.1, 0.2],
+        columns=["x", "y"],
+        data=[[1.0, 0.0], [2.0, 0.0], [3.0, 1.0]],  # rows x columns
+    )
+    data, meta = build_metric_data(
+        {"sen1": out},
+        sensor_name_by_id={"sen1": "thigh"},
+        analysis_meta={"dt": 0.1},
+    )
     assert "thigh.x" in data
     assert np.allclose(data["thigh.x"], [1.0, 2.0, 3.0])
+    assert np.allclose(data["thigh.y"], [0.0, 0.0, 1.0])
     assert "t" in data
+    assert np.allclose(data["t"], [0.0, 0.1, 0.2])
     assert meta["dt"] == 0.1
+
+
+def test_empty_outputs_yield_empty_data():
+    data, meta = build_metric_data({}, {}, {"dt": 0.01})
+    assert data == {} or "t" not in data
+    assert meta["dt"] == 0.01
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/test_metric_data.py -v`
 Expected: FAIL with `ModuleNotFoundError`
 
-- [ ] **Step 4: Write the implementation**
+- [ ] **Step 3: Write the implementation**
 
 ```python
 # quino/services/metric_data.py
 """Build the `data`/`meta` inputs for metric evaluation from sensor outputs.
 
-Keys are `"<sensor_name>.<channel>"` (per the user-facing convention) plus a
-shared `"t"` time axis. `meta` carries analysis-level metadata (dt, t_final...).
+SensorOutput stores `columns` (channel names) and `data` as rows×columns. We
+transpose to per-channel series keyed `"<sensor_name>.<column>"`, plus a shared
+`"t"` time axis. `meta` carries analysis-level metadata (dt, t_final...).
 """
 from __future__ import annotations
 
@@ -1490,35 +1515,41 @@ def build_metric_data(
     time_axis: list[float] | None = None
     for sensor_id, out in sensor_outputs.items():
         name = sensor_name_by_id.get(sensor_id, sensor_id)
-        channels = getattr(out, "channels", {}) or {}
-        for channel, series in channels.items():
-            data[f"{name}.{channel}"] = np.asarray(series, dtype=float)
+        columns = list(getattr(out, "columns", []) or [])
+        rows = getattr(out, "data", []) or []
+        if columns and rows:
+            matrix = np.asarray(rows, dtype=float)  # shape (n_rows, n_cols)
+            if matrix.ndim == 2 and matrix.shape[1] == len(columns):
+                for col_index, column in enumerate(columns):
+                    data[f"{name}.{column}"] = matrix[:, col_index]
         if time_axis is None:
             t = getattr(out, "time", None)
-            if t is not None:
+            if t:
                 time_axis = list(t)
     if time_axis is not None:
         data["t"] = np.asarray(time_axis, dtype=float)
     return data, dict(analysis_meta)
 ```
 
-**Nota:** ajustar `getattr(out, "channels"/"time")` a los nombres reales de `SensorOutput` descubiertos en el Step 1.
-
-- [ ] **Step 5: Run test to verify it passes**
+- [ ] **Step 4: Run test to verify it passes**
 
 Run: `pytest tests/test_metric_data.py -v`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add quino/services/metric_data.py tests/test_metric_data.py
-git commit -m "feat(metrics): builder de data/meta desde sensor_outputs"
+git commit -m "feat(metrics): builder de data/meta desde sensor_outputs (columns/data)"
 ```
 
 ---
 
-## Task 2.3: Promoción atómica de artefactos (buffer temporal)
+## Task 2.3: Helper de ruta de artefactos (`good_dir`)
+
+El runner persiste en `artifacts/run_<analysis_id>/` (vía `save_result_artifact`,
+que usa el prefijo `run_`). El executor (Task 2.4) necesita esa misma ruta para
+hacer backup/restore de los datos previos. Centralizamos la ruta en un helper.
 
 **Files:**
 - Create: `quino/services/run_artifacts.py`
@@ -1528,40 +1559,14 @@ git commit -m "feat(metrics): builder de data/meta desde sensor_outputs"
 
 ```python
 # tests/test_run_artifacts.py
-from pathlib import Path
-
-from quino.services.run_artifacts import staging_dir, good_dir, promote_staging, discard_staging
+from quino.services.run_artifacts import good_dir
 
 
-def test_promote_replaces_good_dir(tmp_path):
+def test_good_dir_matches_runner_prefix(tmp_path):
     base = tmp_path / "artifacts"
-    good = good_dir(base, "an1")
-    good.mkdir(parents=True)
-    (good / "old.txt").write_text("old")
-    staging = staging_dir(base, "an1")
-    staging.mkdir(parents=True)
-    (staging / "new.txt").write_text("new")
-
-    promote_staging(base, "an1")
-
-    assert (good_dir(base, "an1") / "new.txt").exists()
-    assert not (good_dir(base, "an1") / "old.txt").exists()
-    assert not staging_dir(base, "an1").exists()
-
-
-def test_discard_removes_staging_keeps_good(tmp_path):
-    base = tmp_path / "artifacts"
-    good = good_dir(base, "an1")
-    good.mkdir(parents=True)
-    (good / "keep.txt").write_text("keep")
-    staging = staging_dir(base, "an1")
-    staging.mkdir(parents=True)
-    (staging / "tmp.txt").write_text("tmp")
-
-    discard_staging(base, "an1")
-
-    assert (good_dir(base, "an1") / "keep.txt").exists()
-    assert not staging_dir(base, "an1").exists()
+    # save_result_artifact writes to artifacts/run_<id>/, so good_dir must too.
+    assert good_dir(base, "an1").name == "run_an1"
+    assert good_dir(base, "an1").parent == base
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1573,22 +1578,41 @@ Expected: FAIL with `ModuleNotFoundError`
 
 ```python
 # quino/services/run_artifacts.py
-"""Atomic promotion of analysis artifacts via a staging directory.
+"""Artifact directory layout for analysis runs.
 
-`good_dir` holds the last successful results; `staging_dir` is where a new run
-writes. On OK/Partial we promote staging over good; on failure we discard
-staging, leaving good intact.
+`save_result_artifact` (workspace_runner) writes to ``artifacts/run_<id>/``.
+`good_dir` returns that same path so the executor can back up / restore the
+previous results around a re-run.
 """
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 
 def good_dir(base: Path, analysis_id: str) -> Path:
-    return Path(base) / analysis_id
+    """Directory holding the last persisted artifacts for an analysis."""
+    return Path(base) / f"run_{analysis_id}"
+```
 
+**Nota:** `save_result_artifact` en `workspace_runner.py` usa `run_{run.id}`; con
+`run`=Analysis, `run.id` = `analysis_id`, así que la ruta coincide con `good_dir`.
 
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pytest tests/test_run_artifacts.py -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add quino/services/run_artifacts.py tests/test_run_artifacts.py
+git commit -m "feat(run): helper good_dir para ruta de artefactos"
+```
+
+<!-- old staging implementation removed; executor uses backup/restore -->
+<details><summary>(obsoleto — no implementar)</summary>
+
+```python
 def staging_dir(base: Path, analysis_id: str) -> Path:
     return Path(base) / analysis_id / "_staging"
 
@@ -1623,148 +1647,543 @@ def discard_staging(base: Path, analysis_id: str) -> None:
         shutil.rmtree(staging)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+</details>
 
-Run: `pytest tests/test_run_artifacts.py -v`
-Expected: PASS
+---
 
-- [ ] **Step 5: Commit**
+## Task 2.3b: Adaptar runners, `workspace_runner` y `plot_renderer` al estado en Analysis
+
+Hoy los 4 runners (`dynamic.py`, `static_runner.py`, `kinematic_runner.py`,
+`equilibrium_runner.py`) reciben `run=<Run>` y hacen:
+```python
+artifact_path = save_result_artifact(project_dir, run, result)
+run.metrics = evaluate_metrics(list(analysis.config.metrics), artifact)
+```
+Con el rediseño:
+- El `run=` que pasa el executor será **el propio `Analysis`** (ya tiene `id`,
+  `status`, `result_ref`, `artifacts`, `error_message`). `save_result_artifact`
+  pasa a indexar por `run.id` = `analysis.id`.
+- La evaluación de métricas la hace **el executor tras el run** (Task 2.4), no el
+  runner. Se elimina la llamada `evaluate_metrics(...)` de los 4 runners.
+- `analysis.config.metrics` ya no existe (eliminado en Fase 1/Task 1.4); cualquier
+  referencia a él se borra.
+- `plot_renderer.py` importa `_series` de `metric_evaluator` (que reescribimos en
+  2.1). Mover `_series` a un módulo neutro `quino/services/sensor_series.py` y
+  reapuntar `plot_renderer`.
+
+**Files:**
+- Create: `quino/services/sensor_series.py` (alberga el viejo `_series` y helpers que `plot_renderer` necesita)
+- Modify: `quino/services/plot_renderer.py:66` (importar de `sensor_series`)
+- Modify: `quino/analysis/dynamic.py`, `quino/analysis/static_runner.py`, `quino/analysis/kinematic_runner.py`, `quino/analysis/equilibrium_runner.py` (quitar `evaluate_metrics`/`run.metrics`)
+- Modify: `quino/services/workspace_runner.py` (quitar import de `Run`, `_next_run_id`, `evaluate`-en-runner; `save_result_artifact(project_dir, run, result)` sigue válido con `run`=Analysis)
+- Test: `tests/test_kinematic_runner.py` (ya en working set — ajustar aserciones de métricas)
+
+- [ ] **Step 1: Find the exact metric/run lines in each runner**
+
+Run: `git grep -n "evaluate_metrics\|run.metrics\|config.metrics\|_series" quino/analysis quino/services/plot_renderer.py quino/services/workspace_runner.py`
+Expected: las líneas concretas a editar en cada archivo.
+
+- [ ] **Step 2: Create `sensor_series.py` with the `_series` helper**
+
+Como Task 2.1 ya reescribió `metric_evaluator.py` (borrando `_series`), recuperar
+el cuerpo original desde git y copiarlo:
+
+Run: `git show HEAD~5:quino/services/metric_evaluator.py` (ajustar el ref al commit
+previo a 2.1) o `git log -p -- quino/services/metric_evaluator.py` para localizar
+`_series`, `_value_at_t`, `_value_at_sweep_indices`. Copiar las que `plot_renderer`
+u otros usen (mínimo `_series`).
+
+```python
+# quino/services/sensor_series.py
+"""Sensor series extraction from a result artifact dict (used by plot_renderer)."""
+from __future__ import annotations
+
+
+def _series(artifact: dict, sensor_id: str, channel: str) -> list[float]:
+    # Pegar el cuerpo EXACTO recuperado del viejo metric_evaluator._series.
+    ...
+```
+
+- [ ] **Step 3: Reapuntar `plot_renderer.py`**
+
+Cambiar `from quino.services.metric_evaluator import _series` por
+`from quino.services.sensor_series import _series`.
+
+- [ ] **Step 4: Limpiar los 4 runners**
+
+En cada runner, eliminar el bloque:
+```python
+artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+from quino.services.metric_evaluator import evaluate_metrics
+run.metrics = evaluate_metrics(list(analysis.config.metrics), artifact)
+```
+dejando solo:
+```python
+if project_dir is not None and run is not None:
+    save_result_artifact(project_dir, run, result)
+```
+y quitar el import de `evaluate_metrics` donde esté a nivel de módulo.
+
+- [ ] **Step 5: Limpiar `workspace_runner.py`**
+
+- Quitar `Run` y `_next_run_id` si dejan de usarse (el executor ya no los usa).
+  `run_analysis`/`_run_with_model` pueden conservarse si algún test los usa, pero
+  cambiando el tipo anotado `Run` por `Analysis` y la línea `if run not in case.runs`
+  (ya no existe `case.runs`) por un no-op / eliminación. Si nadie los usa fuera de
+  tests, borrarlos y borrar sus tests.
+
+Run: `git grep -n "run_analysis\|_run_with_model\|_next_run_id" quino tests` para decidir.
+
+- [ ] **Step 6: Run the affected suites**
+
+Run: `$env:QT_QPA_PLATFORM='offscreen'; pytest tests/test_kinematic_runner.py tests/test_run_executor.py -q`
+Expected: tras el ajuste, las que dependían de `run.metrics` viejas fallan hasta adaptarse; dejar verdes las de este archivo (las de executor se cierran en 2.4).
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add quino/services/run_artifacts.py tests/test_run_artifacts.py
-git commit -m "feat(run): promoción atómica de artefactos con staging"
+git add quino/analysis quino/services/sensor_series.py quino/services/plot_renderer.py quino/services/workspace_runner.py tests/test_kinematic_runner.py
+git commit -m "refactor(run): runners escriben en Analysis; métricas fuera del runner"
 ```
 
 ---
 
 ## Task 2.4: Adaptar `run_executor` a Analysis + buffer + auto-métricas
 
-`run_executor.py` deja de crear `Run` en `case.runs`; opera sobre `Analysis`, escribe en staging, promociona (o descarta), evalúa métricas, y emite señal para el prompt OK→Partial.
+`run_executor.py` deja de crear `Run` en `case.runs`; opera sobre `Analysis`,
+que **se pasa como el argumento `run=`** al runner (tiene `id`/`status`/
+`result_ref`/`artifacts`/`error_message`, justo lo que el runner escribe). El
+runner persiste vía `save_result_artifact(project_dir, analysis, result)` en
+`artifacts/<analysis_id>/`. El executor decide promoción/descarte y evalúa
+métricas.
+
+**Decisión de staging:** los runners actuales escriben directamente en
+`artifacts/run_<id>/result.json` vía `save_result_artifact`. Para no reescribir
+los runners, el executor ejecuta el runner con `project_dir` apuntando a un
+**directorio temporal de staging** (`<project_dir>/artifacts/<analysis_id>/_staging`
+como raíz efectiva), y luego promociona. En la práctica: pasamos al runner un
+`project_dir` cuyo `artifacts/<analysis_id>` ES el staging, y `promote_staging`
+lo sube a `good`. Para mantenerlo simple y robusto, el executor:
+1. ejecuta el runner con `project_dir` real (el runner escribe en
+   `artifacts/<analysis_id>/`), pero **antes** mueve el `good` previo a un
+   backup `artifacts/<analysis_id>/_prev_backup`;
+2. si el resultado se acepta → borra el backup;
+3. si se descarta (fail / partial-rechazado) → restaura el backup sobre el dir.
+
+Esto evita tocar la firma de los runners y conserva los datos previos.
 
 **Files:**
 - Modify: `quino/services/run_executor.py`
-- Test: `tests/test_run_executor.py` (reescribir las partes que asumen `case.runs`)
+- Test: `tests/test_run_executor.py` (reescribir las aserciones `case.runs` → `analysis`)
 
-- [ ] **Step 1: Read current runner contract**
+- [ ] **Step 1: Read current test fixtures**
 
-Run: leer `quino/services/workspace_runner.py` (`_CaseAsProject`, `_next_run_id`) y `quino/analysis/registry.py` para confirmar la firma de `runner.run(...)` y de dónde sale `status`. Anotar.
+Run: leer `tests/test_run_executor.py` para conocer cómo se construye `app_service`,
+cómo se hace `enqueue`/se espera al thread (`handle.done_event`), y qué runner stub
+se usa. Anotar los helpers existentes para reusarlos.
 
-- [ ] **Step 2: Write/adjust the failing test**
+- [ ] **Step 2: Write the failing test**
+
+Reemplazar las aserciones sobre `case.runs[...]` por aserciones sobre el `Analysis`.
+Añadir este test (adaptando el arranque del app_service a las fixtures del archivo):
 
 ```python
-# tests/test_run_executor.py  (añadir/ajustar)
-from quino.domain.workspace import Analysis
-
-
-def test_run_state_lives_on_analysis(monkeypatch, ...):
-    # Build an app_service with one case + one analysis (use existing test fixtures
-    # in this file; replace any `case.runs` assertions with `analysis.status`).
-    # After a successful enqueue+execute, assert:
-    #   analysis.status == "ok"
-    #   analysis.result_ref is not None
-    #   analysis.finished_at is not None
-    ...
+# tests/test_run_executor.py  (añadir; ajustar el setup a las fixtures del archivo)
+def test_ok_run_sets_state_on_analysis(app_service_with_dynamic_analysis):
+    svc, analysis_id = app_service_with_dynamic_analysis
+    executor = svc.run_executor  # o como se obtenga en las fixtures
+    handle = executor.enqueue(analysis_id)
+    handle.done_event.wait(timeout=30)
+    case = svc.current_case()
+    analysis = next(a for a in case.analyses if a.id == analysis_id)
+    assert analysis.status in {"ok", "partial", "failed"}
+    if analysis.status == "ok":
+        assert analysis.finished_at is not None
 ```
 
-(Reescribir el cuerpo según las fixtures ya presentes en `tests/test_run_executor.py`; el punto clave: las aserciones pasan de `case.runs[-1].status` a `analysis.status`.)
+Y un test del prompt OK→Partial con un runner stub que devuelve `partial`:
+
+```python
+def test_partial_over_ok_defers_promotion(app_service_with_ok_analysis, partial_runner):
+    svc, analysis_id = app_service_with_ok_analysis  # analysis ya en status "ok"
+    captured = []
+    svc.run_executor.run_needs_confirmation.connect(lambda aid: captured.append(aid))
+    handle = svc.run_executor.enqueue(analysis_id)
+    handle.done_event.wait(timeout=30)
+    # el estado previo OK sigue intacto hasta confirmar
+    analysis = next(a for c in svc._workspace.cases.values() for a in c.analyses if a.id == analysis_id)
+    assert analysis.status == "ok"
+    assert analysis_id in captured
+    svc.run_executor.confirm_partial(analysis_id, overwrite=False)
+    assert analysis.status == "ok"  # rechazado → sigue OK
+```
+
+(Si construir `partial_runner` requiere monkeypatch de `get_runner_for_type`,
+hacerlo con `monkeypatch.setattr`.)
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `pytest tests/test_run_executor.py -v`
-Expected: FAIL (sigue mirando `case.runs`)
+Run: `$env:QT_QPA_PLATFORM='offscreen'; pytest tests/test_run_executor.py -v`
+Expected: FAIL (estado aún en `case.runs`, sin señal `run_needs_confirmation`)
 
 - [ ] **Step 4: Rewrite `run_executor.py`**
 
-Cambios clave (mantener el patrón de cola/thread):
-- `enqueue(analysis_id)`: ya no crea `Run`; toma el `Analysis`, captura `prev` snapshot (status, result_ref, artifacts, finished_at, y copia de métricas), pone `analysis.status="queued"` conservando artifacts viejos, y encola un `_QueuedJob(case_id, analysis_id, ...)`.
-- `_run_one(job)`: pone `status="running"`; el runner escribe en `staging_dir(base, analysis_id)`; al terminar:
-  - cancel/`to_be_run` o excepción → `discard_staging`; restaurar `prev`.
-  - `ok` → `promote_staging`; set `status/result_ref/finished_at`; construir data/meta y `evaluate_all`.
-  - `partial`:
-    - si `prev.status == "ok"`: **no promociona**; emite `run_needs_confirmation.emit(analysis_id)` con el resultado pendiente guardado en `self.pending_partial[analysis_id] = (prev, staging_result)`. La GUI decide y llama `confirm_partial(analysis_id, overwrite: bool)`.
-    - si no: `promote_staging` + métricas como en ok.
-
-Añadir señal y método:
-
 ```python
-    run_needs_confirmation = QtCore.Signal(str)  # analysis_id (partial over ok)
+from __future__ import annotations
+
+import copy
+import queue
+import shutil
+import threading
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+
+from PySide6 import QtCore
+
+from quino.analysis.registry import get_runner_for_type
+from quino.services.metric_data import build_metric_data
+from quino.services.metric_evaluator import evaluate_all
+from quino.services.run_artifacts import good_dir
+from quino.services.workspace_runner import _CaseAsProject
+
+
+@dataclass(slots=True)
+class RunHandle:
+    analysis_id: str
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+    done_event: threading.Event = field(default_factory=threading.Event)
+
+    def cancel(self) -> None:
+        self.cancel_event.set()
+
+    def is_done(self) -> bool:
+        return self.done_event.is_set()
+
+
+@dataclass(slots=True)
+class _QueuedJob:
+    case_id: str
+    analysis_id: str
+    cancel_event: threading.Event
+
+
+def _analysis_snapshot(analysis) -> dict:
+    return {
+        "status": analysis.status,
+        "result_ref": copy.deepcopy(analysis.result_ref),
+        "artifacts": copy.deepcopy(analysis.artifacts),
+        "finished_at": analysis.finished_at,
+        "error_message": analysis.error_message,
+        "metrics": copy.deepcopy(analysis.metrics),
+    }
+
+
+class RunExecutor(QtCore.QObject):
+    run_queued = QtCore.Signal(str)
+    run_started = QtCore.Signal(str)
+    run_progress = QtCore.Signal(str, int, int)
+    run_finished = QtCore.Signal(str, str)
+    run_needs_confirmation = QtCore.Signal(str)  # analysis_id: partial over ok
+
+    def __init__(self, app_service, parent: QtCore.QObject | None = None) -> None:
+        super().__init__(parent)
+        self.app_service = app_service
+        self.pending_partial: dict[str, tuple] = {}
+        self._queue: queue.Queue[_QueuedJob | None] = queue.Queue()
+        self._stopping = threading.Event()
+        self._worker = threading.Thread(target=self._loop, name="RunExecutor", daemon=True)
+        self._worker.start()
+
+    # ------------------------------------------------------------------ public
+
+    def enqueue(self, analysis_id: str) -> RunHandle:
+        ws = self.app_service._workspace
+        if ws is None:
+            raise ValueError("No active workspace")
+        case = self.app_service.current_case()
+        if case is None:
+            raise ValueError("No active case")
+        analysis = next((a for a in case.analyses if a.id == analysis_id), None)
+        if analysis is None:
+            raise ValueError(f"Analysis {analysis_id!r} not found in case {case.id!r}")
+
+        with self.app_service.workspace_lock:
+            analysis.status = "queued"  # keep previous artifacts referenced
+            analysis.created_at = datetime.now(tz=timezone.utc).isoformat()
+
+        handle = RunHandle(analysis_id=analysis_id)
+        self.app_service.pending_run_handles[analysis_id] = handle
+        self._queue.put(_QueuedJob(case.id, analysis_id, handle.cancel_event))
+        self.run_queued.emit(analysis_id)
+        return handle
 
     def confirm_partial(self, analysis_id: str, overwrite: bool) -> None:
         pending = self.pending_partial.pop(analysis_id, None)
         if pending is None:
             return
-        prev, result, case_id = pending
-        base = self._artifacts_base()
+        case_id, prev, result, backup_dir = pending
         with self.app_service.workspace_lock:
             analysis = self._find_analysis(case_id, analysis_id)
             if analysis is None:
                 return
             if overwrite:
-                promote_staging(base, analysis_id)
+                self._discard_backup(backup_dir)
                 self._apply_result(analysis, result, status="partial")
                 self._evaluate_metrics(case_id, analysis)
             else:
-                discard_staging(base, analysis_id)
+                self._restore_backup(case_id, analysis_id, backup_dir)
                 self._restore_prev(analysis, prev)
         self.run_finished.emit(analysis_id, analysis.status)
+
+    def shutdown(self) -> None:
+        self._stopping.set()
+        self._queue.put(None)
+        self._worker.join(timeout=2.0)
+
+    def pending_count(self) -> int:
+        count = self._queue.qsize()
+        return max(0, count - 1 if self._stopping.is_set() else count)
+
+    # ------------------------------------------------------------------ worker
+
+    def _loop(self) -> None:
+        while not self._stopping.is_set():
+            try:
+                job = self._queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            if job is None:
+                break
+            self._run_one(job)
+
+    def _run_one(self, job: _QueuedJob) -> None:
+        analysis = self._find_analysis(job.case_id, job.analysis_id)
+        if analysis is None:
+            return
+        with self.app_service.workspace_lock:
+            prev = _analysis_snapshot(analysis)
+            analysis.status = "running"
+        self.run_started.emit(job.analysis_id)
+
+        project_dir = self.app_service.current_project_dir
+        backup_dir = self._backup_good(project_dir, job.analysis_id) if project_dir else None
+
+        try:
+            ws = self.app_service._workspace
+            case = ws.cases.get(job.case_id)
+            analysis = next((a for a in case.analyses if a.id == job.analysis_id), None)
+            project = _CaseAsProject.from_case(case, ws)
+            runner = get_runner_for_type(analysis.analysis_type)
+            result = runner.run(
+                project,
+                analysis,
+                initial_pose=None,
+                cancel_event=job.cancel_event,
+                run=analysis,  # Analysis plays the role of the old Run object
+                project_dir=project_dir,
+            )
+            status = getattr(result, "status", "ok")
+            with self.app_service.workspace_lock:
+                if job.cancel_event.is_set() or status == "to_be_run":
+                    self._restore_backup(job.case_id, job.analysis_id, backup_dir)
+                    self._restore_prev(analysis, prev)
+                    analysis.status = "to_be_run"
+                elif status == "partial" and prev["status"] == "ok":
+                    # defer: keep previous OK data, ask the user
+                    self.pending_partial[job.analysis_id] = (job.case_id, prev, result, backup_dir)
+                    self._restore_prev(analysis, prev)  # show prev OK until decision
+                    self.run_needs_confirmation.emit(job.analysis_id)
+                    return  # do not finish/cleanup yet
+                else:
+                    self._discard_backup(backup_dir)
+                    self._apply_result(analysis, result, status=status)
+                    if status in {"ok", "partial"}:
+                        self._evaluate_metrics(job.case_id, analysis)
+        except Exception as exc:  # noqa: BLE001
+            with self.app_service.workspace_lock:
+                self._restore_backup(job.case_id, job.analysis_id, backup_dir)
+                self._restore_prev(analysis, prev)
+                analysis.status = "failed"
+                analysis.error_message = str(exc)
+        finally:
+            with self.app_service.workspace_lock:
+                if job.analysis_id not in self.pending_partial:
+                    analysis.finished_at = datetime.now(tz=timezone.utc).isoformat()
+            handle = self.app_service.pending_run_handles.pop(job.analysis_id, None)
+            if handle is not None:
+                handle.done_event.set()
+            if job.analysis_id not in self.pending_partial:
+                self.run_finished.emit(job.analysis_id, analysis.status)
+
+    # ------------------------------------------------------------------ helpers
+
+    def _find_analysis(self, case_id: str, analysis_id: str):
+        ws = self.app_service._workspace
+        if ws is None:
+            return None
+        case = ws.cases.get(case_id)
+        if case is None:
+            return None
+        return next((a for a in case.analyses if a.id == analysis_id), None)
+
+    def _apply_result(self, analysis, result, *, status: str) -> None:
+        analysis.status = status
+        msg = getattr(result, "error_message", "") or ""
+        if status == "partial":
+            analysis.error_message = ""
+            if msg and msg not in analysis.warnings:
+                analysis.warnings.append(msg)
+        else:
+            analysis.error_message = msg
+        analysis.finished_at = datetime.now(tz=timezone.utc).isoformat()
+
+    def _restore_prev(self, analysis, prev: dict) -> None:
+        analysis.status = prev["status"]
+        analysis.result_ref = prev["result_ref"]
+        analysis.artifacts = prev["artifacts"]
+        analysis.finished_at = prev["finished_at"]
+        analysis.error_message = prev["error_message"]
+        analysis.metrics = prev["metrics"]
+
+    def _evaluate_metrics(self, case_id: str, analysis) -> None:
+        if not analysis.metrics:
+            return
+        case = self.app_service._workspace.cases.get(case_id)
+        if case is None:
+            return
+        name_by_id = {s.id: s.name for s in case.model.sensors}
+        meta = self._analysis_meta(analysis)
+        data, meta = build_metric_data(case.sensor_outputs, name_by_id, meta)
+        evaluate_all(analysis, data, meta)
+
+    def _analysis_meta(self, analysis) -> dict:
+        cfg = analysis.config
+        meta: dict = {"analysis_type": analysis.analysis_type}
+        for attr in ("dt", "duration", "steps"):
+            if hasattr(cfg, attr):
+                meta[attr] = getattr(cfg, attr)
+        if hasattr(cfg, "duration"):
+            meta["t_final"] = getattr(cfg, "duration")
+        return meta
+
+    # --- backup of the previous good artifacts (so a failed run can restore) ---
+
+    def _backup_good(self, project_dir, analysis_id: str):
+        base = Path(project_dir) / "artifacts"
+        good = good_dir(base, analysis_id)
+        if not good.exists():
+            return None
+        backup = base / f"{analysis_id}__prev_backup"
+        if backup.exists():
+            shutil.rmtree(backup)
+        shutil.copytree(good, backup)
+        return backup
+
+    def _discard_backup(self, backup_dir) -> None:
+        if backup_dir is not None and Path(backup_dir).exists():
+            shutil.rmtree(backup_dir)
+
+    def _restore_backup(self, case_id: str, analysis_id: str, backup_dir) -> None:
+        if backup_dir is None or not Path(backup_dir).exists():
+            return
+        project_dir = self.app_service.current_project_dir
+        if project_dir is None:
+            return
+        base = Path(project_dir) / "artifacts"
+        good = good_dir(base, analysis_id)
+        if good.exists():
+            shutil.rmtree(good)
+        shutil.move(str(backup_dir), str(good))
 ```
 
-Donde `_apply_result`, `_restore_prev`, `_evaluate_metrics`, `_artifacts_base`, `_find_analysis` son helpers privados (escribir su código completo siguiendo los campos de `Analysis`). `_evaluate_metrics` usa `build_metric_data` + `evaluate_all`, con `sensor_name_by_id` derivado de `case.model.sensors` y `analysis_meta` desde `analysis.config` (dt, t_final/duration, steps).
+**Nota:** confirmar que `app_service` expone `workspace_lock`, `pending_run_handles`,
+`current_project_dir` y `current_case()` (lo hace hoy). Si `pending_run_handles`
+indexaba por `run_id`, ahora indexa por `analysis_id`; ajustar cualquier lector.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `pytest tests/test_run_executor.py -v`
+Run: `$env:QT_QPA_PLATFORM='offscreen'; pytest tests/test_run_executor.py -v`
 Expected: PASS
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add quino/services/run_executor.py tests/test_run_executor.py
-git commit -m "feat(run): estado de run en Analysis, staging+promoción, prompt OK→Partial, auto-métricas"
+git commit -m "feat(run): estado en Analysis, backup+restore previo, prompt OK→Partial, auto-métricas"
 ```
 
 ---
 
 ## Task 2.5: Adaptar command-services y fachada a Analysis (sin Run/overlay)
 
-Los command-services (`workspace_commands.py`, etc.) y `service.py` referencian `case.runs`, `delete_run(run_id)`, y mutaciones que antes tocaban overlay. Adaptarlos al modelo nuevo.
+Los command-services y `service.py`/`_context.py` referencian `case.runs`,
+`delete_run(run_id)`, los shims de resolución de conflictos del overlay
+(`resolve_cascade_conflicts`, `cascade_resolution_for`, que leían
+`OperationResult.conflicts` — ya eliminado), y la proxy `.runs`. Adaptarlos.
+
+Puntos concretos ya identificados en el código:
+- `quino/application/_context.py`:
+  - `discard_runs_for_active_case()` importa `_mark_set_stale` (renombrado a
+    `_stale_analyses` en Task 1.9) — reapuntar.
+  - `confirm_invalidation_if_runs_exist()` itera `case.runs` con `r.analysis_id`/
+    `r.status` — cambiar a iterar `case.analyses` con `a.status in {"ok","partial"}`.
+  - `resolve_cascade_conflicts` / `cascade_resolution_for`: ya no hay conflictos
+    persistentes; eliminar estos campos/métodos del `ServiceContext` y sus usos.
+  - `_WorkspaceProjectProxy.runs`: eliminar la property `.runs` (o devolver `[]`)
+    y revisar lectores.
+- `quino/services/workspace_runner.py`: `_CaseAsProject` ok; `_next_run_id` se
+  borró en 2.3b.
 
 **Files:**
 - Modify: `quino/application/commands/workspace_commands.py`
 - Modify: `quino/application/service.py`
-- Modify: `quino/application/_context.py` (si referencia overlay)
-- Test: `tests/test_pose_commands.py`, `tests/test_run_artifact_dataset.py` (ya tocados en working set) y cualquier test de comandos roto
+- Modify: `quino/application/_context.py`
+- Test: `tests/test_pose_commands.py`, `tests/test_run_artifact_dataset.py` (ya en working set) y cualquier test de comandos roto
 
 - [ ] **Step 1: Find call sites**
 
-Run: `git grep -n "\.runs\|delete_run\|create_analysis\|rename_analysis\|delete_analysis\|overlay" quino/application/`
-Expected: lista de métodos a adaptar.
+Run: `git grep -n "\.runs\b\|delete_run\|create_analysis\|rename_analysis\|delete_analysis\|overlay\|conflicts\|resolve_cascade\|_mark_set_stale\|_next_run_id" quino/application quino/services/workspace_runner.py`
+Expected: lista exacta de líneas a adaptar.
 
 - [ ] **Step 2: Run the relevant suites to see failures**
 
-Run: `pytest tests/test_pose_commands.py tests/test_run_executor.py -q`
+Run: `$env:QT_QPA_PLATFORM='offscreen'; pytest tests/test_pose_commands.py tests/test_run_artifact_dataset.py -q`
 Expected: fallos por API vieja.
 
-- [ ] **Step 3: Adapt the command-services**
+- [ ] **Step 3: Adapt application layer**
 
-- `delete_run(run_id)` → `delete_run(analysis_id)` resetea el estado del analysis (usa `run_invalidation.delete_run`, ya adaptado).
-- `create_analysis(...)` crea `Analysis` y lo añade a `case.analyses` (sin tocar runs).
+En `_context.py`:
+- `confirm_invalidation_if_runs_exist`:
+  ```python
+  has_ok_run = any(
+      a.id in analysis_ids and a.status in {"ok", "partial"}
+      for a in case.analyses
+  )
+  ```
+- `discard_runs_for_active_case`: `from quino.services.run_invalidation import _stale_analyses` y `_stale_analyses(case, analysis_ids, "model edited")`.
+- Borrar `resolve_cascade_conflicts`, `cascade_resolution_for` del `ServiceContext`.
+- Borrar la property `runs` de `_WorkspaceProjectProxy`.
+
+En `workspace_commands.py` / `service.py`:
+- `delete_run(run_id)` → `delete_run(analysis_id)` vía `run_invalidation.delete_run`.
+- `create_analysis(...)` crea `Analysis` y lo añade a `case.analyses`.
 - `rename_analysis` / `delete_analysis`: operar sobre `case.analyses`.
-- Eliminar cualquier paso que construyera/validara overlay (`validate_overlay`, `rebuild_overlay`).
-- Las mutaciones de modelo (add/remove/edit body, joint, etc.) que deban cascadear pasan por `CascadingEngine`.
+- Eliminar pasos que construyeran/validaran overlay (`validate_overlay`, `rebuild_overlay`).
+- Mutaciones de modelo que deban cascadear pasan por `CascadingEngine` (sus métodos ya no devuelven `conflicts`).
 
-(Aplicar edits concretos según lo encontrado en Step 1; cada método con su código.)
+(Aplicar edits concretos según lo encontrado en Step 1; cada método con su código completo.)
 
 - [ ] **Step 4: Run suites to verify they pass**
 
-Run: `pytest tests/test_pose_commands.py tests/test_run_executor.py tests/test_run_artifact_dataset.py -q`
+Run: `$env:QT_QPA_PLATFORM='offscreen'; pytest tests/test_pose_commands.py tests/test_run_executor.py tests/test_run_artifact_dataset.py -q`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add quino/application tests/test_pose_commands.py tests/test_run_artifact_dataset.py
-git commit -m "refactor(application): comandos sobre Analysis (run aplanado), sin overlay"
+git commit -m "refactor(application): comandos sobre Analysis (run aplanado), sin overlay ni conflicts"
 ```
 
 ---
