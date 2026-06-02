@@ -2,24 +2,21 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
-from datetime import datetime
+from dataclasses import dataclass
 from pathlib import Path
 
 from quino.domain.model import Model, SimulationResult
 from quino.domain.workspace import (
-    Analysis,
     ArtifactRef,
     Case,
     ResultRef,
     Workspace,
 )
 
-# NOTE (Fase 1.10): the ``Run`` domain entity and ``Case.runs`` were removed;
-# run state now lives flattened on ``Analysis``. This run-execution machinery
-# still constructs ``Run`` objects and appends to ``case.runs`` and has NOT yet
-# been migrated to the Analysis-based model. A minimal local placeholder keeps
-# the module importable; full migration is deferred to a later Fase.
+# NOTE (Fase 1.10 / task 2.3b): the ``Run`` domain entity and ``Case.runs`` were removed;
+# run state now lives flattened on ``Analysis``. ``Run`` is kept here as a local
+# placeholder because ``run_executor.py`` still imports it; full migration is
+# deferred to a later Fase.
 from dataclasses import field as _field
 
 
@@ -64,93 +61,6 @@ def _next_run_id(case: Case) -> str:
     while f"run-{n}" in existing:
         n += 1
     return f"run-{n}"
-
-
-def run_analysis(
-    workspace: Workspace,
-    case: Case,
-    analysis_id: str,
-    simulation_runner,
-    *,
-    cancel_event=None,
-    run: Run | None = None,
-    project_dir: Path | None = None,
-) -> Run:
-    analysis = next((a for a in case.analyses if a.id == analysis_id), None)
-    if analysis is None:
-        raise ValueError(f"Analysis {analysis_id!r} not found in case {case.id!r}")
-
-    if run is None:
-        run = Run(
-            id=_next_run_id(case),
-            analysis_id=analysis.id,
-            created_at=datetime.now().isoformat(),
-            status="running",
-            config_snapshot=asdict(analysis.config),
-        )
-
-    # No composition — case.model is the authoritative model
-    return _run_with_model(case.model, workspace, case, analysis, simulation_runner, run, cancel_event, project_dir)
-
-
-def _run_with_model(
-    model: Model,
-    workspace: Workspace,
-    case: Case,
-    analysis: Analysis,
-    runner,
-    run: Run,
-    cancel_event,
-    project_dir: Path | None,
-) -> Run:
-    project = _CaseAsProject.from_case(case, workspace)
-    try:
-        if runner is None:
-            raise RuntimeError("No simulation runner available")
-
-        result = runner.run(
-            project,
-            analysis,
-            initial_pose=None,
-            cancel_event=cancel_event,
-            run=run,
-            project_dir=project_dir,
-        )
-
-        cancelled = (
-            cancel_event is not None and cancel_event.is_set()
-        ) or getattr(result, "status", None) == "to_be_run"
-        if cancelled:
-            run.status = "to_be_run"
-            run.error_message = getattr(result, "error_message", None) or "Cancelled by user"
-            run.result_ref = None
-            run.artifacts.clear()
-            run.metrics.clear()
-            return run
-
-        if project_dir is not None:
-            # Artifact persistence is handled by the runner itself (if it supports it).
-            # For legacy SimulationResult objects, persist here.
-            if isinstance(result, SimulationResult):
-                save_result_artifact(project_dir, run, result)
-
-        run.metrics = {}
-        run.status = getattr(result, "status", "ok") if not isinstance(result, SimulationResult) else (
-            "ok" if result.success else "failed"
-        )
-        if isinstance(result, SimulationResult) and not result.success and result.error:
-            run.error_message = result.error
-        elif hasattr(result, "error_message"):
-            run.error_message = result.error_message
-    except Exception as exc:
-        run.status = "failed"
-        run.error_message = str(exc)
-    finally:
-        run.finished_at = datetime.now().isoformat()
-
-    if run not in case.runs:
-        case.runs.append(run)
-    return run
 
 
 def load_result_artifact(project_dir: Path, run: Run) -> SimulationResult | None:

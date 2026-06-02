@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from quino.domain.model import SimulationResult
 from quino.analysis.runner import AnalysisResult, AnalysisRunner
 
@@ -68,11 +66,7 @@ class DynamicAnalysisRunner(AnalysisRunner):
                 )
 
             if project_dir is not None and run is not None:
-                artifact_path = save_result_artifact(project_dir, run, result)
-                artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
-                from quino.services.metric_evaluator import evaluate_metrics
-
-                run.metrics = evaluate_metrics(list(analysis.config.metrics), artifact)
+                save_result_artifact(project_dir, run, result)
 
             # A crashed solve that produced some frames is "partial": the
             # available trajectory is still usable for playback / plotting.

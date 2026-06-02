@@ -6,7 +6,6 @@ from pathlib import Path
 
 from quino.analysis.runner import AnalysisResult, AnalysisRunner
 from quino.domain.workspace import Analysis, ResultRef
-from quino.services.metric_evaluator import evaluate_metrics
 from quino.services.mechanism_dof import compute_mechanism_dof
 from quino.services.static_solver import solve_static
 
@@ -57,9 +56,7 @@ class StaticAnalysisRunner(AnalysisRunner):
                 error_message=str(exc),
             )
         if project_dir is not None and run is not None:
-            artifact_path = self._persist_artifact(project_dir, run, report)
-            artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
-            run.metrics = evaluate_metrics(list(analysis.config.metrics), artifact)
+            self._persist_artifact(project_dir, run, report)
         return AnalysisResult(
             analysis_id=analysis.id,
             analysis_type="static",

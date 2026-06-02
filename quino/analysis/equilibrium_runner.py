@@ -7,7 +7,6 @@ from pathlib import Path
 from quino.analysis.runner import AnalysisResult, AnalysisRunner
 from quino.analysis.static_runner import _effective_dof
 from quino.domain.workspace import Analysis, ResultRef
-from quino.services.metric_evaluator import evaluate_metrics
 from quino.services.equilibrium_finder import find_stable_equilibria
 
 
@@ -47,9 +46,7 @@ class EquilibriumAnalysisRunner(AnalysisRunner):
                 error_message=str(exc),
             )
         if project_dir is not None and run is not None:
-            artifact_path = self._persist_artifact(project_dir, run, equilibria)
-            artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
-            run.metrics = evaluate_metrics(list(analysis.config.metrics), artifact)
+            self._persist_artifact(project_dir, run, equilibria)
         return AnalysisResult(
             analysis_id=analysis.id,
             analysis_type="equilibrium",
