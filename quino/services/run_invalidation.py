@@ -4,38 +4,36 @@ from datetime import datetime, timezone
 import dataclasses
 import re
 
-from quino.domain.workspace import Case, Workspace
+from quino.domain.workspace import Analysis, Case, Workspace
 
 
-def _mark_set_stale(case: Case, analysis_ids: set[str], reason: str) -> int:
-    """Flip every ok/partial run in *case* whose analysis_id is in *analysis_ids* to 'stale'."""
-    if not analysis_ids:
-        return 0
+def _stale_analyses(case: Case, analysis_ids: set[str] | None, reason: str) -> int:
+    """Flip every ok/partial Analysis in *case* (filtered by analysis_ids if given) to 'stale'."""
     timestamp = datetime.now(tz=timezone.utc).isoformat()
     affected = 0
-    for run in case.runs:
-        if run.analysis_id not in analysis_ids:
+    for analysis in case.analyses:
+        if analysis_ids is not None and analysis.id not in analysis_ids:
             continue
-        if run.status not in {"ok", "partial"}:
+        if analysis.status not in {"ok", "partial"}:
             continue
-        run.status = "stale"
-        run.warnings.append(f"[{timestamp}] {reason}")
+        analysis.status = "stale"
+        analysis.warnings.append(f"[{timestamp}] {reason}")
         affected += 1
     return affected
 
 
+# Backward-compat alias (used by _context.py until it is adapted).
+_mark_set_stale = _stale_analyses
+
+
 def mark_runs_stale_for_case(case: Case, *, reason: str) -> int:
-    """Stale every run in the given case."""
-    analysis_ids = {a.id for a in case.analyses}
-    return _mark_set_stale(case, analysis_ids, reason)
+    """Stale every ok/partial analysis in the given case."""
+    return _stale_analyses(case, None, reason)
 
 
 def mark_all_runs_stale(workspace: Workspace, *, reason: str) -> int:
-    """Stale every run in every case of the workspace."""
-    total = 0
-    for case in workspace.cases.values():
-        total += mark_runs_stale_for_case(case, reason=reason)
-    return total
+    """Stale every ok/partial analysis in every case of the workspace."""
+    return sum(mark_runs_stale_for_case(case, reason=reason) for case in workspace.cases.values())
 
 
 def mark_runs_stale_for_parameter(workspace: Workspace, parameter_name: str, *, reason: str) -> int:
@@ -48,11 +46,11 @@ def mark_runs_stale_for_parameter(workspace: Workspace, parameter_name: str, *, 
 
 
 def mark_runs_stale_for_pose(workspace: Workspace, pose_id: str, *, reason: str) -> int:
-    """Stale runs of analyses whose pose_id matches."""
+    """Stale analyses whose pose_id matches."""
     total = 0
     for case in workspace.cases.values():
-        analysis_ids = {a.id for a in case.analyses if a.pose_id == pose_id}
-        total += _mark_set_stale(case, analysis_ids, reason)
+        ids = {a.id for a in case.analyses if a.pose_id == pose_id}
+        total += _stale_analyses(case, ids, reason)
     return total
 
 
@@ -76,17 +74,16 @@ def _contains_parameter_token(value, token: re.Pattern[str]) -> bool:
     if isinstance(value, (list, tuple, set)):
         return any(_contains_parameter_token(item, token) for item in value)
     if dataclasses.is_dataclass(value):
-        for field in dataclasses.fields(value):
-            if _contains_parameter_token(getattr(value, field.name), token):
-                return True
+        return any(_contains_parameter_token(getattr(value, f.name), token)
+                   for f in dataclasses.fields(value))
     return False
 
 
-def delete_run(workspace: Workspace, project_dir, run_id: str) -> bool:
-    """Remove a run from its case and unlink the on-disk artifact."""
+def delete_run(workspace: Workspace, project_dir, analysis_id: str) -> bool:
+    """Reset the run state of an analysis and unlink its on-disk artifact."""
     from pathlib import Path
     for case in workspace.cases.values():
-        target = next((r for r in case.runs if r.id == run_id), None)
+        target = next((a for a in case.analyses if a.id == analysis_id), None)
         if target is None:
             continue
         if project_dir is not None and target.result_ref is not None:
@@ -95,6 +92,9 @@ def delete_run(workspace: Workspace, project_dir, run_id: str) -> bool:
                 artifact.unlink(missing_ok=True)
             except OSError:
                 pass
-        case.runs = [r for r in case.runs if r.id != run_id]
+        target.status = "to_be_run"
+        target.result_ref = None
+        target.artifacts = []
+        target.finished_at = None
         return True
     return False
