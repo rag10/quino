@@ -279,13 +279,9 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         analyses_by_pose: dict[str | None, list] = {}
         for analysis in case.analyses:
             analyses_by_pose.setdefault(analysis.pose_id, []).append(analysis)
-        # The standalone ``Run`` entity / ``Case.runs`` were removed; run state now
-        # lives on each Analysis. Run-as-Analysis rendering is handled in task 4.3;
-        # for now no separate run rows are produced.
-        runs_by_analysis: dict[str, list] = {}
         known_pose_ids = {p.id for p in case.poses}
 
-        # --- Poses group (default first, then user poses) ---
+        # --- Poses hang DIRECTLY off the case (default first, then user poses) ---
         default_pose = next((p for p in case.poses if p.is_default), None)
         if default_pose is None:
             # Auto-create the reference pose if missing (workspaces saved before
@@ -295,13 +291,6 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             default_pose = create_default_pose(pose_id)
             case.poses.insert(0, default_pose)
         non_default_poses = [p for p in case.poses if not p.is_default]
-        total_poses = 1 + len(non_default_poses)
-        poses_group = _group_item(
-            f"Poses  ({total_poses})",
-            "workspace-poses",
-        )
-        poses_group.setData(0, ROLE_NODE_KIND, "poses_group")
-        poses_group.setData(0, ROLE_ID, case.id)
 
         dp_pose_id = default_pose.id if default_pose else None
         dp_label = f"{default_pose.name}  [reference]" if default_pose else "Reference  [reference]"
@@ -316,9 +305,9 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         # "Analyses" group node).
         dp_analyses = analyses_by_pose.get(dp_pose_id, []) if dp_pose_id else []
         for analysis in dp_analyses:
-            dp_item.addChild(self._build_analysis_item(analysis, runs_by_analysis, ws))
+            dp_item.addChild(self._build_analysis_item(analysis, ws))
         dp_item.setExpanded(True)
-        poses_group.addChild(dp_item)
+        item.addChild(dp_item)
 
         for pose in non_default_poses:
             pose_analyses = analyses_by_pose.get(pose.id, [])
@@ -337,11 +326,9 @@ class WorkflowTreePanel(QtWidgets.QWidget):
                 pose_item.setBackground(0, QtGui.QBrush(QtGui.QColor(BLUE_SOFT)))
             pose_item.setToolTip(0, f"Pose: {pose.name}")
             for analysis in pose_analyses:
-                pose_item.addChild(self._build_analysis_item(analysis, runs_by_analysis, ws))
+                pose_item.addChild(self._build_analysis_item(analysis, ws))
             pose_item.setExpanded(True)
-            poses_group.addChild(pose_item)
-        poses_group.setExpanded(True)
-        item.addChild(poses_group)
+            item.addChild(pose_item)
 
         # --- Orphaned analyses (no pose / pose missing) ---
         orphan_analyses = [
@@ -351,7 +338,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         if orphan_analyses:
             orphan_group = _group_item(f"Analyses  ({len(orphan_analyses)})", "workspace-analyses")
             for analysis in orphan_analyses:
-                orphan_group.addChild(self._build_analysis_item(analysis, runs_by_analysis, ws))
+                orphan_group.addChild(self._build_analysis_item(analysis, ws))
             orphan_group.setExpanded(True)
             item.addChild(orphan_group)
 
@@ -359,7 +346,7 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         child_cases = [c for c in ws.cases.values() if c.parent_case_id == case.id]
         sub_group = _group_item(
             f"Subcases  ({len(child_cases)})" if child_cases else "Subcases",
-            "workspace-subcase",
+            "folder-open",
         )
         sub_group.setData(0, ROLE_NODE_KIND, "subcases_group")
         sub_group.setData(0, ROLE_ID, case.id)
@@ -370,17 +357,27 @@ class WorkflowTreePanel(QtWidgets.QWidget):
 
         return item
 
-    def _build_analysis_item(self, analysis, runs_by_analysis: dict[str, list], ws) -> QtWidgets.QTreeWidgetItem:
+    def _build_analysis_item(self, analysis, ws) -> QtWidgets.QTreeWidgetItem:
         type_badge = _ANALYSIS_TYPE_LABELS.get(analysis.analysis_type, analysis.analysis_type[:3].capitalize())
-        runs = runs_by_analysis.get(analysis.id, [])
-        run_summary = f"  ({len(runs)} run)" if len(runs) == 1 else (f"  ({len(runs)} runs)" if runs else "")
         is_selected = ws.selected_analysis_id == analysis.id
-        label = f"[{type_badge}] {analysis.name}{run_summary}"
+        status = getattr(analysis, "status", "to_be_run")
+        _icon_name, status_color = _RUN_STATUS_ICONS.get(status, ("run-simulation", "#888888"))
+
+        # Run state is rendered ON the analysis node (no separate run rows).
+        # A status suffix is appended for non-default states.
+        status_suffix = "" if status == "to_be_run" else f"  · {status}"
+        label = f"[{type_badge}] {analysis.name}{status_suffix}"
         a_item = QtWidgets.QTreeWidgetItem([label])
-        a_item.setIcon(
-            0,
-            get_icon("workspace-analysis", BLUE_DARK if is_selected else INK_MUTED, size=16),
-        )
+
+        # Tint the analysis icon by run status so different statuses produce
+        # visibly different pixmaps. Selection takes precedence for colour.
+        if is_selected:
+            icon_color = BLUE_DARK
+        elif status == "to_be_run":
+            icon_color = INK_MUTED
+        else:
+            icon_color = status_color
+        a_item.setIcon(0, get_icon("workspace-analysis", icon_color, size=16))
         a_item.setData(0, ROLE_NODE_KIND, "analysis")
         a_item.setData(0, ROLE_ID, analysis.id)
         if is_selected:
@@ -388,25 +385,12 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             font.setBold(True)
             a_item.setFont(0, font)
             a_item.setBackground(0, QtGui.QBrush(QtGui.QColor(BLUE_SOFT)))
-        a_item.setToolTip(0, f"{analysis.analysis_type.capitalize()} analysis: {analysis.name}")
 
-        for run in runs:
-            date_part = run.created_at[:10] if run.created_at else "-"
-            status = run.status
-            icon_name, status_color = _RUN_STATUS_ICONS.get(status, ("run-simulation", "#888888"))
-            label = f"{date_part}  [{status}]"
-            if run.note:
-                label += f"  {run.note}"
-            r_item = QtWidgets.QTreeWidgetItem([label])
-            r_item.setIcon(0, get_icon(icon_name, status_color, size=16))
-            r_item.setData(0, ROLE_NODE_KIND, "run")
-            r_item.setData(0, ROLE_ID, run.id)
-            r_item.setForeground(0, QtGui.QBrush(QtGui.QColor(status_color)))
-            r_item.setToolTip(0, f"Run {date_part} - {status}" + (f": {run.error_message}" if run.error_message else ""))
-            a_item.addChild(r_item)
-
-        if runs:
-            a_item.setExpanded(True)
+        tooltip = f"{analysis.analysis_type.capitalize()} analysis: {analysis.name}\nStatus: {status}"
+        error_message = getattr(analysis, "error_message", "")
+        if error_message:
+            tooltip += f"\n{error_message}"
+        a_item.setToolTip(0, tooltip)
         return a_item
 
     # ------------------------------------------------------------------
@@ -450,8 +434,6 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         global_pos = self._tree.viewport().mapToGlobal(pos)
         if kind == "case":
             self._show_case_menu(global_pos, ent_id)
-        elif kind == "poses_group":
-            self._show_poses_group_menu(global_pos, ent_id)
         elif kind == "subcases_group":
             self._show_subcases_group_menu(global_pos, ent_id)
         elif kind == "default_pose":
@@ -549,17 +531,6 @@ class WorkflowTreePanel(QtWidgets.QWidget):
                 except ValueError as exc:
                     self._show_error("Cannot delete case", str(exc))
                 self.refresh()
-
-    def _show_poses_group_menu(self, global_pos: QtCore.QPoint, case_id: str) -> None:
-        menu = QtWidgets.QMenu(self)
-        add_action = menu.addAction("Add pose…")
-        action = menu.exec(global_pos)
-        if action == add_action:
-            name, ok = QtWidgets.QInputDialog.getText(self, "Add pose", "Pose name:")
-            if ok and name.strip():
-                pose = self._service.workspace.create_pose(name.strip(), case_id=case_id)
-                self.refresh()
-                self.pose_selected.emit(pose.id)
 
     def _show_subcases_group_menu(self, global_pos: QtCore.QPoint, parent_case_id: str) -> None:
         menu = QtWidgets.QMenu(self)

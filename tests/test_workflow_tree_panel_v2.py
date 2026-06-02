@@ -128,47 +128,48 @@ def test_double_click_case_emits_case_activated(app, qtbot):
     assert blocker.args[0] == service._workspace.root_case_ids[0]
 
 
-def test_rerun_request_resolves_run_id(app, qtbot):
-    from quino.domain.workspace import Analysis, Run
+def test_rerun_request_resolves_analysis_id(app, qtbot):
+    """The rerun signal now carries an analysis id (Run entity removed)."""
+    from quino.domain.workspace import Analysis
     service = ApplicationService()
     service.new_workspace("Test")
     ws = service._workspace
     case = ws.cases[ws.root_case_ids[0]]
-    analysis = Analysis(id="a1", name="A", analysis_type="dynamic", pose_id=None)
-    run = Run(id="r1", analysis_id="a1", status="ok", created_at="2026-01-01T00:00:00")
+    analysis = Analysis(id="a1", name="A", analysis_type="dynamic", pose_id=None, status="ok")
     case.analyses.append(analysis)
-    case.runs.append(run)
 
     panel = WorkflowTreePanel(service)
     qtbot.addWidget(panel)
     with qtbot.waitSignal(panel.rerun_requested, timeout=1000) as blocker:
-        panel.rerun_requested.emit("r1")
-    assert blocker.args[0] == "r1"
+        panel.rerun_requested.emit(analysis.id)
+    assert blocker.args[0] == analysis.id
 
 
 def test_run_icon_uses_status_specific_glyph(app, qtbot):
-    from quino.domain.workspace import Analysis, Run
-    from quino.gui.panels.workflow_tree_panel import ROLE_NODE_KIND
+    """Run state lives on the analysis node; different statuses must yield
+    visibly different analysis icons."""
+    from quino.domain.workspace import Analysis
     service = ApplicationService()
     service.new_workspace("Test")
     ws = service._workspace
     case = ws.cases[ws.root_case_ids[0]]
-    analysis = Analysis(id="a1", name="A", analysis_type="dynamic", pose_id=None)
-    case.analyses.append(analysis)
-    case.runs.append(Run(id="r_ok", analysis_id="a1", status="ok", created_at="2026-01-01T00:00:00"))
-    case.runs.append(Run(id="r_fail", analysis_id="a1", status="failed", created_at="2026-01-02T00:00:00"))
+    case.analyses.append(
+        Analysis(id="a_ok", name="A ok", analysis_type="dynamic", pose_id=None, status="ok")
+    )
+    case.analyses.append(
+        Analysis(id="a_fail", name="A fail", analysis_type="dynamic", pose_id=None, status="failed")
+    )
 
     panel = WorkflowTreePanel(service)
     qtbot.addWidget(panel)
     panel.refresh()
     root = panel.top_level_items()[0]
-    runs = _collect_items(root, kind_filter="run")
-    icons = [item.icon(0) for item in runs]
-    # Both icons must be non-null and distinguishable (different pixmaps)
+    analyses = _collect_items(root, kind_filter="analysis")
+    icons = [item.icon(0) for item in analyses]
     assert len(icons) == 2
-    p1 = icons[0].pixmap(16, 16).toImage()
-    p2 = icons[1].pixmap(16, 16).toImage()
-    assert p1 != p2
+    p_ok = icons[0].pixmap(16, 16).toImage()
+    p_failed = icons[1].pixmap(16, 16).toImage()
+    assert p_ok != p_failed
 
 
 def test_backend_rejects_delete_default_pose(app, qtbot):
@@ -247,7 +248,7 @@ def test_analyses_hang_directly_off_pose(app, qtbot):
 
 
 def test_fork_case_regenerates_pose_ids(app, qtbot):
-    """Forked subcases get only a fresh local reference pose."""
+    """Forked subcases copy the parent's poses with fresh ids."""
     service = ApplicationService()
     service.new_workspace("Test")
     service.workspace.create_pose("User Pose")
@@ -255,13 +256,13 @@ def test_fork_case_regenerates_pose_ids(app, qtbot):
     root_id = ws.root_case_ids[0]
     engine = CascadingEngine(ws)
     child_id = engine.fork_case(root_id, "Child")
-
     root_pose_ids = {p.id for p in ws.cases[root_id].poses}
     child_poses = ws.cases[child_id].poses
     child_pose_ids = {p.id for p in child_poses}
-    assert len(child_poses) == 1
-    assert child_poses[0].is_default is True
-    assert root_pose_ids.isdisjoint(child_pose_ids)
+    # poses are copied as a starting point, with regenerated ids
+    assert len(child_poses) == len(ws.cases[root_id].poses)
+    assert any(p.is_default for p in child_poses)
+    assert root_pose_ids.isdisjoint(child_pose_ids)  # all ids regenerated
 
 
 def test_create_analysis_lands_on_correct_case_after_fork(app, qtbot):
