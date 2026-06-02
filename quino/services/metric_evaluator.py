@@ -1,11 +1,92 @@
 from __future__ import annotations
 
 import math
+import textwrap
+import threading
+from datetime import datetime, timezone
+from typing import Any
+
+import numpy as np
 
 from quino.domain.plotting import MetricDef
+from quino.domain.workspace import Metric, MetricResult
+from quino.services.sensor_series import _series, _value_at_t, _value_at_sweep_indices
 
+# ---------------------------------------------------------------------------
+# NEW evaluator: user-written Python code via restricted exec
+# ---------------------------------------------------------------------------
+
+_SAFE_BUILTINS = {
+    "abs": abs, "min": min, "max": max, "sum": sum, "len": len,
+    "range": range, "enumerate": enumerate, "zip": zip, "map": map,
+    "filter": filter, "sorted": sorted, "round": round, "float": float,
+    "int": int, "bool": bool, "str": str, "list": list, "tuple": tuple,
+    "dict": dict, "set": set, "any": any, "all": all,
+}
+
+_TIMEOUT_S = 5.0
+
+
+def _cast(value: Any, value_type: str) -> Any:
+    if value_type == "float":
+        return float(value)
+    if value_type == "int":
+        return int(value)
+    if value_type == "bool":
+        return bool(value)
+    if value_type == "str":
+        return str(value)
+    return value
+
+
+def _build_callable(code: str):
+    body = textwrap.indent(code if code.strip() else "return None", "    ")
+    source = f"def _evaluate(data, meta):\n{body}\n"
+    globals_ns = {"__builtins__": _SAFE_BUILTINS, "np": np}
+    compiled = compile(source, "<metric>", "exec")
+    exec(compiled, globals_ns)  # noqa: S102 - restricted namespace
+    return globals_ns["_evaluate"]
+
+
+def evaluate(metric: Metric, data: dict[str, Any], meta: dict[str, Any]) -> MetricResult:
+    now = datetime.now(tz=timezone.utc).isoformat()
+    holder: dict[str, Any] = {}
+
+    def _target() -> None:
+        try:
+            fn = _build_callable(metric.code)
+            raw = fn(data, meta)
+            holder["value"] = _cast(raw, metric.value_type)
+        except Exception as exc:  # noqa: BLE001
+            holder["error"] = f"{type(exc).__name__}: {exc}"
+
+    worker = threading.Thread(target=_target, daemon=True)
+    worker.start()
+    worker.join(timeout=_TIMEOUT_S)
+    if worker.is_alive():
+        return MetricResult(value=None, status="error",
+                            error=f"evaluation exceeded {_TIMEOUT_S}s", evaluated_at=now)
+    if "error" in holder:
+        return MetricResult(value=None, status="error", error=holder["error"], evaluated_at=now)
+    return MetricResult(value=holder.get("value"), status="ok", evaluated_at=now)
+
+
+def evaluate_all(analysis: Any, data: dict[str, Any], meta: dict[str, Any]) -> None:
+    for metric in analysis.metrics:
+        if not data:
+            metric.result = MetricResult(value=None, status="no_data",
+                                         evaluated_at=datetime.now(tz=timezone.utc).isoformat())
+        else:
+            metric.result = evaluate(metric, data, meta)
+
+
+# ---------------------------------------------------------------------------
+# LEGACY shims — kept so the 4 analysis runners keep importing cleanly.
+# Removed in task 2.3b.
+# ---------------------------------------------------------------------------
 
 def evaluate_metric(metric: MetricDef, artifact: dict) -> float | None:
+    # legacy; removed in task 2.3b
     kind = metric.kind
     parts = metric.target.split(":")
     sensor_id = parts[0] if parts else ""
@@ -29,68 +110,10 @@ def evaluate_metric(metric: MetricDef, artifact: dict) -> float | None:
 
 
 def evaluate_metrics(metrics: list[MetricDef], artifact: dict) -> dict[str, float]:
+    # legacy; removed in task 2.3b
     out: dict[str, float] = {}
     for metric in metrics:
         value = evaluate_metric(metric, artifact)
         if value is not None and not math.isnan(value):
             out[metric.key] = float(value)
     return out
-
-
-def _series(artifact: dict, sensor_id: str, channel: str) -> list[float]:
-    frames = artifact.get("frames")
-    if frames is not None:
-        keys = [f"sensor:{sensor_id}:{channel}", f"{sensor_id}:{channel}", f"marker:{sensor_id}:{channel}"]
-        values: list[float] = []
-        for frame in frames:
-            for key in keys:
-                if key in frame:
-                    value = frame[key]
-                    if value is not None:
-                        values.append(value)
-                    break
-        return values
-    sensors = artifact.get("sensors", {})
-    blob = sensors.get(sensor_id)
-    if not blob or channel not in blob.get("channels", []):
-        return []
-    stride = len(blob["channels"])
-    idx = blob["channels"].index(channel)
-    data = blob["values"]
-    return [data[i] for i in range(idx, len(data), stride) if not math.isnan(data[i])]
-
-
-def _value_at_t(artifact: dict, sensor_id: str, channel: str, t: float) -> float | None:
-    times = artifact.get("time", [])
-    frames = artifact.get("frames", [])
-    if not times or not frames:
-        return None
-    closest = min(range(len(times)), key=lambda idx: abs(times[idx] - t))
-    keys = [f"sensor:{sensor_id}:{channel}", f"{sensor_id}:{channel}", f"marker:{sensor_id}:{channel}"]
-    if closest >= len(frames):
-        return None
-    for key in keys:
-        if key in frames[closest]:
-            return frames[closest][key]
-    return None
-
-
-def _value_at_sweep_indices(artifact: dict, sensor_id: str, channel: str, indices: list[int]) -> float | None:
-    sensors = artifact.get("sensors", {})
-    blob = sensors.get(sensor_id)
-    if not blob or channel not in blob.get("channels", []):
-        return None
-    shape = artifact.get("shape", [])
-    if len(indices) != len(shape):
-        return None
-    cell = 0
-    stride = 1
-    for axis in reversed(range(len(shape))):
-        cell += indices[axis] * stride
-        stride *= shape[axis]
-    chan_idx = blob["channels"].index(channel)
-    pos = cell * len(blob["channels"]) + chan_idx
-    if pos >= len(blob["values"]):
-        return None
-    value = blob["values"][pos]
-    return None if math.isnan(value) else value

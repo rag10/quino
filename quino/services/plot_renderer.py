@@ -63,6 +63,6 @@ def _series_xy(plot: PlotDef, series: YSeries, artifact: dict) -> tuple[list[flo
 
 
 def _series_values(artifact: dict, sensor_id: str, channel: str) -> list[float]:
-    from quino.services.metric_evaluator import _series
+    from quino.services.sensor_series import _series
 
     return list(_series(artifact, sensor_id, channel))
