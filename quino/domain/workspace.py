@@ -43,6 +43,24 @@ class MetricDefinition:
 
 
 @dataclass(slots=True)
+class MetricResult:
+    value: Any
+    status: str  # "ok" | "error" | "no_data"
+    error: str = ""
+    evaluated_at: str | None = None
+
+
+@dataclass(slots=True)
+class Metric:
+    id: str
+    name: str
+    description: str = ""
+    value_type: str = "float"  # "float" | "bool" | "int" | "str"
+    code: str = ""             # body of eval(data, meta), must `return`
+    result: MetricResult | None = None
+
+
+@dataclass(slots=True)
 class ParameterDescriptor:
     path: str
     tag: str = "invariant"  # "invariant" | "variable"
