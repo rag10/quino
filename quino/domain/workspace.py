@@ -199,28 +199,7 @@ def create_default_pose(pose_id: str, name: str = "Reference") -> Pose:
 
 
 # ---------------------------------------------------------------------------
-# Analysis
-# ---------------------------------------------------------------------------
-
-@dataclass(slots=True)
-class Analysis:
-    id: str
-    name: str
-    analysis_type: str = "dynamic"
-    pose_id: str | None = None
-    config: AnalysisConfig = field(default=None)  # type: ignore[assignment]
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if self.config is None:
-            ctor = _DEFAULT_ANALYSIS_CONFIG.get(self.analysis_type)
-            if ctor is None:
-                raise ValueError(f"Unknown analysis_type {self.analysis_type!r}")
-            self.config = ctor()
-
-
-# ---------------------------------------------------------------------------
-# Run artifacts
+# Run artifacts (defined before Analysis so Analysis can reference them)
 # ---------------------------------------------------------------------------
 
 @dataclass(slots=True)
@@ -239,6 +218,40 @@ class ArtifactRef:
 
 
 _RUN_STATUSES = {"to_be_run", "queued", "running", "ok", "partial", "failed", "stale"}
+
+
+# ---------------------------------------------------------------------------
+# Analysis
+# ---------------------------------------------------------------------------
+
+@dataclass(slots=True)
+class Analysis:
+    id: str
+    name: str
+    analysis_type: str = "dynamic"
+    pose_id: str | None = None
+    config: AnalysisConfig = field(default=None)  # type: ignore[assignment]
+    metrics: list[Metric] = field(default_factory=list)
+
+    # --- run state (flattened; formerly the Run entity) ---
+    status: str = "to_be_run"  # to_be_run|queued|running|ok|partial|failed|stale
+    created_at: str | None = None
+    finished_at: str | None = None
+    result_ref: "ResultRef | None" = None
+    artifacts: list["ArtifactRef"] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    error_message: str = ""
+    config_snapshot: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.config is None:
+            ctor = _DEFAULT_ANALYSIS_CONFIG.get(self.analysis_type)
+            if ctor is None:
+                raise ValueError(f"Unknown analysis_type {self.analysis_type!r}")
+            self.config = ctor()
+        if self.status not in _RUN_STATUSES:
+            raise ValueError(f"Analysis status {self.status!r} is not allowed")
 
 
 @dataclass(slots=True)
