@@ -232,9 +232,10 @@ class CascadingEngine:
         m.springs[:] = [sp for sp in m.springs if sp.id != entity_id]
         if m.control_graph is not None:
             m.control_graph.instances.pop(entity_id, None)
-            object.__setattr__(m.control_graph, "connections",
-                               [c for c in m.control_graph.connections
-                                if c.src_instance != entity_id and c.dst_instance != entity_id])
+            m.control_graph.connections[:] = [
+                c for c in m.control_graph.connections
+                if c.src_instance != entity_id and c.dst_instance != entity_id
+            ]
 
     def _missing_dependencies(self, entity: object, case: Case) -> set[str]:
         ids = set(entity_lookup(case).keys())
@@ -365,8 +366,7 @@ class CascadingEngine:
         diagram = case.model.control_graph
         if diagram is None:
             return result
-        object.__setattr__(diagram, "connections",
-                           [c for c in diagram.connections if _connection_key(c) != key])
+        diagram.connections[:] = [c for c in diagram.connections if _connection_key(c) != key]
         self._mark_modified(result, case_id, model_affecting=True)
         result.applied_changes.append(f"{case_id}:remove_connection:{key}")
         for child_id in self._direct_children(case_id):
@@ -394,8 +394,7 @@ class CascadingEngine:
             return
         if key not in {_connection_key(c) for c in diagram.connections}:
             return
-        object.__setattr__(diagram, "connections",
-                           [c for c in diagram.connections if _connection_key(c) != key])
+        diagram.connections[:] = [c for c in diagram.connections if _connection_key(c) != key]
         self._mark_modified(result, case_id, model_affecting=True)
         for gc_id in self._direct_children(case_id):
             self._propagate_connection_remove(gc_id, key, result)
