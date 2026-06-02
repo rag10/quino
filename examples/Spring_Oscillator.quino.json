@@ -184,13 +184,18 @@
             "plots": [],
             "metrics": []
           },
+          "metrics": [],
+          "status": "to_be_run",
+          "created_at": null,
+          "finished_at": null,
+          "result_ref": null,
+          "artifacts": [],
+          "warnings": [],
+          "error_message": "",
+          "config_snapshot": {},
           "metadata": {}
         }
       ],
-      "runs": [],
-      "overlay": null,
-      "tolerances": {},
-      "metrics": {},
       "metadata": {}
     },
     "case-78f121af": {
@@ -361,69 +366,18 @@
             "plots": [],
             "metrics": []
           },
+          "metrics": [],
+          "status": "to_be_run",
+          "created_at": null,
+          "finished_at": null,
+          "result_ref": null,
+          "artifacts": [],
+          "warnings": [],
+          "error_message": "",
+          "config_snapshot": {},
           "metadata": {}
         }
       ],
-      "runs": [],
-      "overlay": {
-        "entities": {
-          "body_001": {
-            "origin": "inherited",
-            "linked_properties": [
-              "closed_shape",
-              "com",
-              "metadata",
-              "name",
-              "style",
-              "type"
-            ]
-          },
-          "marker_001": {
-            "origin": "inherited",
-            "linked_properties": [
-              "metadata",
-              "name",
-              "style",
-              "type",
-              "visible",
-              "x",
-              "y"
-            ]
-          },
-          "marker_002": {
-            "origin": "inherited",
-            "linked_properties": [
-              "metadata",
-              "name",
-              "style",
-              "type",
-              "visible",
-              "x",
-              "y"
-            ]
-          },
-          "spring_001": {
-            "origin": "inherited",
-            "linked_properties": [
-              "endpoint_a",
-              "endpoint_b",
-              "law",
-              "metadata",
-              "metadata.values.damping",
-              "metadata.values.stiffness",
-              "name",
-              "rest_value",
-              "spring_type",
-              "style"
-            ]
-          }
-        },
-        "deleted_inherited_entity_ids": [],
-        "inherited_connections": [],
-        "deleted_inherited_connections": []
-      },
-      "tolerances": {},
-      "metrics": {},
       "metadata": {}
     }
   },

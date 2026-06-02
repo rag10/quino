@@ -161,13 +161,18 @@
             "plots": [],
             "metrics": []
           },
+          "metrics": [],
+          "status": "to_be_run",
+          "created_at": null,
+          "finished_at": null,
+          "result_ref": null,
+          "artifacts": [],
+          "warnings": [],
+          "error_message": "",
+          "config_snapshot": {},
           "metadata": {}
         }
       ],
-      "runs": [],
-      "overlay": null,
-      "tolerances": {},
-      "metrics": {},
       "metadata": {}
     },
     "case-b642a0d9": {
@@ -311,56 +316,18 @@
             "plots": [],
             "metrics": []
           },
+          "metrics": [],
+          "status": "to_be_run",
+          "created_at": null,
+          "finished_at": null,
+          "result_ref": null,
+          "artifacts": [],
+          "warnings": [],
+          "error_message": "",
+          "config_snapshot": {},
           "metadata": {}
         }
       ],
-      "runs": [],
-      "overlay": {
-        "entities": {
-          "blk_001": {
-            "origin": "inherited",
-            "linked_properties": [
-              "block_type",
-              "parameters"
-            ]
-          },
-          "blk_002": {
-            "origin": "inherited",
-            "linked_properties": [
-              "block_type",
-              "parameters",
-              "parameters.kd",
-              "parameters.ki",
-              "parameters.kp"
-            ]
-          },
-          "blk_003": {
-            "origin": "inherited",
-            "linked_properties": [
-              "block_type",
-              "parameters"
-            ]
-          }
-        },
-        "deleted_inherited_entity_ids": [],
-        "inherited_connections": [
-          [
-            "blk_001",
-            "out",
-            "blk_002",
-            "error"
-          ],
-          [
-            "blk_002",
-            "out",
-            "blk_003",
-            "in"
-          ]
-        ],
-        "deleted_inherited_connections": []
-      },
-      "tolerances": {},
-      "metrics": {},
       "metadata": {}
     }
   },

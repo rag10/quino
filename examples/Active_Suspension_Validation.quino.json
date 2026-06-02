@@ -1031,6 +1031,15 @@
             "plots": [],
             "metrics": []
           },
+          "metrics": [],
+          "status": "to_be_run",
+          "created_at": null,
+          "finished_at": null,
+          "result_ref": null,
+          "artifacts": [],
+          "warnings": [],
+          "error_message": "",
+          "config_snapshot": {},
           "metadata": {}
         },
         {
@@ -1047,13 +1056,18 @@
             "plots": [],
             "metrics": []
           },
+          "metrics": [],
+          "status": "to_be_run",
+          "created_at": null,
+          "finished_at": null,
+          "result_ref": null,
+          "artifacts": [],
+          "warnings": [],
+          "error_message": "",
+          "config_snapshot": {},
           "metadata": {}
         }
       ],
-      "runs": [],
-      "overlay": null,
-      "tolerances": {},
-      "metrics": {},
       "metadata": {}
     }
   },

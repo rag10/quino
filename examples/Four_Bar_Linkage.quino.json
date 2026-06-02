@@ -386,13 +386,18 @@
             "plots": [],
             "metrics": []
           },
+          "metrics": [],
+          "status": "to_be_run",
+          "created_at": null,
+          "finished_at": null,
+          "result_ref": null,
+          "artifacts": [],
+          "warnings": [],
+          "error_message": "",
+          "config_snapshot": {},
           "metadata": {}
         }
       ],
-      "runs": [],
-      "overlay": null,
-      "tolerances": {},
-      "metrics": {},
       "metadata": {}
     },
     "case-b8f23662": {
@@ -765,180 +770,18 @@
             "plots": [],
             "metrics": []
           },
+          "metrics": [],
+          "status": "to_be_run",
+          "created_at": null,
+          "finished_at": null,
+          "result_ref": null,
+          "artifacts": [],
+          "warnings": [],
+          "error_message": "",
+          "config_snapshot": {},
           "metadata": {}
         }
       ],
-      "runs": [],
-      "overlay": {
-        "entities": {
-          "body_001": {
-            "origin": "inherited",
-            "linked_properties": [
-              "closed_shape",
-              "com",
-              "metadata",
-              "name",
-              "style",
-              "type"
-            ]
-          },
-          "marker_001": {
-            "origin": "inherited",
-            "linked_properties": [
-              "metadata",
-              "name",
-              "style",
-              "type",
-              "visible",
-              "x",
-              "y"
-            ]
-          },
-          "marker_002": {
-            "origin": "inherited",
-            "linked_properties": [
-              "metadata",
-              "name",
-              "style",
-              "type",
-              "visible",
-              "x",
-              "y"
-            ]
-          },
-          "body_002": {
-            "origin": "inherited",
-            "linked_properties": [
-              "closed_shape",
-              "com",
-              "mass",
-              "metadata",
-              "name",
-              "style",
-              "type"
-            ]
-          },
-          "marker_004": {
-            "origin": "inherited",
-            "linked_properties": [
-              "metadata",
-              "name",
-              "style",
-              "type",
-              "visible",
-              "x",
-              "y"
-            ]
-          },
-          "marker_005": {
-            "origin": "inherited",
-            "linked_properties": [
-              "metadata",
-              "name",
-              "style",
-              "type",
-              "visible",
-              "x",
-              "y"
-            ]
-          },
-          "body_003": {
-            "origin": "inherited",
-            "linked_properties": [
-              "closed_shape",
-              "com",
-              "mass",
-              "metadata",
-              "name",
-              "style",
-              "type"
-            ]
-          },
-          "marker_007": {
-            "origin": "inherited",
-            "linked_properties": [
-              "metadata",
-              "name",
-              "style",
-              "type",
-              "visible",
-              "x",
-              "y"
-            ]
-          },
-          "marker_008": {
-            "origin": "inherited",
-            "linked_properties": [
-              "metadata",
-              "name",
-              "style",
-              "type",
-              "visible",
-              "x",
-              "y"
-            ]
-          },
-          "joint_001": {
-            "origin": "inherited",
-            "linked_properties": [
-              "endpoint_a",
-              "endpoint_b",
-              "metadata",
-              "name",
-              "style",
-              "type"
-            ]
-          },
-          "joint_002": {
-            "origin": "inherited",
-            "linked_properties": [
-              "endpoint_a",
-              "endpoint_b",
-              "metadata",
-              "name",
-              "style",
-              "type"
-            ]
-          },
-          "joint_003": {
-            "origin": "inherited",
-            "linked_properties": [
-              "endpoint_a",
-              "endpoint_b",
-              "metadata",
-              "name",
-              "style",
-              "type"
-            ]
-          },
-          "joint_004": {
-            "origin": "inherited",
-            "linked_properties": [
-              "endpoint_a",
-              "endpoint_b",
-              "metadata",
-              "name",
-              "style",
-              "type"
-            ]
-          },
-          "driver_001": {
-            "origin": "inherited",
-            "linked_properties": [
-              "law",
-              "metadata",
-              "name",
-              "target_joint_id",
-              "type"
-            ]
-          }
-        },
-        "deleted_inherited_entity_ids": [],
-        "inherited_connections": [],
-        "deleted_inherited_connections": []
-      },
-      "tolerances": {},
-      "metrics": {},
       "metadata": {}
     }
   },

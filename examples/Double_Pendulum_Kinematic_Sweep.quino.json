@@ -337,7 +337,8 @@
                 "end": -0.2,
                 "steps": 5,
                 "values": [],
-                "label": "shoulder"
+                "label": "shoulder",
+                "reference_mode": "absolute"
               },
               {
                 "id": "sw_elbow",
@@ -353,20 +354,26 @@
                 "end": 0.6,
                 "steps": 5,
                 "values": [],
-                "label": "elbow"
+                "label": "elbow",
+                "reference_mode": "absolute"
               }
             ],
             "allow_failed_steps": true,
             "plots": [],
             "metrics": []
           },
+          "metrics": [],
+          "status": "to_be_run",
+          "created_at": null,
+          "finished_at": null,
+          "result_ref": null,
+          "artifacts": [],
+          "warnings": [],
+          "error_message": "",
+          "config_snapshot": {},
           "metadata": {}
         }
       ],
-      "runs": [],
-      "overlay": null,
-      "tolerances": {},
-      "metrics": {},
       "metadata": {}
     }
   },
