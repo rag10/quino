@@ -64,6 +64,9 @@ def evaluate(metric: Metric, data: dict[str, Any], meta: dict[str, Any]) -> Metr
     worker.start()
     worker.join(timeout=_TIMEOUT_S)
     if worker.is_alive():
+        # Known limitation: a CPU-bound runaway metric cannot be cancelled, so
+        # the daemon thread keeps running (and pins its closure) until process
+        # exit. Acceptable for a local single-user desktop app.
         return MetricResult(value=None, status="error",
                             error=f"evaluation exceeded {_TIMEOUT_S}s", evaluated_at=now)
     if "error" in holder:
