@@ -303,6 +303,15 @@ class JsonMapper:
             "analysis_type": analysis.analysis_type,
             "pose_id": analysis.pose_id,
             "config": self._analysis_config_to_dict(analysis.analysis_type, analysis.config),
+            "metrics": [self._metric_to_dict(m) for m in analysis.metrics],
+            "status": analysis.status,
+            "created_at": analysis.created_at,
+            "finished_at": analysis.finished_at,
+            "result_ref": self._result_ref_to_dict(analysis.result_ref) if analysis.result_ref else None,
+            "artifacts": [self._artifact_ref_to_dict(a) for a in analysis.artifacts],
+            "warnings": list(analysis.warnings),
+            "error_message": analysis.error_message,
+            "config_snapshot": dict(analysis.config_snapshot),
             "metadata": dict(analysis.metadata),
         }
 
@@ -313,13 +322,61 @@ class JsonMapper:
     def _analysis_from_dict(self, data: dict) -> Analysis:
         kind = data.get("analysis_type", "dynamic")
         cfg = self._analysis_config_from_dict(kind, data.get("config") or {})
+        result_ref = data.get("result_ref")
         return Analysis(
             id=data["id"],
             name=data["name"],
             analysis_type=kind,
             pose_id=data.get("pose_id"),
             config=cfg,
+            metrics=[self._metric_from_dict(m) for m in data.get("metrics", [])],
+            status=data.get("status", "to_be_run"),
+            created_at=data.get("created_at"),
+            finished_at=data.get("finished_at"),
+            result_ref=self._result_ref_from_dict(result_ref) if result_ref else None,
+            artifacts=[self._artifact_ref_from_dict(a) for a in data.get("artifacts", [])],
+            warnings=list(data.get("warnings", [])),
+            error_message=data.get("error_message", ""),
+            config_snapshot=dict(data.get("config_snapshot", {})),
             metadata=dict(data.get("metadata", {})),
+        )
+
+    def _metric_to_dict(self, metric) -> dict:
+        return {
+            "id": metric.id,
+            "name": metric.name,
+            "description": metric.description,
+            "value_type": metric.value_type,
+            "code": metric.code,
+            "result": self._metric_result_to_dict(metric.result) if metric.result else None,
+        }
+
+    def _metric_from_dict(self, data: dict):
+        from quino.domain.workspace import Metric
+        return Metric(
+            id=data["id"],
+            name=data["name"],
+            description=data.get("description", ""),
+            value_type=data.get("value_type", "float"),
+            code=data.get("code", ""),
+            result=self._metric_result_from_dict(data.get("result")) if data.get("result") else None,
+        )
+
+    def _metric_result_to_dict(self, result) -> dict:
+        return {
+            "value": result.value,
+            "status": result.status,
+            "error": result.error,
+            "evaluated_at": result.evaluated_at,
+        }
+
+    def _metric_result_from_dict(self, data: dict):
+        from quino.domain.workspace import MetricResult
+        return MetricResult(
+            value=data.get("value"),
+            status=data.get("status", "ok"),
+            error=data.get("error", ""),
+            evaluated_at=data.get("evaluated_at"),
         )
 
     def _analysis_config_from_dict(self, kind: str, data: dict):

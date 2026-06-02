@@ -125,8 +125,8 @@ def test_example_registry_skips_json_with_duplicate_name(tmp_path) -> None:
     assert names.count("Four Bar") == 1
 
 
-def test_all_example_files_load_at_schema_0_3_0() -> None:
-    """Every examples/*.quino.json must load as a Workspace at schema 0.3.0.
+def test_all_example_files_load_at_schema_0_4_0() -> None:
+    """Every examples/*.quino.json must load as a Workspace at schema 0.4.0.
 
     (Overlay validation was removed in Fase 1.10.)
     """
@@ -146,5 +146,5 @@ def test_all_example_files_load_at_schema_0_3_0() -> None:
         except Exception as exc:
             failures.append(f"{path.name}: load failed — {exc}")
             continue
-        assert ws.schema_version == "0.3.0", f"{path.name}: not 0.3.0"
+        assert ws.schema_version == "0.4.0", f"{path.name}: not 0.4.0"
     assert not failures, "Example load failed:\n" + "\n".join(failures)
