@@ -804,17 +804,26 @@ class ApplicationService:
             self.sketch.invalidate_cache()
 
     def _invalidate_pose_state(self) -> None:
-        """Drop user pose data after a topology change that could leave stale refs.
+        """Re-solve user poses after a change that may invalidate them.
 
-        User poses reference body ids and driver ids; once the model topology
-        changes we cannot guarantee they still describe a valid configuration,
-        so we drop them and the user can re-solve from the reference pose.
-        The reference (is_default=True) pose is always preserved.
+        A topology/geometry change (marker moved, bar lengths, cascade…) can
+        leave user poses geometrically inconsistent. Rather than dropping them
+        (which orphans their analyses), we RE-SOLVE each non-default pose to the
+        nearest valid configuration under the new kinematics, respecting its
+        prescribes. Poses that cannot be solved are preserved and flagged with a
+        warning (``solve_failed``); they never disappear from the tree. The
+        reference (is_default=True) pose always reflects the model and is left
+        untouched.
         """
-        self.poses.clear_current()
         case = self.current_case()
-        if case is not None:
-            case.poses = [p for p in case.poses if getattr(p, "is_default", False)]
+        if case is None:
+            return
+        try:
+            self.poses.resolve_all_user_poses(reason="model changed")
+        except Exception:
+            # Re-solving is best-effort; a solver hiccup must never destroy the
+            # user's poses or crash the edit. Poses are kept as-is.
+            pass
 
     def _operation(self):
         """Context manager that takes a single snapshot for the whole operation."""

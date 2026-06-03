@@ -83,6 +83,60 @@ class PoseCommands:
             complete.body_poses[body_id] = copy.deepcopy(body_pose)
         return complete
 
+    def resolve_all_user_poses(self, reason: str = "model changed") -> list[str]:
+        """Re-solve every non-default pose against the current model.
+
+        Called after a topology/geometry change (e.g. a marker moved, directly
+        or by cascade) that may have invalidated user poses. Instead of dropping
+        them, each pose is re-solved using its current ``body_poses`` as the
+        initial guess, so the solver converges to the nearest valid
+        configuration under the new kinematics and bar/body lengths, respecting
+        the pose's prescribes.
+
+        A pose that cannot be solved is PRESERVED (never deleted) and flagged
+        ``solve_failed=True`` with a warning recorded in
+        ``pose.metadata.values["solve_warning"]``. The default/reference pose is
+        left untouched (it always reflects the model).
+
+        Returns the list of pose ids that failed to re-solve.
+        """
+        case = self._ctx.current_case_provider()
+        if case is None:
+            return []
+        project = self._project
+        failed: list[str] = []
+        for pose in case.poses:
+            if getattr(pose, "is_default", False):
+                continue
+            if not pose.body_poses:
+                # Nothing solved yet; leave it to be solved on first entry.
+                continue
+            try:
+                result = self._runner.solve(project, self.complete_pose(pose))
+            except Exception as exc:  # noqa: BLE001 - solver may raise; keep pose
+                self._flag_pose_failed(pose, f"{reason}: {exc}")
+                failed.append(pose.id)
+                continue
+            if result.success and result.pose is not None:
+                solved = self.complete_pose(result.pose)
+                pose.body_poses = solved.body_poses
+                pose.solve_failed = False
+                pose.requires_recompute = False
+                if pose.metadata is not None:
+                    pose.metadata.values.pop("solve_warning", None)
+            else:
+                msg = result.error or "no valid configuration found"
+                self._flag_pose_failed(pose, f"{reason}: {msg}")
+                failed.append(pose.id)
+        return failed
+
+    @staticmethod
+    def _flag_pose_failed(pose: Pose, message: str) -> None:
+        pose.solve_failed = True
+        pose.requires_recompute = True
+        if pose.metadata is not None:
+            pose.metadata.values["solve_warning"] = message
+
     # --- public API ---------------------------------------------------------
 
     def create_reference_pose(self, name: str = "Reference") -> Pose:
