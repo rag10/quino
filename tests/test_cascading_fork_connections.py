@@ -23,12 +23,22 @@ def _ws_single_root():
                      root_case_ids=["p"], cases={"p": root})
 
 
-def test_fork_copies_model_and_poses_without_run_state():
+def test_fork_copies_only_model_and_fresh_reference_pose():
+    """A fork inherits the parent MODEL but NOT its poses/analyses.
+
+    The child starts with a single fresh reference (default) pose and no
+    analyses; poses and analyses are local working artifacts per case.
+    """
     ws = _ws_single_root()
     ws.cases["p"].analyses[0].status = "ok"
     new_id = CascadingEngine(ws).fork_case("p", "child")
     child = ws.cases[new_id]
     assert child.parent_case_id == "p"
+    # model inherited (ids preserved for cascading)
     assert [b.id for b in child.model.bodies] == ["b1"]
-    assert child.analyses and child.analyses[0].status == "to_be_run"
-    assert child.analyses[0].id != "an1"
+    # poses/analyses NOT copied
+    assert child.analyses == []
+    assert len(child.poses) == 1
+    assert child.poses[0].is_default is True
+    # fresh pose id, not the parent's "pose-def"
+    assert child.poses[0].id != "pose-def"

@@ -257,6 +257,13 @@ class CascadingEngine:
     # ------------------------------------------------------------------ cases
 
     def fork_case(self, parent_case_id: str, name: str) -> str:
+        """Create a child case that inherits only the parent's MODEL.
+
+        A fork is a starting point for divergence: it copies the parent's model
+        (ids preserved — they are the basis of cascading) and gets a single
+        fresh reference pose. It does NOT copy the parent's poses or analyses —
+        those are local working artifacts the user creates per case.
+        """
         if parent_case_id not in self._ws.cases:
             raise KeyError(f"Parent case {parent_case_id!r} not found")
         parent = self._ws.cases[parent_case_id]
@@ -266,8 +273,8 @@ class CascadingEngine:
             name=name,
             parent_case_id=parent_case_id,
             model=copy.deepcopy(parent.model),
-            poses=self._clone_poses(parent),
-            analyses=self._clone_analyses_reset(parent),
+            poses=[create_default_pose(_new_pose_id())],
+            analyses=[],
             sensor_outputs={},
             reaction_outputs={},
         )
