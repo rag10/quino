@@ -6,11 +6,14 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6 import QtGui, QtWidgets
+from PySide6 import QtWidgets
 
 from quino.application.service import ApplicationService
-from quino.gui.panels.workflow_tree_panel import ROLE_NODE_KIND, WorkflowTreePanel
-from quino.gui.theme import BLUE_SOFT
+from quino.gui.panels.workflow_tree_panel import (
+    ROLE_ACTIVE_TINT,
+    ROLE_NODE_KIND,
+    WorkflowTreePanel,
+)
 from quino.services.case_cascading import CascadingEngine
 
 
@@ -25,10 +28,6 @@ def _children_of_kind(item, kind):
         if child.data(0, ROLE_NODE_KIND) == kind:
             out.append(child)
     return out
-
-
-def _soft_blue():
-    return QtGui.QColor(BLUE_SOFT).name().lower()
 
 
 def test_active_case_tints_default_pose_and_expands():
@@ -46,8 +45,9 @@ def test_active_case_tints_default_pose_and_expands():
     assert root_item.isExpanded() is True
     default_poses = _children_of_kind(root_item, "default_pose")
     assert default_poses
-    bg = default_poses[0].background(0).color().name().lower()
-    assert bg == _soft_blue()
+    # The active-scope tint is carried by the ROLE_ACTIVE_TINT flag (painted by
+    # the delegate; the QSS forces item backgrounds transparent).
+    assert default_poses[0].data(0, ROLE_ACTIVE_TINT) is True
 
 
 def test_inactive_case_pose_not_tinted():
@@ -66,9 +66,7 @@ def test_inactive_case_pose_not_tinted():
 
     default_poses = _children_of_kind(root_item, "default_pose")
     assert default_poses
-    # The inactive root's default pose carries no soft-blue active tint.
-    bg = default_poses[0].background(0).color()
-    assert bg.name().lower() != _soft_blue() or not bg.isValid()
+    assert not default_poses[0].data(0, ROLE_ACTIVE_TINT)
 
 
 def test_active_case_does_not_tint_subcases_group():
@@ -86,5 +84,4 @@ def test_active_case_does_not_tint_subcases_group():
 
     sub_groups = _children_of_kind(root_item, "subcases_group")
     assert sub_groups
-    bg = sub_groups[0].background(0).color()
-    assert bg.name().lower() != _soft_blue() or not bg.isValid()
+    assert not sub_groups[0].data(0, ROLE_ACTIVE_TINT)

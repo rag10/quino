@@ -8,6 +8,7 @@ from quino.gui.icons import get_icon
 from quino.gui.theme import (
     BLUE_DARK,
     BLUE_SOFT,
+    INK,
     INK_MUTED,
     INK_SUBTLE,
     apply_browser_tree_style,
@@ -15,6 +16,11 @@ from quino.gui.theme import (
 
 ROLE_NODE_KIND = QtCore.Qt.ItemDataRole.UserRole
 ROLE_ID = QtCore.Qt.ItemDataRole.UserRole + 1
+# Custom paint flags. The tree QSS forces ``QTreeWidget::item`` background to
+# transparent, which overrides any ``setBackground`` brush — so row tinting is
+# done in the delegate instead, driven by these roles.
+ROLE_ACTIVE_TINT = QtCore.Qt.ItemDataRole.UserRole + 2  # bool: active-case scope
+ROLE_SELECTED_FILL = QtCore.Qt.ItemDataRole.UserRole + 3  # bool: selected pose/analysis
 
 # Status icons + colours for run badges (icon_name, color)
 _RUN_STATUS_ICONS = {
@@ -56,6 +62,11 @@ _CASE_PILL_BG_ACTIVE = "#1e6fb0"
 _CASE_PILL_BORDER_ACTIVE = "#174462"
 _CASE_PILL_RADIUS = 6
 
+# Row backgrounds painted by the delegate for poses/analyses (QSS forces the
+# item background transparent, so these are painted, not set as brushes).
+_ACTIVE_SCOPE_FILL = "#eef6fc"   # light: everything under the active case
+_SELECTED_FILL = "#cfe4f6"       # stronger: the explicitly-selected pose/analysis
+
 
 class _CaseFrameDelegate(QtWidgets.QStyledItemDelegate):
     """Draws a rounded "pill" frame behind case/subcase nodes.
@@ -71,6 +82,18 @@ class _CaseFrameDelegate(QtWidgets.QStyledItemDelegate):
     ) -> None:
         kind = index.data(ROLE_NODE_KIND)
         if kind != "case":
+            # Paint the row fill ourselves (the QSS forces item bg transparent).
+            # Selected fill wins over the lighter active-scope tint. The Qt
+            # selection highlight still draws on top via super().paint().
+            fill = None
+            if index.data(ROLE_SELECTED_FILL):
+                fill = QtGui.QColor(_SELECTED_FILL)
+            elif index.data(ROLE_ACTIVE_TINT):
+                fill = QtGui.QColor(_ACTIVE_SCOPE_FILL)
+            if fill is not None and not (option.state & QtWidgets.QStyle.StateFlag.State_Selected):
+                painter.save()
+                painter.fillRect(option.rect, fill)
+                painter.restore()
             super().paint(painter, option, index)
             return
 
@@ -301,17 +324,19 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             dp_item.setData(0, ROLE_ID, dp_pose_id)
         dp_item.setForeground(0, QtGui.QBrush(QtGui.QColor(INK_SUBTLE)))
         dp_item.setToolTip(0, "Reference pose — model in its reference configuration (read-only)")
+        self._apply_row_style(dp_item, selected=False, active=is_active)
         # Analyses hang directly off their parent pose (no intermediate
         # "Analyses" group node).
         dp_analyses = analyses_by_pose.get(dp_pose_id, []) if dp_pose_id else []
         for analysis in dp_analyses:
             a_child = self._build_analysis_item(analysis, ws)
-            if is_active:
-                self._tint_active(a_child)
+            self._apply_row_style(
+                a_child,
+                selected=ws.selected_analysis_id == analysis.id,
+                active=is_active,
+            )
             dp_item.addChild(a_child)
         dp_item.setExpanded(True)
-        if is_active:
-            self._tint_active(dp_item)
         item.addChild(dp_item)
 
         for pose in non_default_poses:
@@ -324,22 +349,27 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             )
             pose_item.setData(0, ROLE_NODE_KIND, "pose")
             pose_item.setData(0, ROLE_ID, pose.id)
-            if is_selected_pose:
-                font = pose_item.font(0)
-                font.setBold(True)
-                pose_item.setFont(0, font)
-                pose_item.setBackground(0, QtGui.QBrush(QtGui.QColor(BLUE_SOFT)))
-            pose_item.setToolTip(0, f"Pose: {pose.name}")
+            pose_item.setForeground(0, QtGui.QBrush(QtGui.QColor(INK)))
+            # Surface a re-solve warning if the pose failed to re-solve after a
+            # model change (it is preserved, not deleted).
+            warn = None
+            if pose.metadata is not None:
+                warn = pose.metadata.values.get("solve_warning")
+            if pose.solve_failed or warn:
+                pose_item.setText(0, f"{pose.name}  ⚠")
+                pose_item.setToolTip(0, f"Pose: {pose.name}\n⚠ {warn or 'needs re-solving'}")
+            else:
+                pose_item.setToolTip(0, f"Pose: {pose.name}")
+            self._apply_row_style(pose_item, selected=is_selected_pose, active=is_active)
             for analysis in pose_analyses:
                 a_child = self._build_analysis_item(analysis, ws)
-                if is_active and not is_selected_pose:
-                    self._tint_active(a_child)
+                self._apply_row_style(
+                    a_child,
+                    selected=ws.selected_analysis_id == analysis.id,
+                    active=is_active,
+                )
                 pose_item.addChild(a_child)
             pose_item.setExpanded(True)
-            # Active-case tint, unless the pose is the explicitly-selected one
-            # (which already carries the stronger BLUE_SOFT highlight).
-            if is_active and not is_selected_pose:
-                self._tint_active(pose_item)
             item.addChild(pose_item)
 
         # --- Orphaned analyses (no pose / pose missing) ---
@@ -375,13 +405,28 @@ class WorkflowTreePanel(QtWidgets.QWidget):
 
         return item
 
-    def _tint_active(self, item: QtWidgets.QTreeWidgetItem) -> None:
-        """Paint the soft-blue active-case background on a pose/analysis row.
+    def _apply_row_style(
+        self,
+        item: QtWidgets.QTreeWidgetItem,
+        *,
+        selected: bool,
+        active: bool,
+    ) -> None:
+        """Unified styling for pose/analysis rows.
 
-        Applied to the poses and analyses that hang off the active case
-        (excluding subcases) so the active scope reads at a glance.
+        Visual language:
+        - **bold** marks the explicitly-selected pose/analysis (cases are bold
+          via their own builder). Non-selected rows use normal weight.
+        - the selected row gets the stronger fill; rows under the active case
+          get a lighter active-scope tint. Fills are painted by the delegate
+          (driven by ROLE_SELECTED_FILL / ROLE_ACTIVE_TINT) because the tree QSS
+          forces item backgrounds transparent.
         """
-        item.setBackground(0, QtGui.QBrush(QtGui.QColor(BLUE_SOFT)))
+        font = item.font(0)
+        font.setBold(bool(selected))
+        item.setFont(0, font)
+        item.setData(0, ROLE_SELECTED_FILL, bool(selected))
+        item.setData(0, ROLE_ACTIVE_TINT, bool(active) and not selected)
 
     def _build_analysis_item(self, analysis, ws) -> QtWidgets.QTreeWidgetItem:
         type_badge = _ANALYSIS_TYPE_LABELS.get(analysis.analysis_type, analysis.analysis_type[:3].capitalize())
@@ -406,11 +451,8 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         a_item.setIcon(0, get_icon("workspace-analysis", icon_color, size=16))
         a_item.setData(0, ROLE_NODE_KIND, "analysis")
         a_item.setData(0, ROLE_ID, analysis.id)
-        if is_selected:
-            font = a_item.font(0)
-            font.setBold(True)
-            a_item.setFont(0, font)
-            a_item.setBackground(0, QtGui.QBrush(QtGui.QColor(BLUE_SOFT)))
+        # Bold/selection fill/active tint are applied by the caller via
+        # _apply_row_style so all rows share one consistent visual language.
 
         tooltip = f"{analysis.analysis_type.capitalize()} analysis: {analysis.name}\nStatus: {status}"
         error_message = getattr(analysis, "error_message", "")
