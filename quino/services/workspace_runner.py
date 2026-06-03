@@ -7,33 +7,16 @@ from pathlib import Path
 
 from quino.domain.model import Model, SimulationResult
 from quino.domain.workspace import (
+    Analysis,
     ArtifactRef,
     Case,
     ResultRef,
     Workspace,
 )
 
-# NOTE (Fase 1.10 / task 2.3b): the ``Run`` domain entity and ``Case.runs`` were removed;
-# run state now lives flattened on ``Analysis``. ``Run`` is kept here as a local
-# placeholder because ``run_executor.py`` still imports it; full migration is
-# deferred to a later Fase.
-from dataclasses import field as _field
-
-
-@dataclass
-class Run:  # pragma: no cover - deferred run-machinery placeholder
-    id: str
-    analysis_id: str
-    created_at: str
-    finished_at: str | None = None
-    status: str = "to_be_run"
-    note: str = ""
-    result_ref: "ResultRef | None" = None
-    artifacts: list = _field(default_factory=list)
-    metrics: dict = _field(default_factory=dict)
-    warnings: list = _field(default_factory=list)
-    error_message: str = ""
-    config_snapshot: dict = _field(default_factory=dict)
+# Run state is flattened onto ``Analysis`` (no separate ``Run`` entity). The
+# artifact helpers below take the ``Analysis`` directly (it carries
+# ``id`` / ``result_ref`` / ``artifacts``).
 
 
 @dataclass
@@ -55,15 +38,9 @@ class _CaseAsProject:
         return _WorkspaceProjectProxy(workspace, case)
 
 
-def _next_run_id(case: Case) -> str:
-    existing = {r.id for r in case.runs}
-    n = 1
-    while f"run-{n}" in existing:
-        n += 1
-    return f"run-{n}"
 
 
-def load_result_artifact(project_dir: Path, run: Run) -> SimulationResult | None:
+def load_result_artifact(project_dir: Path, run: Analysis) -> SimulationResult | None:
     """Re-hydrate the SimulationResult that a Run produced.
 
     Returns ``None`` when the run has no result_ref, when the artifact
@@ -89,7 +66,7 @@ def load_result_artifact(project_dir: Path, run: Run) -> SimulationResult | None
     )
 
 
-def save_result_artifact(project_dir: Path, run: Run, result: SimulationResult) -> Path:
+def save_result_artifact(project_dir: Path, run: Analysis, result: SimulationResult) -> Path:
     artifact_dir = project_dir / "artifacts" / f"run_{run.id}"
     artifact_dir.mkdir(parents=True, exist_ok=True)
     path = artifact_dir / "result.json"
