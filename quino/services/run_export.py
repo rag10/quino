@@ -5,21 +5,29 @@ import json
 from pathlib import Path
 
 from quino.domain.plotting import PlotDef
-from quino.domain.workspace import Run
+from quino.domain.workspace import Analysis
 
 
-def export_run_json(run: Run, artifact: dict, out_path: Path) -> None:
+def _metric_values(analysis: Analysis) -> dict:
+    """Flatten the analysis' Python metrics into a name->value map for export."""
+    out: dict = {}
+    for metric in analysis.metrics:
+        if metric.result is not None and metric.result.status == "ok":
+            out[metric.name] = metric.result.value
+    return out
+
+
+def export_run_json(analysis: Analysis, artifact: dict, out_path: Path) -> None:
     payload = {
         "run": {
-            "id": run.id,
-            "analysis_id": run.analysis_id,
-            "created_at": run.created_at,
-            "finished_at": run.finished_at,
-            "status": run.status,
-            "note": run.note,
-            "metrics": dict(run.metrics),
-            "warnings": list(run.warnings),
-            "config_snapshot": dict(run.config_snapshot),
+            "id": analysis.id,
+            "analysis_id": analysis.id,
+            "created_at": analysis.created_at,
+            "finished_at": analysis.finished_at,
+            "status": analysis.status,
+            "metrics": _metric_values(analysis),
+            "warnings": list(analysis.warnings),
+            "config_snapshot": dict(analysis.config_snapshot),
         },
         "artifact": artifact,
     }
@@ -27,7 +35,7 @@ def export_run_json(run: Run, artifact: dict, out_path: Path) -> None:
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def export_run_csv(run: Run, artifact: dict, out_path: Path, *, mode: str = "wide") -> None:
+def export_run_csv(analysis: Analysis, artifact: dict, out_path: Path, *, mode: str = "wide") -> None:
     artifact_type = artifact.get("type")
     if artifact_type == "dynamic":
         _export_dynamic_csv(artifact, out_path, mode=mode)

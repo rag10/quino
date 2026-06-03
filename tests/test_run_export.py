@@ -1,25 +1,14 @@
 import json
 
-import pytest
-
-pytest.skip(
-    "quino.services.run_export is unimportable after the Run-unification refactor: "
-    "it still does `from quino.domain.workspace import Run` (Run was deleted), so the "
-    "module raises ImportError at import time. It is also dead code (no production "
-    "caller references it) and export_run_json reads Run-only fields (analysis_id, "
-    "note, metrics-as-dict) that no longer exist on Analysis. The module must be "
-    "ported (or removed) in production before these tests can run. Reported as a "
-    "production bug.",
-    allow_module_level=True,
-)
-
 from quino.domain.plotting import PlotDef, YSeries
-from quino.domain.workspace import Run
+from quino.domain.workspace import Analysis, Metric, MetricResult
 from quino.services.run_export import export_matplotlib_script, export_run_csv, export_run_json
 
 
-def _run() -> Run:
-    return Run(id="run_001", analysis_id="a1", created_at="now", status="ok")
+def _run() -> Analysis:
+    # Run state is flattened onto the Analysis; an "ok" analysis IS a run.
+    return Analysis(id="a1", name="Dyn", analysis_type="dynamic",
+                    status="ok", created_at="now")
 
 
 def test_export_run_csv_writes_one_file_per_sensor(tmp_path):
@@ -63,6 +52,22 @@ def test_export_run_json_writes_payload(tmp_path):
     assert out.exists()
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert "run" in payload and "artifact" in payload
+    assert payload["run"]["status"] == "ok"
+
+
+def test_export_run_json_includes_ok_metric_values(tmp_path):
+    run = _run()
+    run.metrics = [
+        Metric(id="m1", name="final_pos", value_type="float",
+               result=MetricResult(value=3.0, status="ok")),
+        Metric(id="m2", name="broken", value_type="float",
+               result=MetricResult(value=None, status="error")),
+    ]
+    out = tmp_path / "run.json"
+    export_run_json(run, {"type": "dynamic", "time": [], "frames": []}, out)
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    # only ok metrics are exported, keyed by name
+    assert payload["run"]["metrics"] == {"final_pos": 3.0}
 
 
 def test_export_matplotlib_script_creates_runnable_py(tmp_path):
