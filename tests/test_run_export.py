@@ -3,8 +3,13 @@ import json
 import pytest
 
 pytest.skip(
-    "overlay removed; Run entity and case.runs replaced by flattened Analysis run "
-    "state. Run export adapted in Fase 2/4.",
+    "quino.services.run_export is unimportable after the Run-unification refactor: "
+    "it still does `from quino.domain.workspace import Run` (Run was deleted), so the "
+    "module raises ImportError at import time. It is also dead code (no production "
+    "caller references it) and export_run_json reads Run-only fields (analysis_id, "
+    "note, metrics-as-dict) that no longer exist on Analysis. The module must be "
+    "ported (or removed) in production before these tests can run. Reported as a "
+    "production bug.",
     allow_module_level=True,
 )
 
