@@ -1209,36 +1209,35 @@ def test_unsaved_project_persists_artifacts_to_scratch_dir() -> None:
     assert app.current_project_dir == scratch
 
 
-@pytest.mark.skip(reason="compose_project removed in redesign/case-as-model — needs rewrite")
 def test_dynamic_run_succeeds_with_cancel_event_attached(tmp_path) -> None:
     """Regression: the cancel sensor used to declare `(mbs, t)` and return a
     bare float; Exudyn calls SensorUserFunction with 5 args and expects a
     `list[float]`. The mismatch aborted SolveDynamic before any frame was
     written and surfaced as a cryptic WinError 267 from the partial-frame
-    loader trying to read a solution file that never existed."""
+    loader trying to read a solution file that never existed.
+
+    Rewritten for case-as-model: no compose_project / Run entity — run state
+    lives on the Analysis, which is passed as ``run=``; the project view is the
+    Case-as-project proxy.
+    """
     import threading
     from quino.analysis.registry import get_runner_for_type
-    from quino.domain.workspace import Run
+    from quino.services.workspace_runner import _CaseAsProject
 
     app = ApplicationService()
-    app.load_project("examples/Double_Pendulum.quino.json")
+    app.load_workspace("examples/Double_Pendulum.quino.json")
     app.current_project_path = tmp_path / "p.quino.json"
-    ws = app.project.workspace
-    pose = ws.poses[0]
+    ws = app._workspace
+    case = ws.cases[ws.root_case_ids[0]]
+    pose = next(p for p in case.poses if p.is_default)
     analysis = app.workspace.create_analysis(
-        "DynRun",
-        analysis_type="dynamic",
-        baseline_id=pose.baseline_id,
-        case_id=pose.case_id,
-        workspace_pose_id=pose.id,
+        "DynRun", analysis_type="dynamic", case_id=case.id, workspace_pose_id=pose.id,
     )
-    composed = compose_project(app.project, case=None)
-    run = Run(id="r1", analysis_id=analysis.id, created_at="now", status="queued")
-    app.project.workspace.runs.append(run)
+    project = _CaseAsProject.from_case(case, ws)
     cancel = threading.Event()  # never set, but must trip the cancel-sensor path
     result = get_runner_for_type("dynamic").run(
-        composed, analysis,
-        initial_pose=None, run=run,
+        project, analysis,
+        initial_pose=None, run=analysis,
         project_dir=app.current_project_dir,
         cancel_event=cancel,
     )
