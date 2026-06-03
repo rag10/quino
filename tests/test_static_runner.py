@@ -1,21 +1,13 @@
 from __future__ import annotations
 
-import pytest
-
-pytest.skip(
-    "overlay removed; Run entity and case.runs replaced by flattened Analysis run "
-    "state. Runner persistence against Analysis run state adapted in Fase 2/3.",
-    allow_module_level=True,
-)
-
 from quino.analysis.static_runner import StaticAnalysisRunner
 from quino.application.service import ApplicationService
 from quino.domain.inputs import MarkerInput
-from quino.domain.workspace import Analysis, Run
+from quino.domain.workspace import Analysis
 from quino.services.workspace_runner import _CaseAsProject
 
 
-def _setup(monkeypatch=None):
+def _setup():
     svc = ApplicationService()
     svc.new_workspace("t")
     ws = svc._workspace
@@ -45,8 +37,7 @@ def test_static_validate_warns_when_model_is_trivial() -> None:
 
 def test_static_artifact_is_typed(tmp_path, monkeypatch) -> None:
     svc, case, analysis = _setup()
-    run = Run(id="r_static", analysis_id=analysis.id, created_at="...", status="running")
-    case.runs.append(run)
+    analysis.status = "running"
 
     monkeypatch.setattr(
         "quino.analysis.static_runner.solve_static",
@@ -61,11 +52,11 @@ def test_static_artifact_is_typed(tmp_path, monkeypatch) -> None:
     )
 
     project = _CaseAsProject.from_case(case, svc._workspace)
-    result = StaticAnalysisRunner().run(project, analysis, run=run, project_dir=tmp_path)
+    result = StaticAnalysisRunner().run(project, analysis, run=analysis, project_dir=tmp_path)
     assert result.status == "ok"
     import json
 
-    artifact = tmp_path / run.result_ref.artifact_path
+    artifact = tmp_path / analysis.result_ref.artifact_path
     data = json.loads(artifact.read_text(encoding="utf-8"))
     assert data["type"] == "static"
     assert "applied_loads" in data
