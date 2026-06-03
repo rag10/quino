@@ -1,19 +1,11 @@
-import os
 import json
-
-import pytest
-
-pytest.skip(
-    "overlay removed; Run entity and case.runs replaced by flattened Analysis run "
-    "state. Analysis-mode GUI adapted in Fase 2/4.",
-    allow_module_level=True,
-)
+import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from quino.application.service import ApplicationService
 from quino.domain.inputs import MarkerInput
-from quino.domain.workspace import Analysis, ResultRef, Run
+from quino.domain.workspace import Analysis, ResultRef
 from quino.gui.main_window import MainWindow
 
 
@@ -42,22 +34,34 @@ def test_static_mode_shows_dof_banner(qtbot) -> None:
 def test_static_mode_metrics_tab_populates(qtbot, tmp_path) -> None:
     svc, case, analysis = _setup_svc()
     svc.create_punctual_mass("M", x="0 mm", y="0 mm")
-    svc.current_workspace_path = tmp_path
-    run = Run(id="run_001", analysis_id=analysis.id, created_at="now", status="ok", metrics={"spring_energy": 0.75})
-    case.runs.append(run)
-    artifact_dir = tmp_path / "artifacts" / f"run_{run.id}"
+    svc.current_project_path = tmp_path
+    analysis.status = "ok"
+    artifact_dir = tmp_path / "artifacts" / f"run_{analysis.id}"
     artifact_dir.mkdir(parents=True)
     artifact_path = artifact_dir / "result.json"
     artifact_path.write_text(
-        json.dumps({"type": "static", "applied_loads": [], "reactions": [], "spring_forces": [], "total_energy_in_springs": 0.75, "pose": {}}),
+        json.dumps(
+            {
+                "type": "static",
+                "applied_loads": [],
+                "reactions": [],
+                "spring_forces": [],
+                "total_energy_in_springs": 0.75,
+                "pose": {},
+            }
+        ),
         encoding="utf-8",
     )
-    run.result_ref = ResultRef(run_entry_id=run.id, artifact_path=str(artifact_path.relative_to(tmp_path)), checksum="sha256:test")
+    analysis.result_ref = ResultRef(
+        run_entry_id=analysis.id,
+        artifact_path=str(artifact_path.relative_to(tmp_path)),
+        checksum="sha256:test",
+    )
     window = MainWindow(svc)
     qtbot.addWidget(window)
     window._set_app_mode("analysis")
     window._set_app_mode_analysis(analysis)
-    window._on_run_selected(run.id)
+    window._on_run_selected(analysis.id)
     ctrl = window._active_mode_controller
     tabs = [ctrl.report.tabText(i) for i in range(ctrl.report.count())]
     assert "Metrics" in tabs
