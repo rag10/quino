@@ -1,12 +1,3 @@
-import pytest
-
-pytest.skip(
-    "overlay removed; Run entity and case.runs replaced by flattened Analysis run "
-    "state. Batch run goes through RunExecutor which still appends to case.runs; "
-    "migration deferred to Fase 2/3.",
-    allow_module_level=True,
-)
-
 from quino.application.service import ApplicationService
 from quino.services.batch_runner import enqueue_case_analyses
 
@@ -23,8 +14,9 @@ def test_batch_run_enqueues_every_analysis_in_a_case():
     handles = enqueue_case_analyses(svc, root_case.id)
     try:
         assert len(handles) == 2
-        ids = {handle.run_id for handle in handles}
-        run_records = {run.id for run in root_case.runs}
-        assert ids.issubset(run_records)
+        # Run state is flattened onto the Analysis; the handle id IS the analysis id.
+        enqueued_ids = {handle.analysis_id for handle in handles}
+        analysis_ids = {a.id for a in root_case.analyses}
+        assert enqueued_ids == analysis_ids
     finally:
         svc.executor.shutdown()
