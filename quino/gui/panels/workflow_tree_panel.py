@@ -474,8 +474,6 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             self.pose_selected.emit(ent_id)
         elif kind == "analysis" and ent_id:
             self.analysis_selected.emit(ent_id)
-        elif kind == "run" and ent_id:
-            self.run_selected.emit(ent_id)
 
     def _on_item_double_clicked(self, item: QtWidgets.QTreeWidgetItem, _col: int) -> None:
         kind = item.data(0, ROLE_NODE_KIND)
@@ -488,8 +486,6 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             self.pose_selected.emit(ent_id)
         elif kind == "analysis":
             self.analysis_selected.emit(ent_id)
-        elif kind == "run":
-            self.run_selected.emit(ent_id)
 
     def _on_context_menu_requested(self, pos: QtCore.QPoint) -> None:
         item = self._tree.itemAt(pos)
@@ -510,8 +506,6 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             self._show_pose_menu(global_pos, ent_id)
         elif kind == "analysis":
             self._show_analysis_menu(global_pos, ent_id)
-        elif kind == "run":
-            self._show_run_menu(global_pos, ent_id)
 
     # ------------------------------------------------------------------
     # Confirmation helper
@@ -690,6 +684,9 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         menu = QtWidgets.QMenu(self)
         open_action = menu.addAction("Open")
         run_action = menu.addAction("▶  Run now")
+        clear_action = menu.addAction("Clear results")
+        clear_action.setEnabled(getattr(analysis, "status", "to_be_run") not in
+                                {"to_be_run", "queued", "running"})
         menu.addSeparator()
         rename_action = menu.addAction("Rename…")
         duplicate_action = menu.addAction("Duplicate…")
@@ -700,6 +697,10 @@ class WorkflowTreePanel(QtWidgets.QWidget):
             self.analysis_selected.emit(analysis_id)
         elif action == run_action:
             self.run_now_requested.emit(analysis_id)
+        elif action == clear_action:
+            # Reset the analysis' run state back to to_be_run (one run/analysis).
+            self._service.delete_run(analysis_id)
+            self.refresh()
         elif action == rename_action:
             name, ok = QtWidgets.QInputDialog.getText(
                 self, "Rename analysis", "New name:", text=analysis.name
@@ -718,23 +719,6 @@ class WorkflowTreePanel(QtWidgets.QWidget):
         elif action == delete_action:
             if self._confirm_delete("analysis", analysis.name):
                 self._service.workspace.delete_analysis(analysis_id)
-                self.refresh()
-
-    def _show_run_menu(self, global_pos: QtCore.QPoint, run_id: str) -> None:
-        menu = QtWidgets.QMenu(self)
-        open_action = menu.addAction("Open (view results)")
-        rerun_action = menu.addAction("Re-run")
-        menu.addSeparator()
-        delete_action = menu.addAction("Delete")
-        action = menu.exec(global_pos)
-
-        if action == open_action:
-            self.run_selected.emit(run_id)
-        elif action == rerun_action:
-            self.rerun_requested.emit(run_id)
-        elif action == delete_action:
-            if self._confirm_delete("run", run_id):
-                self._service.delete_run(run_id)
                 self.refresh()
 
     # ------------------------------------------------------------------

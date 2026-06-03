@@ -1274,30 +1274,31 @@ class MainWindow(QtWidgets.QMainWindow):
         if hasattr(self, "workflow_panel"):
             self.workflow_panel.refresh()
 
-    def _on_run_selected(self, run_id: str) -> None:
+    def _on_run_selected(self, analysis_id: str) -> None:
+        # Run state is flattened onto the Analysis (no separate run nodes). The
+        # tree no longer emits run_selected, but the handler stays robust: the
+        # id is interpreted as an analysis id and routed like an analysis click.
         ws = self.app_service._workspace
         if ws is None:
             return
-        case = None
-        run = None
+        owner = None
+        analysis = None
         for candidate in ws.cases.values():
-            found = next((r for r in candidate.runs if r.id == run_id), None)
+            found = next((a for a in candidate.analyses if a.id == analysis_id), None)
             if found is not None:
-                case = candidate
-                run = found
+                owner = candidate
+                analysis = found
                 break
-        if case is None or run is None:
+        if owner is None or analysis is None:
             return
-        ws.selected_case_id = case.id
-        analysis = next((a for a in case.analyses if a.id == run.analysis_id), None)
-        if analysis is not None:
-            ws.selected_analysis_id = analysis.id
-            ws.selected_pose_id = analysis.pose_id
-            self._set_app_mode("analysis")
-            self._set_app_mode_analysis(analysis)
-            if self._active_mode_controller is not None:
-                self._active_mode_controller.on_run_selected(run)
-        if run.status == "stale":
+        ws.selected_case_id = owner.id
+        ws.selected_analysis_id = analysis.id
+        ws.selected_pose_id = analysis.pose_id
+        self._set_app_mode("analysis")
+        self._set_app_mode_analysis(analysis)
+        if self._active_mode_controller is not None:
+            self._active_mode_controller.on_run_selected(analysis)
+        if analysis.status == "stale":
             self.canvas.set_playback_locked(True, "Run is stale; data preserved for plots")
             self.action_play_pause.setEnabled(False)
             self.action_stop.setEnabled(False)

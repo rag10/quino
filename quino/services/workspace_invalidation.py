@@ -16,14 +16,14 @@ def invalidate_on_case_change(workspace: Workspace, case_id: str) -> None:
 
 
 def invalidate_on_analysis_change(workspace: Workspace, analysis_id: str) -> None:
-    """Stale runs of the specific analysis."""
+    """Stale the run state of the specific analysis (run state lives on it)."""
     for case in workspace.cases.values():
-        for run in case.runs:
-            if run.analysis_id == analysis_id:
-                if run.status in {"ok", "partial"}:
-                    run.status = "stale"
-                    if f"analysis_changed:{analysis_id}" not in run.warnings:
-                        run.warnings.append(f"analysis_changed:{analysis_id}")
+        for analysis in case.analyses:
+            if analysis.id == analysis_id and analysis.status in {"ok", "partial"}:
+                analysis.status = "stale"
+                warning = f"analysis_changed:{analysis_id}"
+                if warning not in analysis.warnings:
+                    analysis.warnings.append(warning)
 
 
 def invalidate_on_pose_change(workspace: Workspace, pose_id: str) -> None:
