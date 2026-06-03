@@ -1,145 +1,136 @@
 import os
-from unittest.mock import MagicMock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6 import QtWidgets
 
-from quino.application.service import ApplicationService
-from quino.domain.plotting import MetricDef
+from quino.domain.workspace import Analysis, Metric
 from quino.gui.dialogs.metric_editor_dialog import MetricEditorDialog
 from quino.gui.dialogs.metrics_manager_dialog import MetricsManagerDialog
 
 
-def _setup():
-    svc = ApplicationService()
-    svc.new_project("t")
-    svc.create_punctual_mass("M", x="0 mm", y="0 mm")
-    marker_id = svc.project.model.bodies[0].markers[0].id
-    sensor_id = svc.create_sensor("Hub", "point", [marker_id])
-    return svc, sensor_id
+def _app():
+    return QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
 
-def test_metric_editor_dialog_creates_max_metric(qtbot) -> None:
-    svc, sensor_id = _setup()
-    dialog = MetricEditorDialog(svc.project, parent=None)
-    qtbot.addWidget(dialog)
-    dialog.name_edit.setText("Max Y")
-    dialog.key_edit.setText("max_y")
-    dialog.sensor_combo.setCurrentIndex(dialog.sensor_combo.findData(sensor_id))
-    dialog._reload_channels()
-    dialog.channel_combo.setCurrentIndex(dialog.channel_combo.findData("y"))
-    dialog._accept()
-    assert dialog.result_metric is not None
-    assert dialog.result_metric.key == "max_y"
-    assert dialog.result_metric.name == "Max Y"
-    assert dialog.result_metric.kind == "max"
-    assert dialog.result_metric.target == f"{sensor_id}:y"
+def test_editor_builds_python_metric():
+    _app()
+    analysis = Analysis(id="an1", name="Dyn")
+    dlg = MetricEditorDialog(analysis, available_channels=["hub.x", "t"])
+    dlg.name_edit.setText("final pos")
+    idx = dlg.type_combo.findData("float")
+    dlg.type_combo.setCurrentIndex(idx)
+    dlg.code_edit.setPlainText("return data['hub.x'][-1]")
+    dlg._accept()
+    assert dlg.result_metric is not None
+    assert dlg.result_metric.name == "final pos"
+    assert dlg.result_metric.value_type == "float"
+    assert "data['hub.x'][-1]" in dlg.result_metric.code
 
 
-def test_metric_editor_dialog_creates_value_at_t_metric(qtbot) -> None:
-    svc, sensor_id = _setup()
-    dialog = MetricEditorDialog(svc.project, parent=None)
-    qtbot.addWidget(dialog)
-    dialog.name_edit.setText("Y at 1s")
-    dialog.key_edit.setText("y_at_1s")
-    dialog.kind_combo.setCurrentIndex(dialog.kind_combo.findData("value_at_t"))
-    dialog._on_kind_changed()
-    dialog.sensor_combo.setCurrentIndex(dialog.sensor_combo.findData(sensor_id))
-    dialog._reload_channels()
-    dialog.channel_combo.setCurrentIndex(dialog.channel_combo.findData("y"))
-    dialog._t_spin.setValue(1.0)
-    dialog._accept()
-    assert dialog.result_metric is not None
-    assert dialog.result_metric.kind == "value_at_t"
-    assert dialog.result_metric.params == {"t": 1.0}
+def test_editor_edit_mode_populates_fields():
+    _app()
+    analysis = Analysis(id="an1", name="Dyn")
+    m = Metric(id="m1", name="thr", description="d", value_type="bool",
+               code="return data['hub.x'][-1] > 10")
+    dlg = MetricEditorDialog(analysis, metric=m, available_channels=["hub.x"])
+    assert dlg.name_edit.text() == "thr"
+    assert dlg.type_combo.currentData() == "bool"
+    assert "data['hub.x'][-1] > 10" in dlg.code_edit.toPlainText()
+    dlg._accept()
+    assert dlg.result_metric.id == "m1"  # id preserved in edit mode
 
 
-def test_metric_editor_dialog_creates_spring_energy_metric(qtbot) -> None:
-    svc, _sensor_id = _setup()
-    dialog = MetricEditorDialog(svc.project, parent=None)
-    qtbot.addWidget(dialog)
-    dialog.name_edit.setText("Spring E")
-    dialog.key_edit.setText("spring_e")
-    dialog.kind_combo.setCurrentIndex(dialog.kind_combo.findData("spring_energy"))
-    dialog._on_kind_changed()
-    dialog._accept()
-    assert dialog.result_metric is not None
-    assert dialog.result_metric.kind == "spring_energy"
-    assert dialog.result_metric.target == ""
+def test_editor_rejects_empty_name(monkeypatch):
+    _app()
+    from unittest.mock import MagicMock
 
-
-def test_metric_editor_dialog_rejects_empty_key(qtbot, monkeypatch) -> None:
-    svc, sensor_id = _setup()
-    dialog = MetricEditorDialog(svc.project, parent=None)
-    qtbot.addWidget(dialog)
+    analysis = Analysis(id="an1", name="Dyn")
+    dlg = MetricEditorDialog(analysis, available_channels=["hub.x"])
     monkeypatch.setattr(QtWidgets.QMessageBox, "warning", MagicMock())
-    dialog.key_edit.setText("")
-    dialog.sensor_combo.setCurrentIndex(dialog.sensor_combo.findData(sensor_id))
-    dialog._reload_channels()
-    dialog.channel_combo.setCurrentIndex(dialog.channel_combo.findData("y"))
-    dialog._accept()
-    assert dialog.result_metric is None
+    dlg.name_edit.setText("")
+    dlg._accept()
+    assert dlg.result_metric is None
     QtWidgets.QMessageBox.warning.assert_called_once()
 
 
-def test_metric_editor_dialog_edits_existing_metric(qtbot) -> None:
-    svc, sensor_id = _setup()
-    metric = MetricDef(
-        id="m1",
-        key="old_key",
-        name="Old Name",
-        kind="max",
-        target=f"{sensor_id}:x",
-    )
-    dialog = MetricEditorDialog(svc.project, metric=metric, parent=None)
-    qtbot.addWidget(dialog)
-    assert dialog.key_edit.text() == "old_key"
-    dialog.key_edit.setText("new_key")
-    dialog._accept()
-    assert dialog.result_metric is not None
-    assert dialog.result_metric.id == "m1"
-    assert dialog.result_metric.key == "new_key"
+def test_editor_insert_token():
+    _app()
+    analysis = Analysis(id="an1", name="Dyn")
+    dlg = MetricEditorDialog(analysis, available_channels=["hub.x", "t", "meta.dt"])
+    dlg._insert_channel_token("hub.x")
+    dlg._insert_channel_token("t")
+    dlg._insert_channel_token("meta.dt")
+    text = dlg.code_edit.toPlainText()
+    assert "data['hub.x']" in text
+    assert "data['t']" in text
+    assert "meta['dt']" in text
 
 
-def test_metrics_manager_dialog_refreshes_table(qtbot) -> None:
-    svc, sensor_id = _setup()
-    case = svc.workspace.create_case("C")
-    pose = svc.workspace.create_pose("P", case_id=case.id)
-    analysis = svc.workspace.create_analysis(
-        "D", analysis_type="dynamic", case_id=case.id, workspace_pose_id=pose.id
-    )
-
-    analysis.config.metrics.append(
-        MetricDef(id="m1", key="max_y", name="Max Y", kind="max", target=f"{sensor_id}:y")
-    )
-
-    dialog = MetricsManagerDialog(svc.project, analysis, parent=None)
-    qtbot.addWidget(dialog)
-    assert dialog.table.rowCount() == 1
-    assert dialog.table.item(0, 0).text() == "max_y"
+def test_editor_test_button_no_data():
+    _app()
+    analysis = Analysis(id="an1", name="Dyn")
+    dlg = MetricEditorDialog(analysis, available_channels=["hub.x"], sensor_outputs={})
+    dlg.code_edit.setPlainText("return 1")
+    dlg._on_test()
+    # No sensor outputs -> no data reported in the label.
+    assert "no_data" in dlg.result_label.text() or "no data" in dlg.result_label.text().lower()
 
 
-def test_metrics_manager_dialog_delete_metric(qtbot, monkeypatch) -> None:
-    svc, sensor_id = _setup()
-    case = svc.workspace.create_case("C")
-    pose = svc.workspace.create_pose("P", case_id=case.id)
-    analysis = svc.workspace.create_analysis(
-        "D", analysis_type="dynamic", case_id=case.id, workspace_pose_id=pose.id
-    )
+def test_manager_lists_and_adds_metrics():
+    _app()
 
-    analysis.config.metrics.append(
-        MetricDef(id="m1", key="max_y", name="Max Y", kind="max", target=f"{sensor_id}:y")
-    )
+    class FakeModel:
+        sensors = []
 
-    dialog = MetricsManagerDialog(svc.project, analysis, parent=None)
-    qtbot.addWidget(dialog)
+    class FakeProject:
+        model = FakeModel()
+        sensor_outputs = {}
+
+    analysis = Analysis(id="an1", name="Dyn",
+                        metrics=[Metric(id="m1", name="x", value_type="float", code="return 1")])
+    dlg = MetricsManagerDialog(FakeProject(), analysis)
+    # table shows the existing metric
+    assert dlg.table.rowCount() == 1
+
+
+def test_manager_delete_metric(monkeypatch):
+    _app()
+
+    class FakeModel:
+        sensors = []
+
+    class FakeProject:
+        model = FakeModel()
+        sensor_outputs = {}
+
+    analysis = Analysis(id="an1", name="Dyn",
+                        metrics=[Metric(id="m1", name="x", value_type="float", code="return 1")])
+    dlg = MetricsManagerDialog(FakeProject(), analysis)
     monkeypatch.setattr(
         QtWidgets.QMessageBox,
         "question",
-        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Yes,
+        lambda *a, **k: QtWidgets.QMessageBox.StandardButton.Yes,
     )
-    dialog.table.selectRow(0)
-    dialog._on_delete()
-    assert len(analysis.config.metrics) == 0
-    assert dialog.table.rowCount() == 0
+    dlg.table.selectRow(0)
+    dlg._on_delete()
+    assert len(analysis.metrics) == 0
+    assert dlg.table.rowCount() == 0
+
+
+def test_manager_recalculate_no_data():
+    _app()
+
+    class FakeModel:
+        sensors = []
+
+    class FakeProject:
+        model = FakeModel()
+        sensor_outputs = {}
+
+    analysis = Analysis(id="an1", name="Dyn",
+                        metrics=[Metric(id="m1", name="x", value_type="float", code="return 1")])
+    dlg = MetricsManagerDialog(FakeProject(), analysis)
+    dlg._on_recalculate()
+    assert analysis.metrics[0].result is not None
+    assert analysis.metrics[0].result.status == "no_data"

@@ -1,95 +1,98 @@
 from __future__ import annotations
 
+from typing import Any
 from uuid import uuid4
 
 from PySide6 import QtWidgets
 
-from quino.domain.plotting import MetricDef
-from quino.simulation.sensor_expressions import sensor_channel_keys
+from quino.domain.workspace import Metric
+from quino.services.metric_data import build_metric_data
+from quino.services.metric_evaluator import evaluate
 
-_KIND_LABELS = [
-    ("Max", "max"),
-    ("Min", "min"),
-    ("RMS", "rms"),
-    ("Value at time", "value_at_t"),
-    ("Value at sweep indices", "value_at_sweep"),
-    ("Spring energy", "spring_energy"),
+_VALUE_TYPES = [
+    ("float", "float"),
+    ("bool", "bool"),
+    ("int", "int"),
+    ("str", "str"),
 ]
+
+_CODE_PLACEHOLDER = "var = data['sensor1.x']\nreturn var[-1]"
 
 
 class MetricEditorDialog(QtWidgets.QDialog):
+    """Editor for a user-written Python metric (body of ``eval(data, meta)``)."""
+
     def __init__(
         self,
-        project,
-        metric: MetricDef | None = None,
+        analysis,
+        metric: Metric | None = None,
+        *,
+        available_channels: list[str] | None = None,
+        sensor_outputs: dict[str, Any] | None = None,
+        sensor_name_by_id: dict[str, str] | None = None,
+        analysis_meta: dict[str, Any] | None = None,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Edit Metric" if metric is not None else "New Metric")
-        self.result_metric: MetricDef | None = None
-        self._project = project
+        self.setWindowTitle("Editar métrica" if metric is not None else "Nueva métrica")
+        self.setMinimumSize(640, 420)
+
+        self._analysis = analysis
         self._original = metric
+        self._available_channels = list(available_channels or [])
+        self._sensor_outputs = sensor_outputs or {}
+        self._sensor_name_by_id = sensor_name_by_id or {}
+        self._analysis_meta = analysis_meta or {}
+        self.result_metric: Metric | None = None
 
         layout = QtWidgets.QVBoxLayout(self)
+
         form = QtWidgets.QFormLayout()
-
         self.name_edit = QtWidgets.QLineEdit(self)
-        self.name_edit.setPlaceholderText("Display name")
-        form.addRow("Name", self.name_edit)
+        self.name_edit.setPlaceholderText("Nombre de la métrica")
+        form.addRow("Nombre", self.name_edit)
 
-        self.key_edit = QtWidgets.QLineEdit(self)
-        self.key_edit.setPlaceholderText("result_key")
-        form.addRow("Key", self.key_edit)
+        self.description_edit = QtWidgets.QLineEdit(self)
+        self.description_edit.setPlaceholderText("Descripción (opcional)")
+        form.addRow("Descripción", self.description_edit)
 
-        self.kind_combo = QtWidgets.QComboBox(self)
-        for label, value in _KIND_LABELS:
-            self.kind_combo.addItem(label, value)
-        self.kind_combo.currentIndexChanged.connect(self._on_kind_changed)
-        form.addRow("Kind", self.kind_combo)
-
-        target_widget = QtWidgets.QWidget(self)
-        target_layout = QtWidgets.QHBoxLayout(target_widget)
-        target_layout.setContentsMargins(0, 0, 0, 0)
-        self.sensor_combo = QtWidgets.QComboBox(self)
-        self.channel_combo = QtWidgets.QComboBox(self)
-        for sensor in project.model.sensors:
-            self.sensor_combo.addItem(sensor.name, sensor.id)
-        self.sensor_combo.currentIndexChanged.connect(self._reload_channels)
-        target_layout.addWidget(self.sensor_combo)
-        target_layout.addWidget(self.channel_combo)
-        form.addRow("Target", target_widget)
-
-        # Params stack
-        self._params_stack = QtWidgets.QStackedWidget(self)
-        self._t_page = QtWidgets.QWidget(self)
-        t_layout = QtWidgets.QHBoxLayout(self._t_page)
-        t_layout.setContentsMargins(0, 0, 0, 0)
-        self._t_spin = QtWidgets.QDoubleSpinBox(self._t_page)
-        self._t_spin.setRange(0.0, 1e6)
-        self._t_spin.setDecimals(6)
-        self._t_spin.setSuffix(" s")
-        t_layout.addWidget(QtWidgets.QLabel("Time"))
-        t_layout.addWidget(self._t_spin)
-        t_layout.addStretch()
-
-        self._indices_page = QtWidgets.QWidget(self)
-        i_layout = QtWidgets.QHBoxLayout(self._indices_page)
-        i_layout.setContentsMargins(0, 0, 0, 0)
-        self._indices_edit = QtWidgets.QLineEdit(self._indices_page)
-        self._indices_edit.setPlaceholderText("0, 1, 2")
-        i_layout.addWidget(QtWidgets.QLabel("Indices"))
-        i_layout.addWidget(self._indices_edit)
-        i_layout.addStretch()
-
-        self._params_stack.addWidget(self._t_page)
-        self._params_stack.addWidget(self._indices_page)
-        form.addRow("Params", self._params_stack)
-
-        self.tags_edit = QtWidgets.QLineEdit(self)
-        self.tags_edit.setPlaceholderText("comfort, validation, ...")
-        form.addRow("Tags", self.tags_edit)
-
+        self.type_combo = QtWidgets.QComboBox(self)
+        for label, value in _VALUE_TYPES:
+            self.type_combo.addItem(label, value)
+        form.addRow("Tipo", self.type_combo)
         layout.addLayout(form)
+
+        # Code editor + channel palette side by side.
+        body_layout = QtWidgets.QHBoxLayout()
+
+        code_box = QtWidgets.QVBoxLayout()
+        code_box.addWidget(QtWidgets.QLabel("Código  (cuerpo de eval(data, meta), debe usar return)"))
+        self.code_edit = QtWidgets.QPlainTextEdit(self)
+        self.code_edit.setPlaceholderText(_CODE_PLACEHOLDER)
+        self.code_edit.setTabChangesFocus(False)
+        code_box.addWidget(self.code_edit)
+        body_layout.addLayout(code_box, 3)
+
+        palette_box = QtWidgets.QVBoxLayout()
+        palette_box.addWidget(QtWidgets.QLabel("Canales (doble clic)"))
+        self.channel_list = QtWidgets.QListWidget(self)
+        for channel in self._available_channels:
+            self.channel_list.addItem(channel)
+        self.channel_list.itemDoubleClicked.connect(self._on_channel_double_clicked)
+        palette_box.addWidget(self.channel_list)
+        body_layout.addLayout(palette_box, 1)
+
+        layout.addLayout(body_layout)
+
+        # Test row.
+        test_layout = QtWidgets.QHBoxLayout()
+        self.test_btn = QtWidgets.QPushButton("Probar", self)
+        self.test_btn.clicked.connect(self._on_test)
+        test_layout.addWidget(self.test_btn)
+        self.result_label = QtWidgets.QLabel("", self)
+        self.result_label.setWordWrap(True)
+        test_layout.addWidget(self.result_label, 1)
+        layout.addLayout(test_layout)
 
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok
@@ -100,108 +103,80 @@ class MetricEditorDialog(QtWidgets.QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        self._reload_channels()
-        self._on_kind_changed()
-
         if metric is not None:
             self._load_from_metric(metric)
 
-    def _reload_channels(self) -> None:
-        self.channel_combo.clear()
-        sensor_id = self.sensor_combo.currentData()
-        sensor = next((item for item in self._project.model.sensors if item.id == sensor_id), None)
-        if sensor is None:
-            return
-        for channel, _unit in sensor_channel_keys(sensor):
-            self.channel_combo.addItem(channel, channel)
+    # -- channel palette ----------------------------------------------------
 
-    def _on_kind_changed(self) -> None:
-        kind = self.kind_combo.currentData()
-        needs_target = kind != "spring_energy"
-        self.sensor_combo.setEnabled(needs_target)
-        self.channel_combo.setEnabled(needs_target)
+    def _on_channel_double_clicked(self, item: QtWidgets.QListWidgetItem) -> None:
+        self._insert_channel_token(item.text())
 
-        if kind == "value_at_t":
-            self._params_stack.setCurrentWidget(self._t_page)
-            self._params_stack.setVisible(True)
-        elif kind == "value_at_sweep":
-            self._params_stack.setCurrentWidget(self._indices_page)
-            self._params_stack.setVisible(True)
+    def _token_for_channel(self, channel: str) -> str:
+        if channel == "t":
+            return "data['t']"
+        if channel.startswith("meta."):
+            return f"meta['{channel[len('meta.'):]}']"
+        return f"data['{channel}']"
+
+    def _insert_channel_token(self, channel: str) -> None:
+        token = self._token_for_channel(channel)
+        cursor = self.code_edit.textCursor()
+        cursor.insertText(token)
+        self.code_edit.setTextCursor(cursor)
+        self.code_edit.setFocus()
+
+    # -- test ---------------------------------------------------------------
+
+    def _build_tmp_metric(self) -> Metric:
+        return Metric(
+            id="__tmp__",
+            name=self.name_edit.text().strip() or "tmp",
+            description=self.description_edit.text().strip(),
+            value_type=self.type_combo.currentData(),
+            code=self.code_edit.toPlainText(),
+        )
+
+    def _on_test(self) -> None:
+        if not self._sensor_outputs:
+            data: dict[str, Any] = {}
+            meta: dict[str, Any] = dict(self._analysis_meta)
         else:
-            self._params_stack.setVisible(False)
+            data, meta = build_metric_data(
+                self._sensor_outputs, self._sensor_name_by_id, self._analysis_meta
+            )
+        if not data:
+            self.result_label.setText("no_data: no hay resultados de sensores para evaluar")
+            return
+        result = evaluate(self._build_tmp_metric(), data, meta)
+        if result.status == "ok":
+            self.result_label.setText(f"ok: {result.value!r}")
+        elif result.status == "no_data":
+            self.result_label.setText("no_data")
+        else:
+            self.result_label.setText(f"error: {result.error}")
 
-    def _load_from_metric(self, metric: MetricDef) -> None:
+    # -- load / accept ------------------------------------------------------
+
+    def _load_from_metric(self, metric: Metric) -> None:
         self.name_edit.setText(metric.name)
-        self.key_edit.setText(metric.key)
-        for index in range(self.kind_combo.count()):
-            if self.kind_combo.itemData(index) == metric.kind:
-                self.kind_combo.setCurrentIndex(index)
-                break
-
-        if metric.target:
-            parts = metric.target.split(":")
-            sensor_id = parts[0] if parts else ""
-            channel = parts[1] if len(parts) > 1 else ""
-            for index in range(self.sensor_combo.count()):
-                if self.sensor_combo.itemData(index) == sensor_id:
-                    self.sensor_combo.setCurrentIndex(index)
-                    break
-            self._reload_channels()
-            for index in range(self.channel_combo.count()):
-                if self.channel_combo.itemData(index) == channel:
-                    self.channel_combo.setCurrentIndex(index)
-                    break
-
-        if metric.kind == "value_at_t":
-            self._t_spin.setValue(float(metric.params.get("t", 0.0)))
-        elif metric.kind == "value_at_sweep":
-            indices = metric.params.get("indices", [])
-            self._indices_edit.setText(", ".join(str(i) for i in indices))
-
-        self.tags_edit.setText(", ".join(metric.tags))
+        self.description_edit.setText(metric.description)
+        index = self.type_combo.findData(metric.value_type)
+        if index >= 0:
+            self.type_combo.setCurrentIndex(index)
+        self.code_edit.setPlainText(metric.code)
 
     def _accept(self) -> None:
-        key = self.key_edit.text().strip()
-        if not key:
-            QtWidgets.QMessageBox.warning(self, "Validation", "Key is required.")
+        name = self.name_edit.text().strip()
+        if not name:
+            QtWidgets.QMessageBox.warning(self, "Validación", "El nombre es obligatorio.")
             return
 
-        kind = self.kind_combo.currentData()
-        target = ""
-        if kind != "spring_energy":
-            sensor_id = self.sensor_combo.currentData()
-            channel = self.channel_combo.currentData()
-            if sensor_id and channel:
-                target = f"{sensor_id}:{channel}"
-            else:
-                QtWidgets.QMessageBox.warning(
-                    self, "Validation", "Target sensor and channel are required."
-                )
-                return
-
-        params: dict = {}
-        if kind == "value_at_t":
-            params["t"] = float(self._t_spin.value())
-        elif kind == "value_at_sweep":
-            text = self._indices_edit.text().strip()
-            try:
-                params["indices"] = [int(item.strip()) for item in text.split(",") if item.strip()]
-            except ValueError:
-                QtWidgets.QMessageBox.warning(
-                    self, "Validation", "Indices must be comma-separated integers."
-                )
-                return
-
-        tags = [item.strip() for item in self.tags_edit.text().split(",") if item.strip()]
-
         metric_id = self._original.id if self._original is not None else f"mt_{uuid4().hex[:8]}"
-        self.result_metric = MetricDef(
+        self.result_metric = Metric(
             id=metric_id,
-            key=key,
-            name=self.name_edit.text().strip() or key,
-            kind=kind,
-            target=target,
-            params=params,
-            tags=tags,
+            name=name,
+            description=self.description_edit.text().strip(),
+            value_type=self.type_combo.currentData(),
+            code=self.code_edit.toPlainText(),
         )
         self.accept()
