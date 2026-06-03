@@ -183,6 +183,7 @@ class MainWindow(QtWidgets.QMainWindow):
         executor.run_queued.connect(self._on_executor_run_queued)
         executor.run_started.connect(self._on_executor_run_started)
         executor.run_finished.connect(self._on_executor_run_finished)
+        executor.run_needs_confirmation.connect(self._on_executor_run_needs_confirmation)
 
         center_panel = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         self.canvas = MechanismCanvas(self.app_service)
@@ -1446,6 +1447,38 @@ class MainWindow(QtWidgets.QMainWindow):
             self.run_status.show_idle()
         if self._active_mode_controller is not None:
             self._active_mode_controller.on_run_finished(run_id, status)
+        if hasattr(self, "workflow_panel"):
+            self.workflow_panel.refresh()
+
+    def _on_executor_run_needs_confirmation(self, analysis_id: str) -> None:
+        """A re-run finished ``partial`` while the previous result was ``ok``.
+
+        Ask the user whether to overwrite the good previous results. The
+        executor has preserved the previous OK state and is waiting for the
+        decision before promoting or discarding the new partial run.
+        """
+        analysis_label = analysis_id
+        case = self.app_service.current_case()
+        if case is not None:
+            analysis = next((a for a in case.analyses if a.id == analysis_id), None)
+            if analysis is not None and analysis.name:
+                analysis_label = analysis.name
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Overwrite previous results?",
+            (
+                f"The new run of '{analysis_label}' finished with PARTIAL results, "
+                "but the previous run was OK.\n\n"
+                "Overwrite the previous (OK) results with the new partial ones?"
+            ),
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No,
+        )
+        overwrite = reply == QtWidgets.QMessageBox.StandardButton.Yes
+        executor = self.app_service.executor
+        if executor is not None:
+            executor.confirm_partial(analysis_id, overwrite=overwrite)
         if hasattr(self, "workflow_panel"):
             self.workflow_panel.refresh()
 
