@@ -2,21 +2,39 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
-pytest.skip(
-    "overlay removed; Run entity and case.runs replaced by flattened Analysis run "
-    "state. Analysis-mode controllers adapted in Fase 2/4.",
-    allow_module_level=True,
-)
-
-from PySide6 import QtWidgets
-
 from quino.application.service import ApplicationService
-from quino.domain.workspace import ResultRef, Run
+from quino.domain.workspace import ResultRef
 from quino.gui.analysis_modes import mode_controller_for
 from quino.gui.analysis_modes._base import AnalysisModeController
 from quino.gui.main_window import MainWindow
+
+
+def _bootstrap(tmp_path=None):
+    svc = ApplicationService()
+    svc.new_project("t")
+    svc.create_punctual_mass("M", x="0 mm", y="0 mm")
+    ws = svc._workspace
+    case = ws.cases[ws.root_case_ids[0]]
+    pose = svc.workspace.create_pose("P", case_id=case.id)
+    analysis = svc.workspace.create_analysis(
+        "D", analysis_type="dynamic", case_id=case.id, workspace_pose_id=pose.id
+    )
+    if tmp_path is not None:
+        # current_project_dir == tmp_path (a directory, no file suffix)
+        svc.current_project_path = tmp_path
+    return svc, case, analysis
+
+
+def _write_artifact(tmp_path, analysis, payload, *, checksum="sha256:test"):
+    artifact_dir = tmp_path / "artifacts" / f"run_{analysis.id}"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = artifact_dir / "result.json"
+    artifact_path.write_text(json.dumps(payload), encoding="utf-8")
+    analysis.result_ref = ResultRef(
+        run_entry_id=analysis.id,
+        artifact_path=str(artifact_path.relative_to(tmp_path)),
+        checksum=checksum,
+    )
 
 
 def test_dynamic_controller_is_registered() -> None:
@@ -25,14 +43,7 @@ def test_dynamic_controller_is_registered() -> None:
 
 
 def test_dynamic_controller_install_unmount(qtbot) -> None:
-    svc = ApplicationService()
-    svc.new_project("t")
-    svc.create_punctual_mass("M", x="0 mm", y="0 mm")
-    ws = svc._workspace
-    case = ws.cases[ws.root_case_ids[0]]
-    pose = svc.workspace.create_pose("P", case_id=case.id)
-    analysis = svc.workspace.create_analysis("D", analysis_type="dynamic", case_id=case.id, workspace_pose_id=pose.id)
-
+    svc, case, analysis = _bootstrap()
     window = MainWindow(svc)
     qtbot.addWidget(window)
     window._set_app_mode("analysis")
@@ -43,30 +54,27 @@ def test_dynamic_controller_install_unmount(qtbot) -> None:
 
 
 def test_dynamic_metrics_tab_populates_from_selected_run(qtbot, tmp_path) -> None:
-    svc = ApplicationService()
-    svc.new_project("t")
-    svc.create_punctual_mass("M", x="0 mm", y="0 mm")
-    ws = svc._workspace
-    case = ws.cases[ws.root_case_ids[0]]
-    pose = svc.workspace.create_pose("P", case_id=case.id)
-    analysis = svc.workspace.create_analysis("D", analysis_type="dynamic", case_id=case.id, workspace_pose_id=pose.id)
-    svc.current_project_path = tmp_path
-    run = Run(id="run_001", analysis_id=analysis.id, created_at="now", status="ok", metrics={"max_y": 1.25})
-    case.runs.append(run)
-    artifact_dir = tmp_path / "artifacts" / f"run_{run.id}"
-    artifact_dir.mkdir(parents=True)
-    artifact_path = artifact_dir / "result.json"
-    artifact_path.write_text(
-        json.dumps({"success": True, "time": [0.0], "frames": [{}], "states": [], "messages": [], "error": None, "backend": "test"}),
-        encoding="utf-8",
+    svc, case, analysis = _bootstrap(tmp_path)
+    analysis.status = "ok"
+    _write_artifact(
+        tmp_path,
+        analysis,
+        {
+            "success": True,
+            "time": [0.0],
+            "frames": [{}],
+            "states": [],
+            "messages": [],
+            "error": None,
+            "backend": "test",
+        },
     )
-    run.result_ref = ResultRef(run_entry_id=run.id, artifact_path=str(artifact_path.relative_to(tmp_path)), checksum="sha256:test")
 
     window = MainWindow(svc)
     qtbot.addWidget(window)
     window._set_app_mode("analysis")
     window._set_app_mode_analysis(analysis)
-    window._on_run_selected(run.id)
+    window._on_run_selected(analysis.id)
     ctrl = window._active_mode_controller
     assert ctrl._metrics_panel is not None
     assert ctrl._metrics_panel.count() == 1
@@ -74,34 +82,24 @@ def test_dynamic_metrics_tab_populates_from_selected_run(qtbot, tmp_path) -> Non
 
 
 def test_selecting_dynamic_analysis_loads_latest_persisted_run(qtbot, tmp_path) -> None:
-    svc = ApplicationService()
-    svc.new_project("t")
-    svc.create_punctual_mass("M", x="0 mm", y="0 mm")
-    ws = svc._workspace
-    case = ws.cases[ws.root_case_ids[0]]
-    pose = svc.workspace.create_pose("P", case_id=case.id)
-    analysis = svc.workspace.create_analysis("D", analysis_type="dynamic", case_id=case.id, workspace_pose_id=pose.id)
-    svc.current_project_path = tmp_path
-    run = Run(id="run_001", analysis_id=analysis.id, created_at="now", status="ok")
-    case.runs.append(run)
-    artifact_dir = tmp_path / "artifacts" / f"run_{run.id}"
-    artifact_dir.mkdir(parents=True)
-    artifact_path = artifact_dir / "result.json"
-    artifact_path.write_text(
-        json.dumps(
-            {
-                "success": True,
-                "time": [0.0, 0.1],
-                "frames": [{"marker:m1:x": 0.0, "marker:m1:y": 0.0}, {"marker:m1:x": 1.0, "marker:m1:y": 2.0}],
-                "states": [],
-                "messages": [],
-                "error": None,
-                "backend": "test",
-            }
-        ),
-        encoding="utf-8",
+    svc, case, analysis = _bootstrap(tmp_path)
+    analysis.status = "ok"
+    _write_artifact(
+        tmp_path,
+        analysis,
+        {
+            "success": True,
+            "time": [0.0, 0.1],
+            "frames": [
+                {"marker:m1:x": 0.0, "marker:m1:y": 0.0},
+                {"marker:m1:x": 1.0, "marker:m1:y": 2.0},
+            ],
+            "states": [],
+            "messages": [],
+            "error": None,
+            "backend": "test",
+        },
     )
-    run.result_ref = ResultRef(run_entry_id=run.id, artifact_path=str(artifact_path.relative_to(tmp_path)), checksum="sha256:test")
 
     window = MainWindow(svc)
     qtbot.addWidget(window)
@@ -114,14 +112,7 @@ def test_selecting_dynamic_analysis_loads_latest_persisted_run(qtbot, tmp_path) 
 
 
 def test_dynamic_controller_widgets_survive_unmount_and_remount(qtbot) -> None:
-    svc = ApplicationService()
-    svc.new_project("t")
-    svc.create_punctual_mass("M", x="0 mm", y="0 mm")
-    ws = svc._workspace
-    case = ws.cases[ws.root_case_ids[0]]
-    pose = svc.workspace.create_pose("P", case_id=case.id)
-    analysis = svc.workspace.create_analysis("D", analysis_type="dynamic", case_id=case.id, workspace_pose_id=pose.id)
-
+    svc, case, analysis = _bootstrap()
     window = MainWindow(svc)
     qtbot.addWidget(window)
     window._set_app_mode("analysis")
