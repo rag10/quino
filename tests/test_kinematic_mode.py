@@ -1,19 +1,10 @@
 import json
 import os
 
-import pytest
-
-pytest.skip(
-    "overlay removed; Run entity and case.runs replaced by flattened Analysis run "
-    "state. Analysis-mode GUI adapted in Fase 2/4.",
-    allow_module_level=True,
-)
-
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from quino.application.service import ApplicationService
-from quino.domain.inputs import MarkerInput
-from quino.domain.workspace import ResultRef, Run, SweepDef
+from quino.domain.workspace import Analysis, ResultRef, SweepDef
 from quino.gui.main_window import MainWindow
 from quino.services.kinematic_cache import KinematicCache
 
@@ -47,7 +38,7 @@ def test_kinematic_controller_lists_existing_sweeps(qtbot) -> None:
 
 
 def test_kinematic_cache_loads_fake_artifact(tmp_path) -> None:
-    run = Run(id="run_001", analysis_id="a1", created_at="now", status="ok")
+    analysis = Analysis(id="run_001", name="Kin", analysis_type="kinematic", status="ok")
     artifact_dir = tmp_path / "artifacts" / "run_run_001"
     artifact_dir.mkdir(parents=True)
     path = artifact_dir / "result.json"
@@ -64,8 +55,8 @@ def test_kinematic_cache_loads_fake_artifact(tmp_path) -> None:
         ),
         encoding="utf-8",
     )
-    run.result_ref = ResultRef(run_entry_id=run.id, artifact_path=str(path.relative_to(tmp_path)), checksum="sha256:test")
-    cache = KinematicCache.load(tmp_path, run)
+    analysis.result_ref = ResultRef(run_entry_id=analysis.id, artifact_path=str(path.relative_to(tmp_path)), checksum="sha256:test")
+    cache = KinematicCache.load(tmp_path, analysis)
     assert cache is not None
     assert cache.pose_at([1])["b1"]["x"] == 2.0
     assert cache.point_cloud() == [(0.0, 1.0), (2.0, 3.0)]
@@ -84,9 +75,8 @@ def test_kinematic_run_selection_loads_canvas_pose(qtbot, tmp_path) -> None:
         SweepDef(id="sw1", variable_kind="marker_x", target_ids=[marker_id], mode="linear", start=0, end=1, steps=2, label="m.x")
     )
     svc.current_project_path = tmp_path
-    run = Run(id="run_001", analysis_id=analysis.id, created_at="now", status="ok")
-    case.runs.append(run)
-    artifact_dir = tmp_path / "artifacts" / f"run_{run.id}"
+    analysis.status = "ok"
+    artifact_dir = tmp_path / "artifacts" / f"run_{analysis.id}"
     artifact_dir.mkdir(parents=True)
     artifact_path = artifact_dir / "result.json"
     artifact_path.write_text(
@@ -102,10 +92,10 @@ def test_kinematic_run_selection_loads_canvas_pose(qtbot, tmp_path) -> None:
         ),
         encoding="utf-8",
     )
-    run.result_ref = ResultRef(run_entry_id=run.id, artifact_path=str(artifact_path.relative_to(tmp_path)), checksum="sha256:test")
+    analysis.result_ref = ResultRef(run_entry_id=analysis.id, artifact_path=str(artifact_path.relative_to(tmp_path)), checksum="sha256:test")
     window = MainWindow(svc)
     qtbot.addWidget(window)
     window._set_app_mode("analysis")
     window._set_app_mode_analysis(analysis)
-    window._on_run_selected(run.id)
+    window._on_run_selected(analysis.id)
     assert window.canvas._kinematic_cloud == [(0.0, 0.0), (1.0, 0.0)]
